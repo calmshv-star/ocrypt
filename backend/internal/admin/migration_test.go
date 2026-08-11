@@ -72,6 +72,31 @@ func TestAdminSQLUsesLatestMerchantScopedCandidates(t *testing.T) {
 	}
 }
 
+func TestOverviewWebhookHealthIsMerchantScopedAndReadable(t *testing.T) {
+	repository, err := os.ReadFile("postgres.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{"JOIN callback_events e ON e.id=d.callback_event_id", "e.merchant_id=$1"} {
+		if !strings.Contains(string(repository), fragment) {
+			t.Errorf("overview webhook health is not merchant scoped: missing %q", fragment)
+		}
+	}
+	grants, err := os.ReadFile("../../../deploy/postgres/runtime-grants.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminGrant := string(grants)
+	start := strings.Index(adminGrant, "GRANT SELECT ON\n  admin_users")
+	if start < 0 {
+		t.Fatal("merchant admin runtime SELECT grant block is missing")
+	}
+	end := strings.Index(adminGrant[start:], "TO merchant_admin_runtime;")
+	if end < 0 || !strings.Contains(adminGrant[start:start+end], "callback_events") {
+		t.Fatal("merchant admin runtime cannot read the callback events required for scoped dashboard health")
+	}
+}
+
 func TestManualResolutionBridgePersistsAndRechecksCandidateVersion(t *testing.T) {
 	raw, err := os.ReadFile("postgres.go")
 	if err != nil {

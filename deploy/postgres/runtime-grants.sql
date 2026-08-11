@@ -183,7 +183,7 @@ GRANT SELECT ON
   admin_role_bindings,admin_role_permissions,admin_action_requests,
   admin_operator_idempotency,admin_audit_log,payment_intents,payment_routes,
   payment_matches,transfer_events,unmatched_payments,match_candidates,
-  manual_resolutions,callback_deliveries,webhook_endpoints,scanner_gaps,
+  manual_resolutions,callback_events,callback_deliveries,webhook_endpoints,scanner_gaps,
   assets,chains,financial_reconciliation_runs,merchant_members,
   merchant_member_role_bindings,merchant_cabinet_role_permissions,
   admin_invitation_enrollments
