@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/calmshv-star/ocrypt/main/contracts/events/payment-event-v1.schema.json",
+  "title": "Merchant payment event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "sequence",
+    "occurred_at",
+    "merchant_id",
+    "livemode",
+    "payment_intent"
+  ],
+  "properties": {
+    "event_id": { "type": "string", "minLength": 1 },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "payment.intent.created",
+        "payment.route.created",
+        "payment.observed",
+        "payment.confirming",
+        "payment.partially_paid",
+        "payment.needs_review",
+        "payment.settled",
+        "payment.overpaid",
+        "payment.expired",
+        "payment.cancelled",
+        "payment.reorged",
+        "payment.resolution.updated"
+      ]
+    },
+    "schema_version": { "const": "1" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "merchant_id": { "type": "string", "minLength": 1 },
+    "livemode": { "type": "boolean" },
+    "payment_intent": { "$ref": "#/$defs/payment_intent" },
+    "settlement": { "$ref": "#/$defs/settlement" },
+    "observation": { "$ref": "#/$defs/observation" },
+    "resolution": { "$ref": "#/$defs/resolution" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "event_type": { "const": "payment.settled" } }, "required": ["event_type"] },
+      "then": { "required": ["settlement"], "not": { "anyOf": [{ "required": ["observation"] }, { "required": ["resolution"] }] } }
+    },
+    {
+      "if": { "properties": { "event_type": { "enum": ["payment.observed", "payment.confirming"] } }, "required": ["event_type"] },
+      "then": { "required": ["observation"], "not": { "anyOf": [{ "required": ["settlement"] }, { "required": ["resolution"] }] } }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "payment.reorged" } }, "required": ["event_type"] },
+      "then": {
+        "oneOf": [
+          { "required": ["observation"], "not": { "required": ["settlement"] } },
+          { "required": ["settlement"], "not": { "required": ["observation"] } }
+        ],
+        "not": { "required": ["resolution"] }
+      }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "payment.resolution.updated" } }, "required": ["event_type"] },
+      "then": { "required": ["resolution"], "not": { "anyOf": [{ "required": ["observation"] }, { "required": ["settlement"] }] } }
+    }
+  ],
+  "$defs": {
+    "atomic_string": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" },
+    "payment_intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "merchant_order_id", "status", "amount_minor", "currency"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "merchant_order_id": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "minLength": 1 },
+        "amount_minor": { "$ref": "#/$defs/atomic_string" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+      }
+    },
+    "settlement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "settlement_id",
+        "asset_id",
+        "expected_raw",
+        "received_raw",
+        "credited_raw",
+        "finality",
+        "manual_resolution"
+      ],
+      "oneOf": [
+        {
+          "required": ["network", "transaction_hash", "event_index", "block_height", "block_time"],
+          "not": { "anyOf": [
+            { "required": ["provider_id"] }, { "required": ["provider_reference"] },
+            { "required": ["provider_event_id"] }, { "required": ["provider_evidence_sha256"] }
+          ] }
+        },
+        {
+          "required": ["provider_id", "provider_reference", "provider_event_id", "provider_evidence_sha256"],
+          "not": { "anyOf": [
+            { "required": ["network"] }, { "required": ["transaction_hash"] },
+            { "required": ["event_index"] }, { "required": ["block_height"] }, { "required": ["block_time"] }
+          ] }
+        }
+      ],
+      "properties": {
+        "settlement_id": { "type": "string", "minLength": 1 },
+        "asset_id": { "type": "string", "minLength": 1 },
+        "network": { "type": "string", "minLength": 1 },
+        "expected_raw": { "$ref": "#/$defs/atomic_string" },
+        "received_raw": { "$ref": "#/$defs/atomic_string" },
+        "credited_raw": { "$ref": "#/$defs/atomic_string" },
+        "transaction_hash": { "type": "string", "minLength": 1 },
+        "event_index": { "type": "string", "minLength": 1 },
+        "block_height": { "$ref": "#/$defs/atomic_string" },
+        "block_time": { "type": "string", "format": "date-time" },
+        "provider_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "provider_reference": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "provider_event_id": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "provider_evidence_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "finality": { "type": "string", "enum": ["observed", "confirmed", "finalized", "reorged", "provider_verified"] },
+        "manual_resolution": { "type": "boolean" }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observation_id", "payment_route_id", "network", "asset_id", "transaction_hash", "event_index", "from_address", "to_address", "amount_raw", "asset_decimals", "block_height", "block_hash", "block_time", "confirmations", "required_confirmations", "finality", "evidence_sha256"],
+      "properties": {
+        "observation_id": { "type": "string", "minLength": 1 },
+        "payment_route_id": { "type": "string", "minLength": 1 },
+        "network": { "type": "string", "minLength": 1 },
+        "asset_id": { "type": "string", "minLength": 1 },
+        "transaction_hash": { "type": "string", "minLength": 1 },
+        "event_index": { "type": "string", "minLength": 1 },
+        "from_address": { "type": "string", "minLength": 1 },
+        "to_address": { "type": "string", "minLength": 1 },
+        "amount_raw": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+        "asset_decimals": { "type": "integer", "minimum": 0, "maximum": 77 },
+        "block_height": { "$ref": "#/$defs/atomic_string" },
+        "block_hash": { "type": "string", "minLength": 1 },
+        "block_time": { "type": "string", "format": "date-time" },
+        "confirmations": { "type": "integer", "minimum": 0 },
+        "required_confirmations": { "type": "integer", "minimum": 1 },
+        "finality": { "type": "string", "enum": ["observed", "confirmed", "finalized", "reorged"] },
+        "evidence_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resolution_id", "unmatched_payment_id", "transfer_event_id", "payment_route_id", "status", "version", "approval_required", "approved", "accept_shortfall", "accept_late_payment", "accept_cross_asset", "evidence_verified"],
+      "properties": {
+        "resolution_id": { "type": "string", "minLength": 1 },
+        "unmatched_payment_id": { "type": "string", "minLength": 1 },
+        "transfer_event_id": { "type": "string", "minLength": 1 },
+        "payment_route_id": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "enum": ["approval_required", "verification_requested", "verification_retry", "resolved", "invalid", "conflict"] },
+        "version": { "type": "integer", "minimum": 1 },
+        "approval_required": { "type": "boolean" },
+        "approved": { "type": "boolean" },
+        "accept_shortfall": { "type": "boolean" },
+        "accept_late_payment": { "type": "boolean" },
+        "accept_cross_asset": { "type": "boolean" },
+        "evidence_verified": { "type": "boolean" }
+      }
+    }
+  }
+}

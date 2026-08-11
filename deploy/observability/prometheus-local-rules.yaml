@@ -1,0 +1,60 @@
+groups:
+  - name: merchant-platform.local-health
+    rules:
+      - alert: MerchantPlatformLocalHealthProbeFailed
+        expr: probe_success{job="blackbox-health"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: A local Merchant Platform health endpoint is unavailable
+          runbook: docs/runbooks/en/service-unavailable.md
+      - alert: MerchantRateRuntimeNotReady
+        expr: probe_success{job="blackbox-health",instance=~".*rate-worker:9092/readyz"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: Admitted rate ticks are stale or the rate worker is unavailable
+          runbook: docs/runbooks/en/service-unavailable.md
+      - alert: MerchantProviderHealthNotReady
+        expr: probe_success{job="blackbox-health",instance=~".*provider-health-worker:9100/readyz"} == 0 or merchant_provider_admissible_peer_groups{service="provider-health-worker"} < 1
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: Provider health has no independent admitted peer group
+          runbook: docs/en/provider-operations.md
+      - alert: MerchantMatchingRuntimeNotReady
+        expr: probe_success{job="blackbox-health",instance=~".*matching-worker:9090/readyz"} == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: Automated matching is not making healthy progress
+          runbook: docs/runbooks/en/service-unavailable.md
+      - alert: MerchantOutboxJetStreamNotReady
+        expr: merchant_runtime_ready{service="worker"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: The local outbox worker cannot verify PostgreSQL and its admitted JetStream stream
+          runbook: docs/en/event-delivery.md
+      - alert: MerchantReconciliationRuntimeNotReady
+        expr: probe_success{job="blackbox-health",instance=~".*reconciliation-worker:9094/readyz"} == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Reconciliation reports are stale, queued too long, or unavailable
+          runbook: docs/runbooks/en/service-unavailable.md
+      - alert: MerchantSettingsRevocationNotReady
+        expr: probe_success{job="blackbox-health",instance=~".*merchant-(settings-api:9095|session-revocation-worker:9096|invitation-delivery-worker:9097)/readyz"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: Merchant settings or session revocation is not ready
+          runbook: docs/runbooks/en/service-unavailable.md
+      - alert: MerchantPrivateTLSProbeFailed
+        expr: probe_success{job=~"blackbox-(management|platform|financial)-tls-health"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: A private TLS listener or its CA/SNI contract failed
+          runbook: docs/runbooks/en/service-unavailable.md

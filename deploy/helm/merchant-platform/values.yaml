@@ -1,0 +1,795 @@
+nameOverride: ""
+fullnameOverride: ""
+
+global:
+  imagePullSecrets: []
+  podAnnotations: {}
+  priorityClassName: ""
+  # Production values must require immutable digests for every enabled image.
+  requireImageDigest: false
+
+migration:
+  enabled: true
+  image: {repository: merchant-platform-migrations, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+  databaseSecretRef: {name: merchant-platform-migration, key: database-url}
+  activeDeadlineSeconds: 600
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+
+# One-shot, closed-by-default independent payment verification. It exposes no
+# listener or Service and may write only when execute=true and a fenced worker
+# credential plus exact provider mTLS/public-key files have been admitted.
+migrationVerifier:
+  enabled: false
+  execute: false
+  image: {repository: merchant-platform-migration-control-worker, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+  databaseSecretRef: {name: merchant-platform-migration-control-worker, key: database-url}
+  migrationID: ""
+  sourceID: ""
+  workerID: ""
+  activeDeadlineSeconds: 120
+  env:
+    APP_ENV: production
+    MIGRATION_VERIFIER_CONFIG_FILE: /run/secrets/verifier-config.json
+    MIGRATION_PROVIDER_PUBLIC_KEYS_FILE: /run/secrets/provider-public-keys.json
+    MIGRATION_PROVIDER_CA_FILE: /run/secrets/provider-ca.pem
+    MIGRATION_PROVIDER_CLIENT_CERT_FILE: /run/secrets/provider-client.crt
+    MIGRATION_PROVIDER_CLIENT_KEY_FILE: /run/secrets/provider-client.key
+  secretFiles:
+    - {path: /run/secrets/verifier-config.json, secretRef: {name: merchant-platform-migration-verifier, key: verifier-config.json}}
+    - {path: /run/secrets/provider-public-keys.json, secretRef: {name: merchant-platform-migration-verifier, key: provider-public-keys.json}}
+    - {path: /run/secrets/provider-ca.pem, secretRef: {name: merchant-platform-migration-verifier, key: provider-ca.pem}}
+    - {path: /run/secrets/provider-client.crt, secretRef: {name: merchant-platform-migration-verifier, key: provider-client.crt}}
+    - {path: /run/secrets/provider-client.key, secretRef: {name: merchant-platform-migration-verifier, key: provider-client.key}}
+  httpsEgressPeers: []
+  resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 500m, memory: 256Mi}}
+
+# One-shot traffic switch executor. Disabled by default, unpublished, and
+# admitted only with exact external HTTPS/mTLS and signed acknowledgement keys.
+migrationActuator:
+  enabled: false
+  image: {repository: merchant-platform-migration-traffic-actuator, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+  databaseSecretRef: {name: merchant-platform-migration-traffic-actuator, key: database-url}
+  migrationID: ""
+  switchURL: ""
+  serverName: ""
+  requestKeyID: ""
+  timeoutSeconds: 20
+  activeDeadlineSeconds: 120
+  secretFiles:
+    - {path: /run/secrets/migration-actuator-ca.pem, secretRef: {name: merchant-platform-migration-traffic-actuator, key: ca.pem}}
+    - {path: /run/secrets/migration-actuator-client.crt, secretRef: {name: merchant-platform-migration-traffic-actuator, key: client.crt}}
+    - {path: /run/secrets/migration-actuator-client.key, secretRef: {name: merchant-platform-migration-traffic-actuator, key: client.key}}
+    - {path: /run/secrets/migration-actuator-request.key, secretRef: {name: merchant-platform-migration-traffic-actuator, key: request.key}}
+    - {path: /run/secrets/migration-actuator-ack-public-keys.json, secretRef: {name: merchant-platform-migration-traffic-actuator, key: ack-public-keys.json}}
+  httpsEgressPeers: []
+  resources: {requests: {cpu: 25m, memory: 32Mi}, limits: {cpu: 250m, memory: 128Mi}}
+
+# Each database-url Secret belongs to a distinct login inheriting exactly one
+# capability role from deploy/postgres/bootstrap-roles.sql. Do not reuse URLs.
+workloads:
+  api:
+    enabled: true
+    replicas: 2
+    image: {repository: merchant-platform-api, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    port: 8080
+    probeScheme: HTTP
+    workerIDEnv: ""
+    databaseAccess: true
+    env:
+      APP_ENV: production
+      HTTP_ADDRESS: ":8080"
+      PUBLIC_BASE_URL: "https://api.example.invalid"
+      RECONCILIATION_OBJECT_STORE: s3
+      RECONCILIATION_S3_ENDPOINT: "https://s3.example.invalid"
+      RECONCILIATION_S3_REGION: us-east-1
+      RECONCILIATION_S3_BUCKET: merchant-reconciliation
+      RECONCILIATION_S3_ACCESS_KEY_ID_FILE: /run/secrets/reconciliation-s3-access-key-id
+      RECONCILIATION_S3_SECRET_ACCESS_KEY_FILE: /run/secrets/reconciliation-s3-secret-access-key
+      RECONCILIATION_SIGNING_PUBLIC_KEYS: reconciliation-v1=/run/secrets/reconciliation-signing-public-key
+      RECONCILIATION_DOWNLOAD_TIMEOUT_SECONDS: "900"
+      RECONCILIATION_MAX_OBJECT_BYTES: "1073741824"
+    secretEnv:
+      - {name: DATABASE_URL, secretRef: {name: merchant-platform-api, key: database-url}}
+      - {name: API_CREDENTIAL_ENVELOPE_KEY, secretRef: {name: merchant-platform-api, key: credential-envelope-key}}
+    secretFiles:
+      - {path: /run/secrets/reconciliation-s3-access-key-id, secretRef: {name: merchant-platform-reconciliation-api-object-read, key: access-key-id}}
+      - {path: /run/secrets/reconciliation-s3-secret-access-key, secretRef: {name: merchant-platform-reconciliation-api-object-read, key: secret-access-key}}
+      - {path: /run/secrets/reconciliation-signing-public-key, secretRef: {name: merchant-platform-reconciliation-signing-public, key: reconciliation-v1}}
+    secretDirectories: []
+    service: {enabled: true, port: 8080, portName: http}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+    pdb: {enabled: true, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 10, targetCPUUtilizationPercentage: 70}
+
+  management-api:
+    enabled: true
+    replicas: 2
+    image: {repository: merchant-platform-management-api, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    port: 8445
+    probeScheme: HTTPS
+    workerIDEnv: ""
+    databaseAccess: true
+    env:
+      MANAGEMENT_HTTP_ADDRESS: ":8445"
+      MANAGEMENT_PUBLIC_BASE_URL: "https://api.example.invalid"
+      MANAGEMENT_TLS_CERT_FILE: /run/secrets/tls.crt
+      MANAGEMENT_TLS_KEY_FILE: /run/secrets/tls.key
+      WEBHOOK_ENVELOPE_KEY_FILE: /run/secrets/webhook-envelope-key
+      API_CREDENTIAL_ENVELOPE_KEY_FILE: /run/secrets/credential-envelope-key
+      MANAGEMENT_RESPONSE_KEY_FILE: /run/secrets/response-key
+      MANAGEMENT_ADMIN_ASSERTION_KEY_FILE: /run/secrets/admin-assertion-key
+      RECEIPT_AI_API_KEY_FILE: /run/secrets/receipt-ai-api-key
+    secretEnv:
+      - {name: DATABASE_URL, secretRef: {name: merchant-platform-management, key: database-url}}
+    secretFiles:
+      - {path: /run/secrets/webhook-envelope-key, secretRef: {name: merchant-platform-management, key: webhook-envelope-key}}
+      - {path: /run/secrets/credential-envelope-key, secretRef: {name: merchant-platform-management, key: credential-envelope-key}}
+      - {path: /run/secrets/response-key, secretRef: {name: merchant-platform-management, key: response-key}}
+      - {path: /run/secrets/admin-assertion-key, secretRef: {name: merchant-platform-management-bridge, key: assertion-key}}
+      - {path: /run/secrets/tls.crt, secretRef: {name: merchant-platform-management-tls, key: tls.crt}}
+      - {path: /run/secrets/tls.key, secretRef: {name: merchant-platform-management-tls, key: tls.key}}
+      - {path: /run/secrets/receipt-ai-api-key, secretRef: {name: merchant-platform-receipt-ai, key: api-key}}
+    secretDirectories: []
+    service: {enabled: true, port: 8445, portName: https}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+    pdb: {enabled: true, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 10, targetCPUUtilizationPercentage: 70}
+
+  admin-api:
+    enabled: true
+    replicas: 2
+    image: {repository: merchant-platform-admin-api, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    port: 8081
+    probeScheme: HTTP
+    workerIDEnv: ""
+    databaseAccess: true
+    env:
+      ADMIN_HTTP_ADDRESS: ":8081"
+      ADMIN_PUBLIC_ORIGIN: "https://admin.example.invalid"
+      ADMIN_OIDC_ISSUER: "https://identity.example.invalid"
+      ADMIN_OIDC_CLIENT_ID: merchant-admin
+      ADMIN_OIDC_REDIRECT_URI: "https://admin.example.invalid/admin/v1/auth/callback"
+      ADMIN_REQUIRED_ACR: "urn:mfa"
+      ADMIN_ACCEPTED_AMR: "otp,hwk,webauthn"
+      MANAGEMENT_INTERNAL_URL: "https://management-api.merchant.svc:8445"
+      MANAGEMENT_ADMIN_ASSERTION_KEY_FILE: /run/secrets/management-assertion-key
+      MANAGEMENT_INTERNAL_CA_FILE: /run/secrets/management-ca.pem
+      PLATFORM_ADMIN_INTERNAL_URL: "https://platform-admin-api.merchant.svc:8446"
+      PLATFORM_ADMIN_ASSERTION_KEY_FILE: /run/secrets/platform-assertion-key
+      PLATFORM_ADMIN_CA_FILE: /run/secrets/platform-ca.pem
+      PLATFORM_ADMIN_ASSERTION_ISSUER: merchant-admin-bff
+      PLATFORM_ADMIN_ASSERTION_AUDIENCE: platform-admin-api
+      MERCHANT_SETTINGS_INTERNAL_URL: "https://merchant-settings-api.merchant.svc:8447"
+      MERCHANT_SETTINGS_ASSERTION_KEY_FILE: /run/secrets/merchant-settings-assertion-key
+      MERCHANT_SETTINGS_INTERNAL_CA_FILE: /run/secrets/merchant-settings-ca.pem
+      MERCHANT_SETTINGS_INTERNAL_CLIENT_CERT_FILE: /run/secrets/merchant-settings-client.crt
+      MERCHANT_SETTINGS_INTERNAL_CLIENT_KEY_FILE: /run/secrets/merchant-settings-client.key
+      MERCHANT_SETTINGS_INTERNAL_SERVER_NAME: merchant-settings-api.merchant.svc
+      FINANCIAL_INTERNAL_URL: "https://financial-api.merchant.svc:8444"
+      FINANCIAL_INTERNAL_ASSERTION_KEY_FILE: /run/secrets/financial-assertion-key
+      FINANCIAL_INTERNAL_CA_FILE: /run/secrets/financial-ca.pem
+      FINANCIAL_INTERNAL_CLIENT_CERT_FILE: /run/secrets/financial-client.crt
+      FINANCIAL_INTERNAL_CLIENT_KEY_FILE: /run/secrets/financial-client.key
+      FINANCIAL_INTERNAL_SERVER_NAME: financial-api.merchant.svc
+    secretEnv:
+      - {name: DATABASE_URL, secretRef: {name: merchant-platform-admin, key: database-url}}
+      - {name: ADMIN_OIDC_CLIENT_SECRET, secretRef: {name: merchant-platform-admin, key: oidc-client-secret}}
+      - {name: ADMIN_STATE_ENCRYPTION_KEY, secretRef: {name: merchant-platform-admin, key: state-encryption-key}}
+    secretFiles:
+      - {path: /run/secrets/management-assertion-key, secretRef: {name: merchant-platform-management-bridge, key: assertion-key}}
+      - {path: /run/secrets/management-ca.pem, secretRef: {name: merchant-platform-management-tls, key: ca.crt}}
+      - {path: /run/secrets/platform-assertion-key, secretRef: {name: merchant-platform-platform-bridge, key: assertion-key}}
+      - {path: /run/secrets/platform-ca.pem, secretRef: {name: merchant-platform-platform-tls, key: ca.crt}}
+      - {path: /run/secrets/merchant-settings-assertion-key, secretRef: {name: merchant-platform-merchant-settings-bridge, key: assertion-key}}
+      - {path: /run/secrets/merchant-settings-ca.pem, secretRef: {name: merchant-platform-merchant-settings-tls, key: ca.crt}}
+      - {path: /run/secrets/merchant-settings-client.crt, secretRef: {name: merchant-platform-merchant-settings-client, key: tls.crt}}
+      - {path: /run/secrets/merchant-settings-client.key, secretRef: {name: merchant-platform-merchant-settings-client, key: tls.key}}
+      - {path: /run/secrets/financial-assertion-key, secretRef: {name: merchant-platform-financial-bridge, key: assertion-key}}
+      - {path: /run/secrets/financial-ca.pem, secretRef: {name: merchant-platform-financial-tls, key: ca.crt}}
+      - {path: /run/secrets/financial-client.crt, secretRef: {name: merchant-platform-financial-client, key: tls.crt}}
+      - {path: /run/secrets/financial-client.key, secretRef: {name: merchant-platform-financial-client, key: tls.key}}
+    secretDirectories: []
+    service: {enabled: true, port: 8081, portName: http}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+    pdb: {enabled: true, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 10, targetCPUUtilizationPercentage: 70}
+
+  platform-admin-api:
+    enabled: true
+    replicas: 2
+    image: {repository: merchant-platform-platform-admin-api, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    port: 8446
+    probeScheme: HTTPS
+    workerIDEnv: PLATFORM_ADMIN_SCHEDULER_WORKER_ID
+    databaseAccess: true
+    env:
+      PLATFORM_ADMIN_LISTEN_ADDR: ":8446"
+      PLATFORM_ADMIN_TLS_CERT_FILE: /run/secrets/tls.crt
+      PLATFORM_ADMIN_TLS_KEY_FILE: /run/secrets/tls.key
+      PLATFORM_ADMIN_ASSERTION_SECRET_FILE: /run/secrets/assertion-key
+      PLATFORM_ADMIN_ASSERTION_ISSUER: merchant-admin-bff
+      PLATFORM_ADMIN_ASSERTION_AUDIENCE: platform-admin-api
+      PLATFORM_ADMIN_SCHEDULER_ACTOR_ID: "00000000-0000-7000-8000-000000000001"
+      MIGRATION_MANIFEST_PUBLIC_KEYS_FILE: /run/secrets/migration-manifest-public-keys.json
+      MIGRATION_ACTUATOR_PUBLIC_KEYS_FILE: /run/secrets/migration-actuator-public-keys.json
+    secretEnv:
+      - {name: PLATFORM_ADMIN_DATABASE_URL, secretRef: {name: merchant-platform-platform-admin, key: database-url}}
+      - {name: MIGRATION_ACTUATOR_DATABASE_URL, secretRef: {name: merchant-platform-migration-actuator, key: database-url}}
+    secretFiles:
+      - {path: /run/secrets/tls.crt, secretRef: {name: merchant-platform-platform-tls, key: tls.crt}}
+      - {path: /run/secrets/tls.key, secretRef: {name: merchant-platform-platform-tls, key: tls.key}}
+      - {path: /run/secrets/assertion-key, secretRef: {name: merchant-platform-platform-bridge, key: assertion-key}}
+      - {path: /run/secrets/migration-manifest-public-keys.json, secretRef: {name: merchant-platform-migration-public-keys, key: manifest-keys.json}}
+      - {path: /run/secrets/migration-actuator-public-keys.json, secretRef: {name: merchant-platform-migration-public-keys, key: actuator-keys.json}}
+    secretDirectories: []
+    service: {enabled: true, port: 8446, portName: https}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+    pdb: {enabled: true, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 70}
+
+  settlement-worker: &coreWorker
+    enabled: true
+    replicas: 2
+    image: {repository: merchant-platform-worker, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    port: 9090
+    probeScheme: HTTP
+    workerIDEnv: WORKER_ID
+    databaseAccess: true
+    env: {WORKER_ROLES: settlements, WORKER_HEALTH_ADDRESS: ":9090"}
+    secretEnv:
+      - {name: DATABASE_URL, secretRef: {name: merchant-platform-settlement-worker, key: database-url}}
+    secretFiles: []
+    secretDirectories: []
+    service: {enabled: true, port: 9090, portName: health}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+    pdb: {enabled: true, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 10, targetCPUUtilizationPercentage: 70}
+  matching-worker:
+    <<: *coreWorker
+    env: {WORKER_ROLES: matching, WORKER_HEALTH_ADDRESS: ":9090"}
+    secretEnv:
+      - {name: DATABASE_URL, secretRef: {name: merchant-platform-matching-worker, key: database-url}}
+  callback-worker:
+    <<: *coreWorker
+    env: {WORKER_ROLES: callbacks, WORKER_HEALTH_ADDRESS: ":9090"}
+    secretEnv:
+      - {name: DATABASE_URL, secretRef: {name: merchant-platform-callback-worker, key: database-url}}
+      - {name: WEBHOOK_ENVELOPE_KEY, secretRef: {name: merchant-platform-callback-worker, key: webhook-envelope-key}}
+  outbox-worker:
+    <<: *coreWorker
+    # JetStream delivery is opt-in and must point at a separately provisioned,
+    # mutually authenticated cluster. PostgreSQL remains recovery truth.
+    enabled: false
+    env:
+      APP_ENV: production
+      WORKER_ROLES: outbox
+      WORKER_HEALTH_ADDRESS: ":9090"
+      OUTBOX_PUBLISHER: jetstream
+      OUTBOX_MAX_RETRY_DELAY: 15m
+      OUTBOX_NATS_URLS: "tls://merchant-jetstream.jetstream-system.svc:4222"
+      OUTBOX_NATS_CA_FILE: /run/secrets/outbox-nats-ca.pem
+      OUTBOX_NATS_SERVER_NAME: merchant-jetstream.jetstream-system.svc
+      OUTBOX_NATS_CLIENT_CERT_FILE: /run/secrets/outbox-nats-client.crt
+      OUTBOX_NATS_CLIENT_KEY_FILE: /run/secrets/outbox-nats-client.key
+      OUTBOX_NATS_CREDS_FILE: /run/secrets/outbox-nats-publisher.creds
+      OUTBOX_NATS_CONNECT_TIMEOUT: 5s
+      OUTBOX_NATS_PUBLISH_TIMEOUT: 10s
+      OUTBOX_NATS_RECONNECT_WAIT: 1s
+      OUTBOX_NATS_MAX_RECONNECTS: "60"
+      OUTBOX_JETSTREAM_MAX_AGE: 168h
+      OUTBOX_JETSTREAM_MAX_BYTES: "10737418240"
+      OUTBOX_JETSTREAM_MAX_MESSAGES: "10000000"
+      OUTBOX_JETSTREAM_MAX_MESSAGE_BYTES: "1048576"
+      OUTBOX_JETSTREAM_DUPLICATE_WINDOW: 30m
+      OUTBOX_JETSTREAM_REPLICAS: "3"
+    secretEnv:
+      - {name: DATABASE_URL, secretRef: {name: merchant-platform-outbox-worker, key: database-url}}
+    secretFiles:
+      - {path: /run/secrets/outbox-nats-ca.pem, secretRef: {name: merchant-platform-outbox-nats-tls, key: ca.crt}}
+      - {path: /run/secrets/outbox-nats-client.crt, secretRef: {name: merchant-platform-outbox-nats-tls, key: tls.crt}}
+      - {path: /run/secrets/outbox-nats-client.key, secretRef: {name: merchant-platform-outbox-nats-tls, key: tls.key}}
+      - {path: /run/secrets/outbox-nats-publisher.creds, secretRef: {name: merchant-platform-outbox-nats-credentials, key: publisher.creds}}
+    service: {enabled: false, port: 9090, portName: health}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+  plan-worker:
+    <<: *coreWorker
+    env: {WORKER_ROLES: plans, WORKER_HEALTH_ADDRESS: ":9090"}
+    secretEnv:
+      - {name: DATABASE_URL, secretRef: {name: merchant-platform-plan-worker, key: database-url}}
+  resolution-worker:
+    <<: *coreWorker
+    enabled: false
+    env: {WORKER_ROLES: resolutions, WORKER_HEALTH_ADDRESS: ":9090", VERIFIER_CHAIN_ID: "", VERIFIER_PROVIDER_URLS: "", VERIFIER_QUORUM: "2"}
+    secretEnv:
+      - {name: DATABASE_URL, secretRef: {name: merchant-platform-resolution-worker, key: database-url}}
+      - {name: VERIFIER_PROVIDER_TOKEN, secretRef: {name: merchant-platform-resolution-worker, key: provider-token}}
+  proof-worker:
+    <<: *coreWorker
+    enabled: false
+    env: {WORKER_ROLES: proofs, WORKER_HEALTH_ADDRESS: ":9090", PROOF_VERIFIER_CHAIN_ID: "", PROOF_VERIFIER_PROVIDER_URLS: "", PROOF_VERIFIER_QUORUM: "2"}
+    secretEnv:
+      - {name: DATABASE_URL, secretRef: {name: merchant-platform-proof-worker, key: database-url}}
+      - {name: PROOF_VERIFIER_PROVIDER_TOKEN, secretRef: {name: merchant-platform-proof-worker, key: provider-token}}
+
+  scanner:
+    enabled: false
+    replicas: 2
+    image: {repository: merchant-platform-scanner, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    port: 9091
+    probeScheme: HTTP
+    workerIDEnv: WORKER_ID
+    databaseAccess: true
+    env:
+      SCANNER_HEALTH_ADDRESS: ":9091"
+      SCANNER_PLATFORM_RUNTIME_JSON: '{"chain":"eip155:1","finality":"eip155:1","rpc_providers":["rpc/primary","rpc/secondary"],"assets":["eth-ethereum"],"maintenance":[]}'
+      SCANNER_SECRET_DIR: /run/scanner-secrets
+    secretEnv:
+      - {name: DATABASE_URL, secretRef: {name: merchant-platform-scanner, key: database-url}}
+    secretFiles: []
+    secretDirectories:
+      - {path: /run/scanner-secrets, secretRef: {name: merchant-platform-scanner-provider-credentials}}
+    service: {enabled: true, port: 9091, portName: health}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+    pdb: {enabled: true, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 10, targetCPUUtilizationPercentage: 70}
+
+  provider-health-worker:
+    # Private only. Enable after approved provider policies, at least two
+    # independent peers, a dedicated DB login, and exact HTTPS egress exist.
+    enabled: false
+    replicas: 2
+    image: {repository: merchant-platform-provider-health-worker, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    port: 9100
+    probeScheme: HTTP
+    workerIDEnv: WORKER_ID
+    databaseAccess: true
+    env:
+      PROVIDER_HEALTH_ADDRESS: ":9100"
+      PROVIDER_HEALTH_POLL_INTERVAL: 15s
+      PROVIDER_HEALTH_READY_AGE: 2m
+      PROVIDER_HEALTH_BATCH_SIZE: "64"
+      PROVIDER_HEALTH_CONCURRENCY: "8"
+      PROVIDER_HEALTH_SECRET_DIR: /run/provider-health-secrets
+    secretEnv:
+      - {name: DATABASE_URL, secretRef: {name: merchant-platform-provider-health-worker, key: database-url}}
+    secretFiles: []
+    secretDirectories:
+      - {path: /run/provider-health-secrets, secretRef: {name: merchant-platform-provider-health-credentials}}
+    service: {enabled: true, port: 9100, portName: health}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+    pdb: {enabled: true, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 70}
+
+  platform-outbox-publisher:
+    # Enable only after the exact HTTPS destination, private egress selector,
+    # client certificate, bearer, database login and enabled service identity
+    # have been provisioned. This worker intentionally has no Service.
+    enabled: false
+    replicas: 1
+    image: {repository: merchant-platform-platform-outbox-publisher, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    port: 9098
+    probeScheme: HTTP
+    workerIDEnv: ""
+    databaseAccess: true
+    env:
+      PLATFORM_OUTBOX_HEALTH_ADDRESS: 127.0.0.1:9098
+      PLATFORM_OUTBOX_POLL_INTERVAL: 1s
+      PLATFORM_OUTBOX_LEASE: 30s
+      PLATFORM_OUTBOX_BATCH_SIZE: "50"
+      PLATFORM_OUTBOX_DESTINATION_URL: ""
+      PLATFORM_OUTBOX_DESTINATION_CA_FILE: /run/secrets/destination-ca.pem
+      PLATFORM_OUTBOX_DESTINATION_CERT_FILE: /run/secrets/destination.crt
+      PLATFORM_OUTBOX_DESTINATION_KEY_FILE: /run/secrets/destination.key
+      PLATFORM_OUTBOX_DESTINATION_TOKEN_FILE: /run/secrets/destination.bearer
+    secretEnv:
+      - {name: PLATFORM_OUTBOX_DATABASE_URL, secretRef: {name: merchant-platform-platform-outbox-publisher, key: database-url}}
+      - {name: PLATFORM_OUTBOX_WORKER_ID, secretRef: {name: merchant-platform-platform-outbox-publisher, key: service-identity-id}}
+    secretFiles:
+      - {path: /run/secrets/destination-ca.pem, secretRef: {name: merchant-platform-platform-outbox-destination, key: ca.pem}}
+      - {path: /run/secrets/destination.crt, secretRef: {name: merchant-platform-platform-outbox-destination, key: tls.crt}}
+      - {path: /run/secrets/destination.key, secretRef: {name: merchant-platform-platform-outbox-destination, key: tls.key}}
+      - {path: /run/secrets/destination.bearer, secretRef: {name: merchant-platform-platform-outbox-destination, key: bearer}}
+    secretDirectories: []
+    service: {enabled: false, port: 9098, portName: health}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 500m, memory: 256Mi}}
+    pdb: {enabled: false, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 1, targetCPUUtilizationPercentage: 70}
+
+  rate-worker:
+    enabled: false
+    replicas: 2
+    image: {repository: merchant-platform-rate-worker, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    port: 9092
+    probeScheme: HTTP
+    # Must be a pre-provisioned enabled UUID, not a pod UID.
+    workerIDEnv: ""
+    databaseAccess: true
+    env: {RATE_HEALTH_ADDRESS: ":9092", RATE_WORKER_ID: "", RATE_TARGETS_JSON: "[]", RATE_SECRET_DIR: /run/rate-secrets}
+    secretEnv:
+      - {name: DATABASE_URL, secretRef: {name: merchant-platform-rate-worker, key: database-url}}
+    secretFiles: []
+    secretDirectories:
+      - {path: /run/rate-secrets, secretRef: {name: merchant-platform-rate-provider-credentials}}
+    service: {enabled: true, port: 9092, portName: health}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+    pdb: {enabled: true, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 10, targetCPUUtilizationPercentage: 70}
+
+  reconciliation-worker:
+    enabled: true
+    replicas: 1
+    image: {repository: merchant-platform-reconciliation-worker, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    port: 9094
+    probeScheme: HTTP
+    workerIDEnv: RECONCILIATION_WORKER_ID
+    databaseAccess: true
+    env:
+      RECONCILIATION_OBJECT_STORE: s3
+      RECONCILIATION_S3_ENDPOINT: "https://s3.example.invalid"
+      RECONCILIATION_S3_REGION: us-east-1
+      RECONCILIATION_S3_BUCKET: merchant-reconciliation
+      RECONCILIATION_S3_ACCESS_KEY_ID_FILE: /run/secrets/reconciliation-s3-access-key-id
+      RECONCILIATION_S3_SECRET_ACCESS_KEY_FILE: /run/secrets/reconciliation-s3-secret-access-key
+      RECONCILIATION_SIGNING_PRIVATE_KEY_FILE: /run/secrets/signing-key
+      RECONCILIATION_SIGNING_KEY_ID: reconciliation-v1
+      RECONCILIATION_HEALTH_ADDRESS: ":9094"
+      RECONCILIATION_MAX_OBJECT_BYTES: "1073741824"
+      RECONCILIATION_MAX_ENTRIES: "1000000"
+    secretEnv:
+      - {name: DATABASE_URL, secretRef: {name: merchant-platform-reconciliation-worker, key: database-url}}
+    secretFiles:
+      - {path: /run/secrets/reconciliation-s3-access-key-id, secretRef: {name: merchant-platform-reconciliation-worker-object-write, key: access-key-id}}
+      - {path: /run/secrets/reconciliation-s3-secret-access-key, secretRef: {name: merchant-platform-reconciliation-worker-object-write, key: secret-access-key}}
+      - {path: /run/secrets/signing-key, secretRef: {name: merchant-platform-reconciliation-signing-private, key: reconciliation-v1}}
+    secretDirectories: []
+    service: {enabled: false, port: 9094, portName: health}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+    pdb: {enabled: false, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
+
+  retention-worker:
+    # Enable only after the dedicated database login, WORM bucket, exact
+    # port-443 egress peer and four file Secrets have been admitted. Health is
+    # probed on the pod at :9099; this worker intentionally has no Service.
+    enabled: false
+    replicas: 1
+    image: {repository: merchant-platform-retention-worker, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    port: 9099
+    probeScheme: HTTP
+    workerIDEnv: RETENTION_WORKER_ID
+    databaseAccess: true
+    env:
+      APP_ENV: production
+      RETENTION_OBJECT_STORE: s3
+      RETENTION_HEALTH_ADDRESS: ":9099"
+      RETENTION_SIGNING_PRIVATE_KEY_FILE: /run/secrets/retention-signing-private-key
+      RETENTION_SIGNING_KEY_ID: retention-v1
+      RETENTION_S3_ENDPOINT: "https://s3.example.invalid"
+      RETENTION_S3_REGION: us-east-1
+      RETENTION_S3_BUCKET: merchant-retention
+      RETENTION_S3_ACCESS_KEY_ID_FILE: /run/secrets/retention-s3-access-key-id
+      RETENTION_S3_SECRET_ACCESS_KEY_FILE: /run/secrets/retention-s3-secret-access-key
+      RETENTION_S3_SESSION_TOKEN_FILE: /run/secrets/retention-s3-session-token
+      RETENTION_POLL_INTERVAL_MS: "5000"
+      RETENTION_LEASE_SECONDS: "120"
+      RETENTION_READY_STALE_LEASE_SECONDS: "1800"
+      RETENTION_S3_TIMEOUT_SECONDS: "120"
+      RETENTION_BATCH_SIZE: "100"
+      RETENTION_CYCLES_PER_POLL: "5"
+      RETENTION_MAX_OBJECT_BYTES: "67108864"
+    secretEnv:
+      - {name: RETENTION_DATABASE_URL, secretRef: {name: merchant-platform-retention-archive-worker, key: database-url}}
+    secretFiles:
+      - {path: /run/secrets/retention-signing-private-key, secretRef: {name: merchant-platform-retention-signing-private, key: retention-v1}}
+      - {path: /run/secrets/retention-s3-access-key-id, secretRef: {name: merchant-platform-retention-object-write, key: access-key-id}}
+      - {path: /run/secrets/retention-s3-secret-access-key, secretRef: {name: merchant-platform-retention-object-write, key: secret-access-key}}
+      - {path: /run/secrets/retention-s3-session-token, secretRef: {name: merchant-platform-retention-object-write, key: session-token}}
+    secretDirectories: []
+    service: {enabled: false, port: 9099, portName: health}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+    pdb: {enabled: false, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
+
+  retention-control-scheduler:
+    # Platform-admin readiness depends on this DB-clock scheduler heartbeat.
+    enabled: true
+    replicas: 1
+    image: {repository: merchant-platform-retention-control-scheduler, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    port: 9102
+    probeScheme: HTTP
+    workerIDEnv: RETENTION_CONTROL_WORKER_ID
+    databaseAccess: true
+    env:
+      APP_ENV: production
+      RETENTION_CONTROL_HEALTH_ADDRESS: "127.0.0.1:9102"
+      RETENTION_CONTROL_POLL_MS: "5000"
+      RETENTION_CONTROL_BATCH_SIZE: "25"
+      RETENTION_CONTROL_STALE_SECONDS: "60"
+    secretEnv:
+      - {name: RETENTION_CONTROL_DATABASE_URL, secretRef: {name: merchant-platform-retention-control-scheduler, key: database-url}}
+    secretFiles: []
+    secretDirectories: []
+    service: {enabled: false, port: 9102, portName: health}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 250m, memory: 128Mi}}
+    pdb: {enabled: false, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 1, targetCPUUtilizationPercentage: 70}
+
+  legacy-gateway:
+    # Disabled until two-person 000018 admission, external file Secrets, exact
+    # HTTPS egress peers, an unexpired sunset, and a source-preserving listener
+    # are supplied. Health stays pod-private on 9101.
+    enabled: false
+    replicas: 2
+    image: {repository: merchant-platform-legacy-gateway, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    port: 9101
+    extraPorts: [{name: legacy, containerPort: 8082, protocol: TCP}]
+    probeScheme: HTTP
+    workerIDEnv: LEGACY_WORKER_ID
+    databaseAccess: true
+    env:
+      APP_ENV: production
+      LEGACY_COMPAT_ENABLED: "true"
+      LEGACY_HTTP_ADDRESS: ":8082"
+      LEGACY_HEALTH_ADDRESS: ":9101"
+      LEGACY_PUBLIC_BASE_URL: "https://legacy.example.invalid"
+      LEGACY_CHECKOUT_BASE_URL: "https://checkout.example.invalid"
+      LEGACY_SECRET_DIR: /run/secrets/legacy-credentials
+      LEGACY_CORE_URL: "https://api.example.invalid"
+      LEGACY_CORE_CA_FILE: /run/secrets/core-ca.pem
+      LEGACY_CORE_SERVER_NAME: api.example.invalid
+      LEGACY_CORE_CLIENT_CERT_FILE: /run/secrets/core-client.crt
+      LEGACY_CORE_CLIENT_KEY_FILE: /run/secrets/core-client.key
+      LEGACY_SUNSET_AT: ""
+      LEGACY_POLL_INTERVAL: 2s
+      LEGACY_CALLBACK_LEASE: 30s
+      LEGACY_BATCH_SIZE: "50"
+    secretEnv:
+      - {name: LEGACY_DATABASE_URL, secretRef: {name: merchant-platform-legacy-compat-runtime, key: database-url}}
+    secretFiles:
+      - {path: /run/secrets/core-ca.pem, secretRef: {name: merchant-platform-legacy-core-mtls, key: ca.pem}}
+      - {path: /run/secrets/core-client.crt, secretRef: {name: merchant-platform-legacy-core-mtls, key: tls.crt}}
+      - {path: /run/secrets/core-client.key, secretRef: {name: merchant-platform-legacy-core-mtls, key: tls.key}}
+    secretDirectories:
+      - {path: /run/secrets/legacy-credentials, secretRef: {name: merchant-platform-legacy-credential-files}}
+    service: {enabled: false, port: 8082, portName: legacy, targetPortName: legacy, appProtocol: http}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+    pdb: {enabled: true, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 70}
+
+  merchant-settings-api:
+    enabled: true
+    replicas: 2
+    image: {repository: merchant-platform-merchant-settings-api, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    # Health is a separate private plaintext listener. The only data listener is
+    # TLS 1.3 with mandatory verified client certificates on port 8447.
+    port: 9095
+    extraPorts: [{name: https, containerPort: 8447, protocol: TCP}]
+    probeScheme: HTTP
+    workerIDEnv: ""
+    databaseAccess: true
+    env:
+      MERCHANT_SETTINGS_HTTP_ADDRESS: ":8447"
+      MERCHANT_SETTINGS_HEALTH_ADDRESS: ":9095"
+      MERCHANT_SETTINGS_ASSERTION_KEY_FILE: /run/secrets/assertion-key
+      MERCHANT_INVITE_TOKEN_KEY_RING_FILE: /run/secrets/invitation-token-keys/key-ring.json
+      MERCHANT_SETTINGS_TLS_CERT_FILE: /run/secrets/tls.crt
+      MERCHANT_SETTINGS_TLS_KEY_FILE: /run/secrets/tls.key
+      MERCHANT_SETTINGS_CLIENT_CA_FILE: /run/secrets/client-ca.pem
+      MERCHANT_SETTINGS_BODY_LIMIT_BYTES: "262144"
+      MERCHANT_SETTINGS_EMAIL_INVITES_ENABLED: "false"
+    secretEnv:
+      - {name: DATABASE_URL, secretRef: {name: merchant-platform-merchant-settings-api, key: database-url}}
+    secretFiles:
+      - {path: /run/secrets/assertion-key, secretRef: {name: merchant-platform-merchant-settings-bridge, key: assertion-key}}
+      - {path: /run/secrets/tls.crt, secretRef: {name: merchant-platform-merchant-settings-tls, key: tls.crt}}
+      - {path: /run/secrets/tls.key, secretRef: {name: merchant-platform-merchant-settings-tls, key: tls.key}}
+      - {path: /run/secrets/client-ca.pem, secretRef: {name: merchant-platform-merchant-settings-client-ca, key: ca.crt}}
+    secretDirectories:
+      - {path: /run/secrets/invitation-token-keys, secretRef: {name: merchant-platform-invitation-token-keys}}
+    service: {enabled: true, port: 8447, portName: https, targetPortName: https, appProtocol: https}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+    pdb: {enabled: true, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 70}
+
+  merchant-session-revocation-worker:
+    enabled: true
+    replicas: 2
+    image: {repository: merchant-platform-merchant-session-revocation-worker, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    port: 9096
+    probeScheme: HTTP
+    workerIDEnv: ""
+    databaseAccess: true
+    env:
+      MERCHANT_SESSION_REVOCATION_HEALTH_ADDRESS: ":9096"
+      MERCHANT_SESSION_REVOCATION_POLL_INTERVAL: 1s
+      MERCHANT_SESSION_REVOCATION_MAX_READY_AGE: 10s
+      MERCHANT_SESSION_REVOCATION_BATCH_SIZE: "100"
+    secretEnv:
+      - {name: DATABASE_URL, secretRef: {name: merchant-platform-merchant-session-revocation-worker, key: database-url}}
+    secretFiles: []
+    secretDirectories: []
+    service: {enabled: false, port: 9096, portName: health}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 500m, memory: 256Mi}}
+    pdb: {enabled: true, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 70}
+
+  merchant-invitation-delivery-worker:
+    # Opt in only after the notifier origin, pinned CA, bearer Secret and a
+    # narrowly admitted port-443 egress peer have all been provisioned.
+    enabled: false
+    replicas: 2
+    image: {repository: merchant-platform-merchant-invitation-delivery-worker, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    port: 9097
+    probeScheme: HTTP
+    # Kubernetes pod UIDs are canonical UUIDs and keep replica identities
+    # distinct; the security-definer heartbeat admits and expires them.
+    workerIDEnv: MERCHANT_INVITATION_DELIVERY_WORKER_ID
+    databaseAccess: true
+    env:
+      MERCHANT_INVITE_TOKEN_KEY_RING_FILE: /run/secrets/invitation-token-keys/key-ring.json
+      MERCHANT_SETTINGS_INVITE_NOTIFIER_URL: ""
+      MERCHANT_SETTINGS_INVITE_NOTIFIER_BEARER_FILE: /run/secrets/notifier-bearer
+      MERCHANT_SETTINGS_INVITE_NOTIFIER_CA_FILE: /run/secrets/notifier-ca.pem
+      MERCHANT_INVITATION_DELIVERY_HEALTH_ADDRESS: ":9097"
+      MERCHANT_INVITATION_DELIVERY_POLL_INTERVAL: 1s
+      MERCHANT_INVITATION_DELIVERY_LEASE: 30s
+      MERCHANT_INVITATION_DELIVERY_BASE_BACKOFF: 5s
+      MERCHANT_INVITATION_DELIVERY_MAX_BACKOFF: 1h
+      MERCHANT_INVITATION_DELIVERY_MAX_ATTEMPTS: "8"
+      MERCHANT_INVITATION_DELIVERY_BATCH_SIZE: "50"
+    secretEnv:
+      - {name: DATABASE_URL, secretRef: {name: merchant-platform-merchant-invitation-delivery-worker, key: database-url}}
+    secretFiles:
+      - {path: /run/secrets/notifier-bearer, secretRef: {name: merchant-platform-invitation-notifier, key: bearer}}
+      - {path: /run/secrets/notifier-ca.pem, secretRef: {name: merchant-platform-invitation-notifier, key: ca.pem}}
+    secretDirectories:
+      - {path: /run/secrets/invitation-token-keys, secretRef: {name: merchant-platform-invitation-token-keys}}
+    service: {enabled: false, port: 9097, portName: health}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 500m, memory: 256Mi}}
+    pdb: {enabled: true, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 70}
+
+  financial-api:
+    enabled: false
+    replicas: 2
+    image: {repository: merchant-platform-financial-api, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    port: 8444
+    probeScheme: HTTPS
+    workerIDEnv: ""
+    databaseAccess: true
+    env: {FINANCIAL_LISTEN_ADDR: ":8444", FINANCIAL_TLS_CERT_FILE: /run/secrets/tls.crt, FINANCIAL_TLS_KEY_FILE: /run/secrets/tls.key, FINANCIAL_TLS_CLIENT_CA_FILE: /run/secrets/client-ca.pem, FINANCIAL_OPERATOR_ASSERTION_SECRET_FILE: /run/secrets/assertion-key, FINANCIAL_MONITOR_CLIENT_CERT_FILE: /run/secrets/monitor-client.crt, FINANCIAL_MONITOR_CLIENT_KEY_FILE: /run/secrets/monitor-client.key, FINANCIAL_MONITOR_CA_FILE: /run/secrets/tls-ca.pem, FINANCIAL_MONITOR_SERVER_NAME: financial-api.merchant.svc}
+    secretEnv:
+      - {name: FINANCIAL_DATABASE_URL, secretRef: {name: merchant-platform-financial-api, key: database-url}}
+    secretFiles:
+      - {path: /run/secrets/tls.crt, secretRef: {name: merchant-platform-financial-tls, key: tls.crt}}
+      - {path: /run/secrets/tls.key, secretRef: {name: merchant-platform-financial-tls, key: tls.key}}
+      - {path: /run/secrets/assertion-key, secretRef: {name: merchant-platform-financial-bridge, key: assertion-key}}
+      - {path: /run/secrets/client-ca.pem, secretRef: {name: merchant-platform-financial-client-ca, key: ca.crt}}
+      - {path: /run/secrets/monitor-client.crt, secretRef: {name: merchant-platform-financial-monitor-client, key: tls.crt}}
+      - {path: /run/secrets/monitor-client.key, secretRef: {name: merchant-platform-financial-monitor-client, key: tls.key}}
+      - {path: /run/secrets/tls-ca.pem, secretRef: {name: merchant-platform-financial-tls, key: ca.crt}}
+    secretDirectories: []
+    service: {enabled: true, port: 8444, portName: https}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+    pdb: {enabled: true, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 70}
+  financial-worker:
+    enabled: false
+    replicas: 2
+    image: {repository: merchant-platform-financial-worker, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    port: 9093
+    probeScheme: HTTP
+    workerIDEnv: ""
+    databaseAccess: true
+    env:
+      FINANCIAL_WORKER_HEALTH_ADDR: ":9093"
+      FINANCIAL_WORKER_ID: financial-worker
+      FINANCIAL_WORKER_TENANT_IDS: ""
+      FINANCIAL_BUILDER_URL: "https://builder.example.invalid"
+      FINANCIAL_SIGNER_URL: "https://signer.example.invalid"
+      FINANCIAL_BROADCASTER_URL: "https://broadcaster.example.invalid"
+      FINANCIAL_FINALITY_URL: "https://finality.example.invalid"
+      FINANCIAL_EVENT_SINK_URL: "https://events.example.invalid"
+      FINANCIAL_BUILDER_TOKEN_FILE: /run/secrets/builder-token
+      FINANCIAL_SIGNER_TOKEN_FILE: /run/secrets/signer-token
+      FINANCIAL_BROADCASTER_TOKEN_FILE: /run/secrets/broadcaster-token
+      FINANCIAL_FINALITY_TOKEN_FILE: /run/secrets/finality-token
+      FINANCIAL_EVENT_SINK_TOKEN_FILE: /run/secrets/event-sink-token
+    secretEnv:
+      - {name: FINANCIAL_DATABASE_URL, secretRef: {name: merchant-platform-financial-worker, key: database-url}}
+    secretFiles:
+      - {path: /run/secrets/builder-token, secretRef: {name: merchant-platform-financial-worker, key: builder-token}}
+      - {path: /run/secrets/signer-token, secretRef: {name: merchant-platform-financial-worker, key: signer-token}}
+      - {path: /run/secrets/broadcaster-token, secretRef: {name: merchant-platform-financial-worker, key: broadcaster-token}}
+      - {path: /run/secrets/finality-token, secretRef: {name: merchant-platform-financial-worker, key: finality-token}}
+      - {path: /run/secrets/event-sink-token, secretRef: {name: merchant-platform-financial-worker, key: event-sink-token}}
+    secretDirectories: []
+    service: {enabled: true, port: 9093, portName: health}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+    pdb: {enabled: true, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 10, targetCPUUtilizationPercentage: 70}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Example for ingress-nginx: nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+  # Production must also verify the private management CA/SNI at the controller.
+  managementAnnotations: {}
+  # Operator attestation that the chosen ingress validates backend CA and SNI.
+  managementTLSVerified: false
+  # Controller-specific request/connection limit annotations for capabilities.
+  publicCapabilityRateLimitAnnotations: {}
+  # Operator attestation that capability routes have edge rate limits.
+  publicCapabilityRateLimitVerified: false
+  publicHost: api.example.invalid
+  adminHost: admin.example.invalid
+  tls: []
+  coreAPIPaths:
+    - /v1/payment-intents
+    - /v1/payment-proofs
+    - /v1/assets
+    - /v1/events
+    - /v1/transfers
+    - /v1/quotes
+    - /v1/balances
+    - /v1/reconciliation
+    - /v1/reconciliation-reports
+    - /v1/operator
+
+networkPolicy:
+  enabled: true
+  dns:
+    namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+    podSelector: {matchLabels: {k8s-app: kube-dns}}
+  healthIngressFrom: []
+  edgeIngressFrom: []
+  databasePeers: []
+  databasePorts: [5432]
+
+platformOutbox:
+  # Set true only together with an admitted platform-outbox-publisher and the
+  # live destination evidence required by the release manifest.
+  claimExternalPublication: false
+
+observability:
+  prometheusRule:
+    enabled: false

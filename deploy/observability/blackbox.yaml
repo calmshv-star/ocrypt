@@ -1,0 +1,54 @@
+modules:
+  http_health:
+    prober: http
+    timeout: 3s
+    http:
+      method: GET
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200, 204]
+      fail_if_ssl: false
+      follow_redirects: false
+
+  https_platform_health:
+    prober: http
+    timeout: 3s
+    http:
+      method: GET
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200, 204]
+      fail_if_not_ssl: true
+      follow_redirects: false
+      tls_config:
+        insecure_skip_verify: false
+        ca_file: /run/secrets/platform-ca.pem
+
+  https_management_health:
+    prober: http
+    timeout: 3s
+    http:
+      method: GET
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200, 204]
+      fail_if_not_ssl: true
+      follow_redirects: false
+      tls_config:
+        insecure_skip_verify: false
+        ca_file: /run/secrets/management-ca.pem
+
+  https_financial_health:
+    prober: http
+    timeout: 3s
+    http:
+      method: GET
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200, 204]
+      fail_if_not_ssl: true
+      follow_redirects: false
+      tls_config:
+        insecure_skip_verify: false
+        ca_file: /run/secrets/financial-ca.pem
+        cert_file: /run/secrets/financial-monitor-client.crt
+        key_file: /run/secrets/financial-monitor-client.key
+        server_name: financial-api
+        min_version: TLS13
+        max_version: TLS13

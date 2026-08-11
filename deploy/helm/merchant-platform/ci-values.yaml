@@ -1,0 +1,116 @@
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  managementAnnotations:
+    nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+    nginx.ingress.kubernetes.io/proxy-ssl-verify: "on"
+    nginx.ingress.kubernetes.io/proxy-ssl-server-name: "on"
+    nginx.ingress.kubernetes.io/proxy-ssl-name: merchant-merchant-platform-management-api.merchant.svc
+    nginx.ingress.kubernetes.io/proxy-ssl-secret: merchant/merchant-platform-management-tls
+  publicCapabilityRateLimitAnnotations:
+    nginx.ingress.kubernetes.io/limit-rps: "30"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "2"
+  managementTLSVerified: true
+  publicCapabilityRateLimitVerified: true
+  tls:
+    - hosts: [api.example.invalid, admin.example.invalid]
+      secretName: merchant-platform-edge-tls
+
+networkPolicy:
+  edgeIngressFrom:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}
+      podSelector: {matchLabels: {app.kubernetes.io/name: ingress-nginx}}
+  databasePeers:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: database}}
+      podSelector: {matchLabels: {app.kubernetes.io/name: postgresql}}
+
+workloads:
+  api:
+    network:
+      httpsEgressPeers:
+        - &httpsPeer
+          namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: egress-system}}
+          podSelector: {matchLabels: {app.kubernetes.io/name: egress-gateway}}
+  admin-api:
+    env:
+      MANAGEMENT_INTERNAL_URL: https://merchant-merchant-platform-management-api.merchant.svc:8445
+      PLATFORM_ADMIN_INTERNAL_URL: https://merchant-merchant-platform-platform-admin-api.merchant.svc:8446
+      MERCHANT_SETTINGS_INTERNAL_URL: https://merchant-merchant-platform-merchant-settings-api.merchant.svc:8447
+      MERCHANT_SETTINGS_INTERNAL_SERVER_NAME: merchant-merchant-platform-merchant-settings-api.merchant.svc
+      FINANCIAL_INTERNAL_URL: https://merchant-merchant-platform-financial-api.merchant.svc:8444
+      FINANCIAL_INTERNAL_SERVER_NAME: merchant-merchant-platform-financial-api.merchant.svc
+    network:
+      httpsEgressPeers: [*httpsPeer]
+  management-api:
+    network: {httpsEgressPeers: [*httpsPeer]}
+  callback-worker:
+    network: {httpsEgressPeers: [*httpsPeer]}
+  outbox-worker:
+    enabled: true
+    network:
+      ingressFrom: []
+      httpsEgressPeers: []
+      internalEgress:
+        - to:
+            - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: jetstream-system}}
+              podSelector: {matchLabels: {app.kubernetes.io/name: merchant-jetstream}}
+          ports: [{protocol: TCP, port: 4222}]
+  resolution-worker:
+    enabled: true
+    network: {httpsEgressPeers: [*httpsPeer]}
+  proof-worker:
+    enabled: true
+    network: {httpsEgressPeers: [*httpsPeer]}
+  scanner:
+    enabled: true
+    network: {httpsEgressPeers: [*httpsPeer]}
+    env:
+      SCANNER_HEALTH_ADDRESS: ":9091"
+      SCANNER_PLATFORM_RUNTIME_JSON: '{"chain":"eip155:1","finality":"eip155:1","rpc_providers":["rpc/primary","rpc/secondary"],"assets":["eth-ethereum"],"maintenance":[]}'
+      SCANNER_SECRET_DIR: /run/scanner-secrets
+  provider-health-worker:
+    enabled: true
+    network: {httpsEgressPeers: [*httpsPeer]}
+  platform-outbox-publisher:
+    enabled: true
+    env:
+      PLATFORM_OUTBOX_DESTINATION_URL: https://events.example.invalid/v1/platform-admin/events
+    network:
+      httpsEgressPeers:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: platform-event-destination}}
+          podSelector: {matchLabels: {app.kubernetes.io/name: platform-event-destination}}
+  rate-worker:
+    enabled: true
+    network: {httpsEgressPeers: [*httpsPeer]}
+    env:
+      RATE_HEALTH_ADDRESS: ":9092"
+      RATE_WORKER_ID: 00000000-0000-7000-8000-000000000002
+      RATE_TARGETS_JSON: '[{"policy_key":"ci/rates"}]'
+      RATE_SECRET_DIR: /run/rate-secrets
+  reconciliation-worker:
+    network: {httpsEgressPeers: [*httpsPeer]}
+  retention-worker:
+    enabled: true
+    network: {httpsEgressPeers: [*httpsPeer]}
+  retention-control-scheduler:
+    enabled: true
+  merchant-invitation-delivery-worker:
+    enabled: true
+    env:
+      MERCHANT_SETTINGS_INVITE_NOTIFIER_URL: https://notifier.example.invalid/v1/invitations
+    network: {httpsEgressPeers: [*httpsPeer]}
+  financial-api:
+    enabled: true
+    env:
+      FINANCIAL_MONITOR_SERVER_NAME: merchant-merchant-platform-financial-api.merchant.svc
+    network:
+      ingressFrom:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: financial-operators}}
+          podSelector: {matchLabels: {app.kubernetes.io/name: financial-operator-gateway}}
+  financial-worker:
+    enabled: true
+    network: {httpsEgressPeers: [*httpsPeer]}
+
+platformOutbox:
+  claimExternalPublication: true

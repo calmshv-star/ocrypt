@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://merchant-platform.invalid/contracts/migration-manifest-v1.schema.json",
+  "title": "Signed shadow migration manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifest", "signatures"],
+  "properties": {
+    "manifest": { "$ref": "#/$defs/manifest" },
+    "signatures": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/signature" }
+    }
+  },
+  "$defs": {
+    "uuid": { "type": "string", "format": "uuid" },
+    "reference": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,254}$" },
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key_id", "signature"],
+      "properties": {
+        "key_id": { "$ref": "#/$defs/reference" },
+        "signature": { "type": "string", "pattern": "^[A-Za-z0-9_-]{86}$" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["system_id", "build_id", "schema_version", "exported_at", "window_start", "window_end"],
+      "properties": {
+        "system_id": { "$ref": "#/$defs/reference" },
+        "build_id": { "$ref": "#/$defs/reference" },
+        "schema_version": { "$ref": "#/$defs/reference" },
+        "exported_at": { "type": "string", "format": "date-time" },
+        "window_start": { "type": "string", "format": "date-time" },
+        "window_end": { "type": "string", "format": "date-time" }
+      }
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "digest"],
+      "properties": {
+        "source_id": { "$ref": "#/$defs/reference" },
+        "digest": { "$ref": "#/$defs/digest" },
+        "data": { "type": "object", "maxProperties": 256 }
+      }
+    },
+    "items": { "type": "array", "maxItems": 500000, "items": { "$ref": "#/$defs/item" } },
+    "inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "merchants", "configurations", "assets", "chains", "rpc_providers", "wallets",
+        "open_orders", "paid_orders", "expired_orders", "amount_reservations", "incoming_transfers",
+        "unmatched_transfers", "callback_backlog", "scanner_cursors", "provider_orders",
+        "on_chain_balance_observations"
+      ],
+      "properties": {
+        "merchants": { "$ref": "#/$defs/items" },
+        "configurations": { "$ref": "#/$defs/items" },
+        "assets": { "$ref": "#/$defs/items" },
+        "chains": { "$ref": "#/$defs/items" },
+        "rpc_providers": { "$ref": "#/$defs/items" },
+        "wallets": { "$ref": "#/$defs/items" },
+        "open_orders": { "$ref": "#/$defs/items" },
+        "paid_orders": { "$ref": "#/$defs/items" },
+        "expired_orders": { "$ref": "#/$defs/items" },
+        "amount_reservations": { "$ref": "#/$defs/items" },
+        "incoming_transfers": { "$ref": "#/$defs/items" },
+        "unmatched_transfers": { "$ref": "#/$defs/items" },
+        "callback_backlog": { "$ref": "#/$defs/items" },
+        "scanner_cursors": { "$ref": "#/$defs/items" },
+        "provider_orders": { "$ref": "#/$defs/items" },
+        "on_chain_balance_observations": { "$ref": "#/$defs/items" }
+      }
+    },
+    "canary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["percentage", "merchant_ids", "asset_ids"],
+      "properties": {
+        "percentage": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "merchant_ids": { "type": "array", "minItems": 1, "maxItems": 10000, "uniqueItems": true, "items": { "$ref": "#/$defs/uuid" } },
+        "asset_ids": { "type": "array", "minItems": 1, "maxItems": 1000, "uniqueItems": true, "items": { "$ref": "#/$defs/reference" } }
+      }
+    },
+    "cutover": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["balances_digest", "open_orders_digest", "paid_orders_digest", "unmatched_digest", "callback_backlog_digest", "scanner_cursors_digest", "rollback_deadline"],
+      "properties": {
+        "balances_digest": { "$ref": "#/$defs/digest" },
+        "open_orders_digest": { "$ref": "#/$defs/digest" },
+        "paid_orders_digest": { "$ref": "#/$defs/digest" },
+        "unmatched_digest": { "$ref": "#/$defs/digest" },
+        "callback_backlog_digest": { "$ref": "#/$defs/digest" },
+        "scanner_cursors_digest": { "$ref": "#/$defs/digest" },
+        "rollback_deadline": { "type": "string", "format": "date-time" }
+      }
+    },
+    "decommission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backlog_count", "archive_digest", "restore_test_reference", "key_revocation_reference"],
+      "properties": {
+        "backlog_count": { "const": 0 },
+        "backlog_exception_ref": { "$ref": "#/$defs/reference" },
+        "archive_digest": { "$ref": "#/$defs/digest" },
+        "restore_test_reference": { "$ref": "#/$defs/reference" },
+        "key_revocation_reference": { "$ref": "#/$defs/reference" }
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "manifest_id", "migration_id", "tenant_id", "kind", "profile", "source", "unexplained_diff_count", "warnings"],
+      "properties": {
+        "schema_version": { "const": "migration-manifest-v1" },
+        "manifest_id": { "$ref": "#/$defs/uuid" },
+        "migration_id": { "$ref": "#/$defs/uuid" },
+        "tenant_id": { "$ref": "#/$defs/uuid" },
+        "kind": { "enum": ["inventory", "dry_run", "canary", "cutover", "decommission"] },
+        "profile": { "enum": ["generic", "wallet_ledger", "json_md5", "form_md5"] },
+        "source": { "$ref": "#/$defs/source" },
+        "inventory": { "$ref": "#/$defs/inventory" },
+        "canary": { "$ref": "#/$defs/canary" },
+        "cutover": { "$ref": "#/$defs/cutover" },
+        "decommission": { "$ref": "#/$defs/decommission" },
+        "unexplained_diff_count": { "type": "integer", "minimum": 0 },
+        "warnings": { "type": "array", "maxItems": 1000, "items": { "type": "string", "maxLength": 1000 } }
+      },
+      "allOf": [
+        { "if": { "properties": { "kind": { "enum": ["inventory", "dry_run"] } } }, "then": { "required": ["inventory"], "not": { "anyOf": [{ "required": ["canary"] }, { "required": ["cutover"] }, { "required": ["decommission"] }] } } },
+        { "if": { "properties": { "kind": { "const": "canary" } } }, "then": { "required": ["canary"], "not": { "anyOf": [{ "required": ["inventory"] }, { "required": ["cutover"] }, { "required": ["decommission"] }] } } },
+        { "if": { "properties": { "kind": { "const": "cutover" } } }, "then": { "required": ["cutover"], "not": { "anyOf": [{ "required": ["inventory"] }, { "required": ["canary"] }, { "required": ["decommission"] }] } } },
+        { "if": { "properties": { "kind": { "const": "decommission" } } }, "then": { "required": ["decommission"], "not": { "anyOf": [{ "required": ["inventory"] }, { "required": ["canary"] }, { "required": ["cutover"] }] } } }
+      ]
+    }
+  }
+}

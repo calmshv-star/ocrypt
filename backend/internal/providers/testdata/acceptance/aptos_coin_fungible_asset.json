@@ -1,0 +1,7 @@
+{
+  "ledger":{"chain_id":1,"block_height":"1"},
+  "genesis":{"type":"genesis_transaction","hash":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","version":"0","success":true,"timestamp":"1","sender":"0x0","payload":{"function":"","type_arguments":[],"arguments":[]}},
+  "parent":{"block_height":"0","block_hash":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","block_timestamp":"1000000","transactions":[]},
+  "block":{"block_height":"1","block_hash":"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","block_timestamp":"100000000","transactions":[{"type":"user_transaction","hash":"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","version":"7","success":true,"timestamp":"100000000","sender":"0x1","payload":{"function":"0x1::primary_fungible_store::transfer","type_arguments":[],"arguments":["0x44","0x2","20"]}},{"type":"user_transaction","hash":"0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","version":"8","success":true,"timestamp":"100000000","sender":"0x1","payload":{"function":"0x1::coin::transfer","type_arguments":["0x1::aptos_coin::AptosCoin"],"arguments":["0x2","10"]}}]},
+  "expected_kinds": ["aptos_fungible_asset_transfer","aptos_native_transfer"]
+}

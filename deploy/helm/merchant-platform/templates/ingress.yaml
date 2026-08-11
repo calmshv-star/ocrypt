@@ -1,0 +1,109 @@
+{{- if .Values.ingress.enabled }}
+{{- $fullname := include "merchant.fullname" . -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-merchant-api
+  labels:
+    {{- include "merchant.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.publicHost | quote }}
+      http:
+        paths:
+          {{- range .Values.ingress.coreAPIPaths }}
+          - path: {{ . | quote }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-api
+                port: {name: http}
+          {{- end }}
+---
+# Separate resource: management speaks verified TLS to the ingress controller,
+# while the core API backend is HTTP. Configure the controller-specific HTTPS
+# upstream annotation in managementAnnotations.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-public-capabilities
+  labels:
+    {{- include "merchant.labels" . | nindent 4 }}
+  annotations:
+    merchant.platform/route-owner: management-api
+    {{- with .Values.ingress.managementAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.ingress.publicCapabilityRateLimitAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.publicHost | quote }}
+      http:
+        paths:
+          - path: /v1/public/payment-links
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-management-api
+                port:
+                  name: https
+          - path: /v1/payment-links
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-management-api
+                port:
+                  name: https
+          - path: /v1/checkout-sessions
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-management-api
+                port:
+                  name: https
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-admin-bff
+  labels:
+    {{- include "merchant.labels" . | nindent 4 }}
+  annotations:
+    merchant.platform/route-owner: admin-api
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.adminHost | quote }}
+      http:
+        paths:
+          - path: /admin/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-admin-api
+                port:
+                  name: http
+{{- end }}

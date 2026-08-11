@@ -1,0 +1,177 @@
+name: ocrypt-standalone
+
+x-runtime: &runtime
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: ["/tmp:rw,noexec,nosuid,size=16m"]
+
+services:
+  api:
+    <<: *runtime
+    image: ocrypt-api:20260811-receipts
+    container_name: ocrypt-api
+    environment:
+      APP_ENV: production
+      DATABASE_URL: ${API_DATABASE_URL:?}
+      API_CREDENTIAL_ENVELOPE_KEY: ${API_CREDENTIAL_ENVELOPE_KEY:?}
+      HTTP_ADDRESS: ":8080"
+      PUBLIC_BASE_URL: https://api.pay.example.com
+      RATE_SOURCE_GATEWAY_ENABLED: "true"
+    ports: ["127.0.0.1:8084:8080"]
+    networks: [data, core]
+
+  core-proxy:
+    <<: *runtime
+    image: nginx:1.29-alpine
+    container_name: ocrypt-core-proxy
+    user: "101:101"
+    entrypoint: ["nginx", "-g", "daemon off;"]
+    depends_on: [api]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=700"
+    volumes:
+      - /opt/ocrypt/config/core-proxy.conf:/etc/nginx/nginx.conf:ro
+      - /opt/ocrypt/tls/core-server.crt:/run/tls/server.crt:ro
+      - /opt/ocrypt/tls/core-server.key:/run/tls/server.key:ro
+      - /opt/ocrypt/tls/ca.crt:/run/tls/ca.crt:ro
+    networks:
+      core:
+        aliases: [core.ocrypt.internal]
+
+  management-api:
+    <<: *runtime
+    image: ocrypt-management-api:20260811-receipts
+    container_name: ocrypt-management-api
+    environment:
+      DATABASE_URL: ${MANAGEMENT_DATABASE_URL:?}
+      MANAGEMENT_HTTP_ADDRESS: ":8445"
+      MANAGEMENT_PUBLIC_BASE_URL: https://pay.example.com
+      MANAGEMENT_TLS_CERT_FILE: /run/secrets/management.crt
+      MANAGEMENT_TLS_KEY_FILE: /run/secrets/management.key
+      WEBHOOK_ENVELOPE_KEY_FILE: /run/secrets/webhook-envelope-key
+      API_CREDENTIAL_ENVELOPE_KEY_FILE: /run/secrets/credential-envelope-key
+      MANAGEMENT_RESPONSE_KEY_FILE: /run/secrets/response-key
+      MANAGEMENT_ADMIN_ASSERTION_KEY_FILE: /run/secrets/assertion-key
+      RECEIPT_AI_API_KEY_FILE: /run/secrets/receipt-ai-api-key
+    volumes:
+      - /opt/ocrypt/tls/management.crt:/run/secrets/management.crt:ro
+      - /opt/ocrypt/tls/management.key:/run/secrets/management.key:ro
+      - /opt/ocrypt/secrets/credential-envelope-key:/run/secrets/credential-envelope-key:ro
+      - /opt/ocrypt/secrets/webhook-envelope-key:/run/secrets/webhook-envelope-key:ro
+      - /opt/ocrypt/secrets/management-response-key:/run/secrets/response-key:ro
+      - /opt/ocrypt/secrets/management-assertion-key:/run/secrets/assertion-key:ro
+      - /opt/ocrypt/secrets/polza-api-key:/run/secrets/receipt-ai-api-key:ro
+    ports: ["127.0.0.1:8445:8445"]
+    networks: [data]
+
+  legacy-gateway:
+    <<: *runtime
+    image: ocrypt-legacy-gateway:20260811
+    container_name: ocrypt-legacy
+    depends_on: [core-proxy]
+    environment:
+      APP_ENV: production
+      LEGACY_COMPAT_ENABLED: "true"
+      LEGACY_DATABASE_URL: ${LEGACY_DATABASE_URL:?}
+      LEGACY_HTTP_ADDRESS: ":8082"
+      LEGACY_HEALTH_ADDRESS: ":9101"
+      LEGACY_PUBLIC_BASE_URL: https://pay.example.com
+      LEGACY_CHECKOUT_BASE_URL: https://pay.example.com
+      LEGACY_SECRET_DIR: /run/secrets/legacy
+      LEGACY_CORE_URL: https://core.ocrypt.internal:8443
+      LEGACY_CORE_CA_FILE: /run/tls/ca.crt
+      LEGACY_CORE_SERVER_NAME: core.ocrypt.internal
+      LEGACY_CORE_CLIENT_CERT_FILE: /run/tls/client.crt
+      LEGACY_CORE_CLIENT_KEY_FILE: /run/tls/client.key
+      LEGACY_WORKER_ID: ocrypt-legacy-1
+      LEGACY_SUNSET_AT: "2027-02-01T00:00:00Z"
+      LEGACY_POLL_INTERVAL: 2s
+      LEGACY_CALLBACK_LEASE: 30s
+      LEGACY_BATCH_SIZE: "50"
+    volumes:
+      - /opt/ocrypt/secrets/legacy-compat:/run/secrets/legacy:ro
+      - /opt/ocrypt/tls/ca.crt:/run/tls/ca.crt:ro
+      - /opt/ocrypt/tls/legacy-client.crt:/run/tls/client.crt:ro
+      - /opt/ocrypt/tls/legacy-client.key:/run/tls/client.key:ro
+    ports:
+      - "127.0.0.1:8283:8082"
+      - "127.0.0.1:9101:9101"
+    networks: [data, core, merchant]
+
+  plan-worker:
+    <<: *runtime
+    image: ocrypt-worker:20260811-receipts
+    container_name: ocrypt-plan-worker
+    environment:
+      DATABASE_URL: ${PLAN_DATABASE_URL:?}
+      WORKER_ID: ocrypt-plan-1
+      WORKER_ROLES: plans
+      WORKER_HEALTH_ADDRESS: ":9090"
+    networks: [data]
+
+  settlement-worker:
+    <<: *runtime
+    image: ocrypt-worker:20260811-receipts
+    container_name: ocrypt-settlement-worker
+    environment:
+      DATABASE_URL: ${SETTLEMENT_DATABASE_URL:?}
+      WORKER_ID: ocrypt-settlement-1
+      WORKER_ROLES: settlements
+      WORKER_HEALTH_ADDRESS: ":9090"
+    networks: [data]
+
+  matching-worker:
+    <<: *runtime
+    image: ocrypt-worker:20260811-receipts
+    container_name: ocrypt-matching-worker
+    environment:
+      DATABASE_URL: ${MATCHING_DATABASE_URL:?}
+      WORKER_ID: ocrypt-matching-1
+      WORKER_ROLES: matching
+      WORKER_HEALTH_ADDRESS: ":9090"
+    networks: [data]
+
+  rate-worker:
+    <<: *runtime
+    image: ocrypt-rate-worker:20260811-receipts
+    container_name: ocrypt-rate-worker
+    environment:
+      DATABASE_URL: ${RATE_DATABASE_URL:?}
+      RATE_WORKER_ID: 0198a100-0000-7000-8000-000000000050
+      RATE_TARGETS_JSON: >-
+        [{"policy_key":"rate-eth-ethereum-rub"},{"policy_key":"rate-sol-solana-rub"},{"policy_key":"rate-ton-ton-rub"},{"policy_key":"rate-trx-tron-rub"},{"policy_key":"rate-usdt-tron-rub"}]
+      RATE_POLL_INTERVAL: 15s
+      RATE_LEASE_DURATION: 30s
+      RATE_MAX_READY_AGE: 2m
+      RATE_MAX_ATTEMPTS: "20"
+      RATE_HEALTH_ADDRESS: ":9092"
+    networks: [data, edge]
+
+  checkout:
+    <<: *runtime
+    image: nginx:1.29-alpine
+    container_name: ocrypt-checkout
+    user: "101:101"
+    entrypoint: ["nginx", "-g", "daemon off;"]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=700"
+    volumes:
+      - /opt/ocrypt/web/checkout:/usr/share/nginx/html:ro
+      - /opt/ocrypt/config/checkout-nginx.conf:/etc/nginx/nginx.conf:ro
+    ports: ["127.0.0.1:4174:8080"]
+    networks: [edge]
+
+networks:
+  data:
+    external: true
+    name: ocrypt-data
+  merchant:
+    external: true
+    name: ocrypt-integrations
+  core:
+    name: ocrypt-core
+    internal: true
+  edge:
+    name: ocrypt-edge

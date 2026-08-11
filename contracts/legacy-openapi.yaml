@@ -1,0 +1,218 @@
+openapi: 3.1.0
+info:
+  title: Merchant Platform Legacy JSON-MD5/Form-MD5 Compatibility API
+  version: 2026-08-11
+  description: |
+    Temporary, disabled-by-default compatibility surface. It translates legacy
+    creates into ordinary core payment intents/routes, reads status from core,
+    and translates canonical settled events into frozen legacy callbacks. It
+    cannot mark a payment paid or write a ledger. Every response is deprecated,
+    no-store, and carries the configured Sunset header.
+servers:
+  - url: https://legacy.example.invalid
+paths:
+  /legacy/json-md5/v1/orders:
+    post:
+      deprecated: true
+      summary: Create a JSON-MD5-compatible transaction
+      parameters: [{ $ref: '#/components/parameters/Deprecation' }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: '#/components/schemas/JSONMD5Create' }
+          application/json:
+            schema: { $ref: '#/components/schemas/JSONMD5Create' }
+      responses:
+        '200':
+          description: Core intent and on-chain route created or replayed.
+          headers: { Sunset: { $ref: '#/components/headers/Sunset' }, Deprecation: { $ref: '#/components/headers/Deprecation' }, Cache-Control: { $ref: '#/components/headers/NoStore' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/CreateEnvelope' } } }
+        '400': { $ref: '#/components/responses/LegacyError' }
+        '401': { $ref: '#/components/responses/LegacyError' }
+        '409': { $ref: '#/components/responses/LegacyError' }
+        '503': { $ref: '#/components/responses/LegacyError' }
+  /legacy/form-md5/v1/orders:
+    get:
+      deprecated: true
+      summary: Create a Form-MD5-compatible transaction using query parameters
+      parameters:
+        - { $ref: '#/components/parameters/PID' }
+        - { $ref: '#/components/parameters/Money' }
+        - { $ref: '#/components/parameters/OutTradeNo' }
+        - { $ref: '#/components/parameters/NotifyURL' }
+        - { $ref: '#/components/parameters/ReturnURL' }
+        - { $ref: '#/components/parameters/Name' }
+        - { $ref: '#/components/parameters/Type' }
+        - { $ref: '#/components/parameters/Sign' }
+        - { $ref: '#/components/parameters/SignType' }
+      responses:
+        '302':
+          description: Redirect to the legacy checkout compatibility hop.
+          headers: { Sunset: { $ref: '#/components/headers/Sunset' }, Deprecation: { $ref: '#/components/headers/Deprecation' }, Cache-Control: { $ref: '#/components/headers/NoStore' } }
+        '400': { $ref: '#/components/responses/LegacyError' }
+        '401': { $ref: '#/components/responses/LegacyError' }
+        '409': { $ref: '#/components/responses/LegacyError' }
+        '503': { $ref: '#/components/responses/LegacyError' }
+    post:
+      deprecated: true
+      summary: Create a Form-MD5-compatible transaction using a form body
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: '#/components/schemas/FormMD5Create' }
+      responses:
+        '302':
+          description: Redirect to the legacy checkout compatibility hop.
+          headers: { Sunset: { $ref: '#/components/headers/Sunset' }, Deprecation: { $ref: '#/components/headers/Deprecation' }, Cache-Control: { $ref: '#/components/headers/NoStore' } }
+        '400': { $ref: '#/components/responses/LegacyError' }
+        '401': { $ref: '#/components/responses/LegacyError' }
+        '409': { $ref: '#/components/responses/LegacyError' }
+        '503': { $ref: '#/components/responses/LegacyError' }
+  /pay/check-status/{trade_id}:
+    get:
+      deprecated: true
+      summary: Read the projected legacy status
+      description: Possession of the 128-bit trade_id is the historical capability. This endpoint is read-only, uniformly rate-limited, and returns no order or customer metadata.
+      parameters:
+        - name: trade_id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9_-]{22}$' }
+      responses:
+        '200':
+          description: Minimal status projection (1 pending, 2 settled, 3 expired/cancelled).
+          headers: { Sunset: { $ref: '#/components/headers/Sunset' }, Deprecation: { $ref: '#/components/headers/Deprecation' }, Cache-Control: { $ref: '#/components/headers/NoStore' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/StatusEnvelope' } } }
+        '404':
+          description: Uniform response for malformed, missing, rate-limited, or unsafe core states.
+          headers: { Sunset: { $ref: '#/components/headers/Sunset' }, Deprecation: { $ref: '#/components/headers/Deprecation' }, Cache-Control: { $ref: '#/components/headers/NoStore' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+  /pay/checkout-counter/{trade_id}:
+    get:
+      deprecated: true
+      summary: Exchange the opaque legacy capability for the core checkout URL
+      description: Returns only a redirect and never renders or exposes order/customer metadata.
+      parameters:
+        - name: trade_id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9_-]{22}$' }
+      responses:
+        '302':
+          description: Redirect to the core checkout token URL.
+          headers: { Sunset: { $ref: '#/components/headers/Sunset' }, Deprecation: { $ref: '#/components/headers/Deprecation' }, Cache-Control: { $ref: '#/components/headers/NoStore' } }
+        '404':
+          description: Uniform response for malformed, missing, rate-limited, or unavailable capabilities.
+          headers: { Sunset: { $ref: '#/components/headers/Sunset' }, Deprecation: { $ref: '#/components/headers/Deprecation' }, Cache-Control: { $ref: '#/components/headers/NoStore' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+components:
+  parameters:
+    Deprecation: { name: Deprecation, in: header, required: false, schema: { type: string }, deprecated: true }
+    PID: { name: pid, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+    Money: { name: money, in: query, required: true, schema: { type: string, pattern: '^[0-9]+([.][0-9]+)?$' } }
+    OutTradeNo: { name: out_trade_no, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+    NotifyURL: { name: notify_url, in: query, required: true, schema: { type: string, format: uri, pattern: '^https://' } }
+    ReturnURL: { name: return_url, in: query, required: false, schema: { type: string, format: uri, pattern: '^https://' } }
+    Name: { name: name, in: query, required: false, schema: { type: string, maxLength: 2048 } }
+    Type: { name: type, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+    Sign: { name: sign, in: query, required: true, schema: { type: string, pattern: '^[0-9a-f]{32}$' } }
+    SignType: { name: sign_type, in: query, required: false, schema: { type: string, const: MD5 } }
+  headers:
+    Sunset: { description: RFC 7231 timestamp after which the adapter refuses production traffic., schema: { type: string } }
+    Deprecation: { description: Always true., schema: { type: string, const: 'true' } }
+    NoStore: { description: Always no-store., schema: { type: string, const: no-store } }
+  responses:
+    LegacyError:
+      description: Generic legacy boundary error; secrets and core details are never returned.
+      headers: { Sunset: { $ref: '#/components/headers/Sunset' }, Deprecation: { $ref: '#/components/headers/Deprecation' }, Cache-Control: { $ref: '#/components/headers/NoStore' } }
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+  schemas:
+    JSONMD5Create:
+      type: object
+      additionalProperties: false
+      required: [pid, order_id, currency, token, network, amount, notify_url, signature]
+      properties:
+        pid: { type: string, minLength: 1, maxLength: 128 }
+        order_id: { type: string, minLength: 1, maxLength: 128 }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        token: { type: string, minLength: 1, maxLength: 64 }
+        network: { type: string, minLength: 1, maxLength: 128 }
+        amount: { oneOf: [{ type: string, pattern: '^[0-9]+([.][0-9]+)?$' }, { type: number, exclusiveMinimum: 0 }] }
+        notify_url: { type: string, format: uri, pattern: '^https://' }
+        redirect_url: { type: string, format: uri, pattern: '^https://' }
+        name: { type: string, maxLength: 2048 }
+        payment_type: { type: string }
+        signature: { type: string, pattern: '^[0-9a-f]{32}$' }
+    FormMD5Create:
+      type: object
+      additionalProperties: false
+      required: [pid, money, out_trade_no, notify_url, type, sign]
+      properties:
+        pid: { type: string }
+        money: { type: string, pattern: '^[0-9]+([.][0-9]+)?$' }
+        out_trade_no: { type: string }
+        notify_url: { type: string, pattern: '^https://' }
+        return_url: { type: string, pattern: '^https://' }
+        name: { type: string }
+        type: { type: string }
+        token: { type: string }
+        network: { type: string }
+        currency: { type: string }
+        sign: { type: string, pattern: '^[0-9a-f]{32}$' }
+        sign_type: { type: string, const: MD5 }
+    CreateEnvelope:
+      type: object
+      additionalProperties: false
+      required: [status_code, message, data]
+      properties:
+        status_code: { type: integer, const: 200 }
+        message: { type: string, const: success }
+        data:
+          type: object
+          additionalProperties: false
+          required: [trade_id, order_id, amount, currency, actual_amount, receive_address, token, network, status, expiration_time, payment_url]
+          properties:
+            trade_id: { type: string, pattern: '^[A-Za-z0-9_-]{22}$' }
+            order_id: { type: string }
+            amount: { type: number }
+            currency: { type: string }
+            actual_amount: { type: number }
+            receive_address: { type: string }
+            token: { type: string }
+            network: { type: string }
+            status: { type: integer, const: 1 }
+            expiration_time: { type: integer, format: int64 }
+            payment_url: { type: string, format: uri }
+    StatusEnvelope:
+      type: object
+      additionalProperties: false
+      required: [status_code, message, data]
+      properties:
+        status_code: { type: integer, const: 200 }
+        message: { type: string, const: success }
+        data:
+          type: object
+          additionalProperties: false
+          required: [trade_id, status]
+          properties:
+            trade_id: { type: string }
+            status: { type: integer, enum: [1, 2, 3] }
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [status_code, message]
+      properties:
+        status_code: { type: integer }
+        message: { type: string }
+x-legacy-callbacks:
+  json_md5:
+    method: POST
+    contentType: application/json
+    acknowledgement: exact trimmed lowercase ok or success
+    fields: [pid, trade_id, order_id, amount, actual_amount, receive_address, token, block_transaction_id, signature, status]
+  form_md5:
+    method: GET
+    acknowledgement: exact trimmed lowercase ok or success
+    fields: [pid, trade_no, out_trade_no, type, name, money, trade_status, sign, sign_type]

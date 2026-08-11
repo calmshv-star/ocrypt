@@ -1,0 +1,96 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: merchant-platform-baseline
+spec:
+  groups:
+    - name: merchant-platform.availability
+      rules:
+        - alert: MerchantPlatformDeploymentUnavailable
+          expr: kube_deployment_status_replicas_unavailable{deployment=~".*-(api|management-api|admin-api|platform-admin-api|platform-outbox-publisher|financial-api|financial-worker|rate-worker|reconciliation-worker|merchant-settings-api|merchant-session-revocation-worker|merchant-invitation-delivery-worker|legacy-gateway|settlement-worker|matching-worker|callback-worker|outbox-worker|resolution-worker|proof-worker|plan-worker|scanner|provider-health-worker)"} > 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Merchant Platform workload has unavailable replicas
+            runbook: docs/runbooks/en/service-unavailable.md
+        - alert: MerchantPlatformCrashLoop
+          expr: increase(kube_pod_container_status_restarts_total{pod=~".*-(api|management-api|admin-api|platform-admin-api|platform-outbox-publisher|financial-api|financial-worker|rate-worker|reconciliation-worker|merchant-settings-api|merchant-session-revocation-worker|merchant-invitation-delivery-worker|legacy-gateway|settlement-worker|matching-worker|callback-worker|outbox-worker|resolution-worker|proof-worker|plan-worker|scanner|provider-health-worker)-.*"}[15m]) > 3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Merchant Platform container is repeatedly restarting
+            runbook: docs/runbooks/en/service-unavailable.md
+        - alert: MerchantPlatformHealthProbeFailed
+          expr: probe_success{job="blackbox-health"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: A Merchant Platform health endpoint is unavailable
+            runbook: docs/runbooks/en/service-unavailable.md
+        - alert: MerchantPlatformRateOrScannerStale
+          expr: probe_success{job="blackbox-health",instance=~"http://(rate-worker:9092|scanner:9091)/readyz"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Rate admission or chain scanning is stale; new quotes must fail closed
+            runbook: docs/runbooks/en/service-unavailable.md
+        - alert: MerchantProviderHealthNotReady
+          expr: probe_success{job="blackbox-health",instance="http://provider-health-worker:9100/readyz"} == 0 or merchant_provider_admissible_peer_groups{service="provider-health-worker"} < 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Provider health has no current independent peer group; scanner admission must fail closed
+            runbook: docs/en/provider-operations.md
+        - alert: MerchantProviderCircuitFailureBudgetBurn
+          expr: sum(rate(merchant_provider_probes_total{service="provider-health-worker",outcome="failure"}[10m])) / clamp_min(sum(rate(merchant_provider_probes_total{service="provider-health-worker"}[10m])), 0.001) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Provider probe failed-result ratio exceeds five percent
+            runbook: docs/en/provider-operations.md
+        - alert: MerchantSettingsRevocationNotReady
+          expr: probe_success{job="blackbox-health",instance=~"http://merchant-(settings-api:9095|session-revocation-worker:9096|invitation-delivery-worker:9097)/readyz"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: Merchant settings or session revocation is not ready
+            runbook: docs/runbooks/en/service-unavailable.md
+        - alert: MerchantOutboxJetStreamDeliveryStalled
+          expr: time() - max(merchant_worker_last_success_timestamp_seconds{service="worker",role="outbox"}) > 120
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: PostgreSQL outbox delivery through JetStream has no successful cycle
+            runbook: docs/en/event-delivery.md
+        - alert: MerchantOutboxJetStreamFailureBudgetBurn
+          expr: sum(rate(merchant_worker_cycles_total{service="worker",role="outbox",outcome="failure"}[10m])) / clamp_min(sum(rate(merchant_worker_cycles_total{service="worker",role="outbox"}[10m])), 0.001) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: JetStream outbox failed-cycle ratio exceeds five percent
+            runbook: docs/en/event-delivery.md
+        - alert: MerchantLegacyCompatibilityWorkerStalled
+          expr: time() - legacy_worker_last_success_timestamp_seconds > 60
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Legacy recovery/callback worker has no successful cycle
+            runbook: deploy/legacy-compat/README.md
+        - alert: MerchantLegacyCallbackFailureBudgetBurn
+          expr: increase(legacy_callbacks_failed_total[15m]) > 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Legacy callback delivery failures exceed the temporary compatibility budget
+            runbook: deploy/legacy-compat/README.md

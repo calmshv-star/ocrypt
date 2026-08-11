@@ -1,0 +1,10 @@
+{
+  "head":{"blockID":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","block_header":{"raw_data":{"number":1,"parentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","timestamp":100000}}},
+  "genesis":{"blockID":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","block_header":{"raw_data":{"number":0,"parentHash":"0000000000000000000000000000000000000000000000000000000000000000","timestamp":1000}}},
+  "block":{"blockID":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","block_header":{"raw_data":{"number":1,"parentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","timestamp":100000}},"transactions":[{"txID":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","raw_data":{"contract":[{"type":"TriggerSmartContract","parameter":{"value":{"owner_address":"411111111111111111111111111111111111111111","contract_address":"415555555555555555555555555555555555555555"}}}]},"ret":[{"contractRet":"SUCCESS"}]}]},
+  "info":{"id":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","blockNumber":1,"blockTimeStamp":100000,"result":"SUCCESS","receipt":{"result":"SUCCESS"},"log":[
+    {"address":"4444444444444444444444444444444444444444","topics":["ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0000000000000000000000001111111111111111111111111111111111111111","0000000000000000000000002222222222222222222222222222222222222222"],"data":"000000000000000000000000000000000000000000000000000000000000027f"},
+    {"address":"4444444444444444444444444444444444444444","topics":["ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0000000000000000000000001111111111111111111111111111111111111111","0000000000000000000000003333333333333333333333333333333333333333"],"data":"0000000000000000000000000000000000000000000000000000000000000096"}
+  ],"contractResult":[""],"internal_transactions":[]},
+  "expected_kinds": ["gasfree_permit_transfer","gasfree_fee"]
+}

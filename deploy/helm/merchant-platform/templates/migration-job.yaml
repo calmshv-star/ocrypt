@@ -1,0 +1,198 @@
+{{- if .Values.migration.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "merchant.fullname" . }}-migrate-{{ .Release.Revision }}
+  labels:
+    {{- include "merchant.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: {{ .Values.migration.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        {{- include "merchant.selectorLabels" (dict "root" . "component" "migration") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "merchant.fullname" . }}-migration
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "merchant.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "merchant.image" .Values.migration.image | quote }}
+          imagePullPolicy: {{ .Values.migration.image.pullPolicy }}
+          securityContext:
+            {{- include "merchant.containerSecurityContext" . | nindent 12 }}
+          env:
+            - name: MIGRATION_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.migration.databaseSecretRef.name | quote }}
+                  key: {{ .Values.migration.databaseSecretRef.key | quote }}
+          resources:
+            {{- toYaml .Values.migration.resources | nindent 12 }}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "merchant.fullname" . }}-migration
+  labels:
+    {{- include "merchant.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+automountServiceAccountToken: false
+{{- end }}
+{{- if .Values.migrationActuator.enabled }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "merchant.fullname" . }}-migration-traffic-actuator-{{ .Release.Revision }}
+  labels:
+    {{- include "merchant.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration-traffic-actuator
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: {{ .Values.migrationActuator.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        {{- include "merchant.selectorLabels" (dict "root" . "component" "migration-traffic-actuator") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "merchant.fullname" . }}-migration-traffic-actuator
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "merchant.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: actuator
+          image: {{ include "merchant.image" .Values.migrationActuator.image | quote }}
+          imagePullPolicy: {{ .Values.migrationActuator.image.pullPolicy }}
+          securityContext:
+            {{- include "merchant.containerSecurityContext" . | nindent 12 }}
+          env:
+            - {name: APP_ENV, value: "production"}
+            - {name: MIGRATION_ACTUATOR_MIGRATION_ID, value: {{ .Values.migrationActuator.migrationID | quote }}}
+            - {name: MIGRATION_ACTUATOR_SWITCH_URL, value: {{ .Values.migrationActuator.switchURL | quote }}}
+            - {name: MIGRATION_ACTUATOR_SERVER_NAME, value: {{ .Values.migrationActuator.serverName | quote }}}
+            - {name: MIGRATION_ACTUATOR_REQUEST_KEY_ID, value: {{ .Values.migrationActuator.requestKeyID | quote }}}
+            - {name: MIGRATION_ACTUATOR_TIMEOUT_SECONDS, value: {{ .Values.migrationActuator.timeoutSeconds | quote }}}
+            - {name: MIGRATION_ACTUATOR_CA_FILE, value: /run/secrets/migration-actuator-ca.pem}
+            - {name: MIGRATION_ACTUATOR_CLIENT_CERT_FILE, value: /run/secrets/migration-actuator-client.crt}
+            - {name: MIGRATION_ACTUATOR_CLIENT_KEY_FILE, value: /run/secrets/migration-actuator-client.key}
+            - {name: MIGRATION_ACTUATOR_REQUEST_SIGNING_KEY_FILE, value: /run/secrets/migration-actuator-request.key}
+            - {name: MIGRATION_ACTUATOR_ACK_PUBLIC_KEYS_FILE, value: /run/secrets/migration-actuator-ack-public-keys.json}
+            - name: MIGRATION_ACTUATOR_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.migrationActuator.databaseSecretRef.name | quote }}
+                  key: {{ .Values.migrationActuator.databaseSecretRef.key | quote }}
+          resources:
+            {{- toYaml .Values.migrationActuator.resources | nindent 12 }}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            {{- range $index, $file := .Values.migrationActuator.secretFiles }}
+            - {name: actuator-secret-{{ $index }}, mountPath: {{ $file.path | quote }}, subPath: value, readOnly: true}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 16Mi}
+        {{- range $index, $file := .Values.migrationActuator.secretFiles }}
+        - name: actuator-secret-{{ $index }}
+          secret:
+            secretName: {{ $file.secretRef.name | quote }}
+            defaultMode: 0400
+            items: [{key: {{ $file.secretRef.key | quote }}, path: value}]
+        {{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "merchant.fullname" . }}-migration-traffic-actuator
+  labels:
+    {{- include "merchant.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration-traffic-actuator
+automountServiceAccountToken: false
+{{- end }}
+{{- if .Values.migrationVerifier.enabled }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "merchant.fullname" . }}-migration-verifier-{{ .Release.Revision }}
+  labels:
+    {{- include "merchant.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration-control-worker
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: {{ .Values.migrationVerifier.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        {{- include "merchant.selectorLabels" (dict "root" . "component" "migration-control-worker") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "merchant.fullname" . }}-migration-control-worker
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "merchant.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: verifier
+          image: {{ include "merchant.image" .Values.migrationVerifier.image | quote }}
+          imagePullPolicy: {{ .Values.migrationVerifier.image.pullPolicy }}
+          securityContext:
+            {{- include "merchant.containerSecurityContext" . | nindent 12 }}
+          env:
+            - {name: APP_ENV, value: "production"}
+            - {name: MIGRATION_EXECUTE, value: {{ .Values.migrationVerifier.execute | quote }}}
+            - {name: MIGRATION_ID, value: {{ .Values.migrationVerifier.migrationID | quote }}}
+            - {name: MIGRATION_SOURCE_ID, value: {{ .Values.migrationVerifier.sourceID | quote }}}
+            - {name: MIGRATION_WORKER_ID, value: {{ .Values.migrationVerifier.workerID | quote }}}
+            - name: MIGRATION_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.migrationVerifier.databaseSecretRef.name | quote }}
+                  key: {{ .Values.migrationVerifier.databaseSecretRef.key | quote }}
+            {{- range $key, $value := .Values.migrationVerifier.env }}
+            - {name: {{ $key }}, value: {{ $value | quote }}}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.migrationVerifier.resources | nindent 12 }}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            {{- range $index, $file := .Values.migrationVerifier.secretFiles }}
+            - {name: secret-{{ $index }}, mountPath: {{ $file.path | quote }}, subPath: value, readOnly: true}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 32Mi}
+        {{- range $index, $file := .Values.migrationVerifier.secretFiles }}
+        - name: secret-{{ $index }}
+          secret:
+            secretName: {{ $file.secretRef.name | quote }}
+            defaultMode: 0400
+            items: [{key: {{ $file.secretRef.key | quote }}, path: value}]
+        {{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "merchant.fullname" . }}-migration-control-worker
+  labels:
+    {{- include "merchant.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration-control-worker
+automountServiceAccountToken: false
+{{- end }}

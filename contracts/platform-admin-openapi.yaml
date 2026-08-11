@@ -1,0 +1,614 @@
+openapi: 3.1.0
+info:
+  title: Merchant Platform Configuration Admin API
+  version: 1.0.0
+  description: >-
+    Internal, TLS-only configuration control plane. Browser clients MUST use the
+    same-origin admin BFF. Configuration values are immutable; every production
+    change follows draft, approval, scheduling and fenced activation.
+servers:
+  - url: https://platform-admin.internal
+security:
+  - mutualTLS: []
+    platformAssertion: []
+tags:
+  - name: Changes
+  - name: Snapshots
+  - name: Emergency
+  - name: Provider operations
+  - name: Provider configuration
+  - name: Retention control
+paths:
+  /internal/platform-admin/v1/changes:
+    get:
+      tags: [Changes]
+      operationId: listPlatformChanges
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/Kind'
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/ChangeStatus'}}
+        - {name: cursor, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        '200': {description: Scoped change requests, content: {application/json: {schema: {$ref: '#/components/schemas/ChangePage'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      tags: [Changes]
+      operationId: createPlatformChangeDraft
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CreateChange'}}}}
+      responses:
+        '201': {description: Immutable draft version, content: {application/json: {schema: {$ref: '#/components/schemas/ChangeRequest'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/changes/{id}:
+    get:
+      tags: [Changes]
+      operationId: getPlatformChange
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}]
+      responses:
+        '200': {description: Change request, content: {application/json: {schema: {$ref: '#/components/schemas/ChangeRequest'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/changes/{id}/request-approval:
+    post: {$ref: '#/components/pathItems/DecisionRequest'}
+  /internal/platform-admin/v1/changes/{id}/approve:
+    post: {$ref: '#/components/pathItems/DecisionRequest'}
+  /internal/platform-admin/v1/changes/{id}/reject:
+    post: {$ref: '#/components/pathItems/DecisionRequest'}
+  /internal/platform-admin/v1/changes/{id}/schedule:
+    post:
+      tags: [Changes]
+      operationId: schedulePlatformChange
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ScheduleInput'}}}}
+      responses:
+        '200': {description: Scheduled change, content: {application/json: {schema: {$ref: '#/components/schemas/ChangeRequest'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/changes/{id}/activate:
+    post:
+      tags: [Changes]
+      operationId: manuallyActivateDuePlatformChange
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ActivateInput'}}}}
+      responses:
+        '200': {description: Activated immutable snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/Snapshot'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/rollbacks:
+    post:
+      tags: [Changes]
+      operationId: draftPlatformRollback
+      description: Creates a new draft from a historic snapshot; it never rewrites history.
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RollbackInput'}}}}
+      responses:
+        '201': {description: New rollback draft, content: {application/json: {schema: {$ref: '#/components/schemas/ChangeRequest'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/snapshots:
+    get:
+      tags: [Snapshots]
+      operationId: listPlatformSnapshots
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/Kind'
+        - {name: logical_key, in: query, schema: {type: string}}
+        - {name: cursor, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        '200': {description: Immutable snapshots, content: {application/json: {schema: {$ref: '#/components/schemas/SnapshotPage'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/emergency-pauses:
+    post:
+      tags: [Emergency]
+      operationId: recordEmergencyPauseOrResume
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PauseInput'}}}}
+      responses:
+        '200': {description: Separately audited operational pause event}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/providers:
+    get:
+      tags: [Provider operations]
+      operationId: listProviderOperationBindings
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {name: cursor, in: query, schema: {type: string, format: uuid}}, {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}]
+      responses:
+        '200': {description: Secret-free provider binding page, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderPage'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/providers/{id}:
+    get:
+      tags: [Provider operations]
+      operationId: getProviderOperationBinding
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}]
+      responses:
+        '200': {description: Secret-free provider binding, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderBinding'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/provider-change-requests:
+    get:
+      tags: [Provider operations]
+      operationId: listProviderOperationChanges
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {name: cursor, in: query, schema: {type: string, format: uuid}}, {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}]
+      responses:
+        '200': {description: Provider change page, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderChangePage'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/provider-policy-requests:
+    get:
+      tags: [Provider operations]
+      operationId: listHostedProviderPolicyRequests
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {name: cursor, in: query, schema: {type: string, format: uuid}}, {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}]
+      responses:
+        '200': {description: Secret-free hosted provider policy page, content: {application/json: {schema: {$ref: '#/components/schemas/HostedProviderPolicyPage'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/providers/{id}/pause-requests:
+    post:
+      tags: [Provider operations]
+      operationId: requestProviderPause
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderStatusRequest'}}}}
+      responses:
+        '202': {description: Pending provider pause, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderChangeRequest'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/providers/{id}/unpause-requests:
+    post:
+      tags: [Provider operations]
+      operationId: requestProviderUnpause
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderStatusRequest'}}}}
+      responses:
+        '202': {description: Pending provider unpause, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderChangeRequest'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/providers/{id}/policy-requests:
+    post:
+      tags: [Provider operations]
+      operationId: requestHostedProviderPolicy
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HostedProviderPolicyRequest'}}}}
+      responses:
+        '202': {description: Pending independent provider policy approval; the bootstrap reference is never returned, content: {application/json: {schema: {$ref: '#/components/schemas/HostedProviderPolicyVersion'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/provider-change-requests/{id}/approve:
+    post:
+      tags: [Provider operations]
+      operationId: approveProviderStatusChange
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderDecision'}}}}
+      responses:
+        '200': {description: Approved provider change, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderChangeRequest'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/provider-change-requests/{id}/reject:
+    post:
+      tags: [Provider operations]
+      operationId: rejectProviderStatusChange
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderDecision'}}}}
+      responses:
+        '200': {description: Rejected provider change, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderChangeRequest'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/provider-policy-requests/{id}/approve:
+    post: {$ref: '#/components/pathItems/HostedProviderPolicyDecision'}
+  /internal/platform-admin/v1/provider-policy-requests/{id}/reject:
+    post: {$ref: '#/components/pathItems/HostedProviderPolicyDecision'}
+  /internal/platform-admin/v1/provider-config-versions:
+    get:
+      tags: [Provider configuration]
+      operationId: listProviderConfigurationVersions
+      parameters: [{$ref: '#/components/parameters/ProviderConfigurationTenant'}, {name: cursor, in: query, schema: {type: string, format: uuid}}, {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}]
+      responses:
+        '200': {description: Scoped secret-free configuration versions, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderConfigurationPage'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/provider-config-versions/{id}:
+    get:
+      tags: [Provider configuration]
+      operationId: getProviderConfigurationVersion
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/ProviderConfigurationTenant'}]
+      responses:
+        '200': {description: Secret-free immutable configuration version, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderConfigurationVersion'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/provider-configurations/{id}/requests:
+    post:
+      tags: [Provider configuration]
+      operationId: requestProviderConfigurationVersion
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'}}
+        - $ref: '#/components/parameters/ProviderConfigurationTenant'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderConfigurationRequest'}}}}
+      responses:
+        '202': {description: Immutable version pending independent approval, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderConfigurationVersion'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /internal/platform-admin/v1/provider-config-requests/{id}/approve:
+    post: {$ref: '#/components/pathItems/ProviderConfigurationDecision'}
+  /internal/platform-admin/v1/provider-config-requests/{id}/reject:
+    post: {$ref: '#/components/pathItems/ProviderConfigurationDecision'}
+  /internal/platform-admin/v1/retention/policies:
+    get: {$ref: '#/components/pathItems/RetentionPolicyList'}
+  /internal/platform-admin/v1/retention/policy-requests:
+    get: {$ref: '#/components/pathItems/RetentionPolicyChangeList'}
+    post: {$ref: '#/components/pathItems/RetentionPolicyRequest'}
+  /internal/platform-admin/v1/retention/policy-requests/{id}/approve:
+    post: {$ref: '#/components/pathItems/RetentionPolicyDecision'}
+  /internal/platform-admin/v1/retention/policy-requests/{id}/reject:
+    post: {$ref: '#/components/pathItems/RetentionPolicyDecision'}
+  /internal/platform-admin/v1/retention/holds:
+    get: {$ref: '#/components/pathItems/RetentionHoldList'}
+    post: {$ref: '#/components/pathItems/RetentionHoldCreate'}
+  /internal/platform-admin/v1/retention/holds/{id}/release-requests:
+    post: {$ref: '#/components/pathItems/RetentionHoldReleaseRequest'}
+  /internal/platform-admin/v1/retention/hold-release-requests:
+    get: {$ref: '#/components/pathItems/RetentionHoldReleaseList'}
+  /internal/platform-admin/v1/retention/hold-release-requests/{id}/approve:
+    post: {$ref: '#/components/pathItems/RetentionHoldReleaseDecision'}
+  /internal/platform-admin/v1/retention/hold-release-requests/{id}/reject:
+    post: {$ref: '#/components/pathItems/RetentionHoldReleaseDecision'}
+  /internal/platform-admin/v1/retention/archive-batches:
+    get: {$ref: '#/components/pathItems/RetentionArchiveBatchList'}
+  /internal/platform-admin/v1/retention/tombstones:
+    get: {$ref: '#/components/pathItems/RetentionTombstoneList'}
+components:
+  securitySchemes:
+    mutualTLS: {type: mutualTLS, description: Internal workload TLS identity enforced by the deployment boundary.}
+    platformAssertion: {type: http, scheme: bearer, bearerFormat: 'PlatformAdmin compact HMAC assertion bound to method/path/query/body/audience/nonce'}
+  parameters:
+    ID: {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    Tenant: {name: tenant_id, in: query, required: false, description: Omit only for a globally authorized resource, schema: {type: string, format: uuid}}
+    RetentionTenant: {name: tenant_id, in: query, required: true, description: Exact tenant bound into the authenticated platform assertion, schema: {type: string, format: uuid}}
+    ProviderConfigurationTenant: {name: tenant_id, in: query, required: true, description: Exact tenant bound into the trusted BFF assertion and DB scope, schema: {type: string, format: uuid}}
+    Kind: {name: kind, in: query, schema: {$ref: '#/components/schemas/ConfigKind'}}
+    IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 255}}
+  pathItems:
+    RetentionPolicyList:
+      tags: [Retention control]
+      parameters: [{$ref: '#/components/parameters/RetentionTenant'}]
+      responses: {'200': {description: Effective policies, content: {application/json: {schema: {$ref: './retention-control-openapi.yaml#/components/schemas/PolicyList'}}}}, default: {$ref: '#/components/responses/Problem'}}
+    RetentionPolicyChangeList:
+      tags: [Retention control]
+      parameters: [{$ref: '#/components/parameters/RetentionTenant'}, {name: cursor, in: query, schema: {type: string, format: uuid}}, {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200}}]
+      responses: {'200': {description: Policy requests, content: {application/json: {schema: {$ref: './retention-control-openapi.yaml#/components/schemas/PolicyChangePage'}}}}, default: {$ref: '#/components/responses/Problem'}}
+    RetentionPolicyRequest:
+      tags: [Retention control]
+      parameters: [{$ref: '#/components/parameters/RetentionTenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './retention-control-openapi.yaml#/components/schemas/PolicyRequest'}}}}
+      responses: {'202': {description: Pending policy request, content: {application/json: {schema: {$ref: './retention-control-openapi.yaml#/components/schemas/PolicyChange'}}}}, default: {$ref: '#/components/responses/Problem'}}
+    RetentionPolicyDecision:
+      tags: [Retention control]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/RetentionTenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './retention-control-openapi.yaml#/components/schemas/Decision'}}}}
+      responses: {'200': {description: Decided policy request, content: {application/json: {schema: {$ref: './retention-control-openapi.yaml#/components/schemas/PolicyChange'}}}}, default: {$ref: '#/components/responses/Problem'}}
+    RetentionHoldList:
+      tags: [Retention control]
+      parameters: [{$ref: '#/components/parameters/RetentionTenant'}, {name: cursor, in: query, schema: {type: string, format: uuid}}, {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200}}]
+      responses: {'200': {description: Redacted legal holds, content: {application/json: {schema: {$ref: './retention-control-openapi.yaml#/components/schemas/HoldPage'}}}}, default: {$ref: '#/components/responses/Problem'}}
+    RetentionHoldCreate:
+      tags: [Retention control]
+      parameters: [{$ref: '#/components/parameters/RetentionTenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './retention-control-openapi.yaml#/components/schemas/HoldRequest'}}}}
+      responses: {'201': {description: Immediate legal hold, content: {application/json: {schema: {$ref: './retention-control-openapi.yaml#/components/schemas/Hold'}}}}, default: {$ref: '#/components/responses/Problem'}}
+    RetentionHoldReleaseRequest:
+      tags: [Retention control]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/RetentionTenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './retention-control-openapi.yaml#/components/schemas/HoldReleaseRequestInput'}}}}
+      responses: {'202': {description: Pending release request, content: {application/json: {schema: {$ref: './retention-control-openapi.yaml#/components/schemas/HoldRelease'}}}}, default: {$ref: '#/components/responses/Problem'}}
+    RetentionHoldReleaseList:
+      tags: [Retention control]
+      parameters: [{$ref: '#/components/parameters/RetentionTenant'}, {name: cursor, in: query, schema: {type: string, format: uuid}}, {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200}}]
+      responses: {'200': {description: Hold release requests, content: {application/json: {schema: {$ref: './retention-control-openapi.yaml#/components/schemas/HoldReleasePage'}}}}, default: {$ref: '#/components/responses/Problem'}}
+    RetentionHoldReleaseDecision:
+      tags: [Retention control]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/RetentionTenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './retention-control-openapi.yaml#/components/schemas/Decision'}}}}
+      responses: {'200': {description: Decided release request, content: {application/json: {schema: {$ref: './retention-control-openapi.yaml#/components/schemas/HoldRelease'}}}}, default: {$ref: '#/components/responses/Problem'}}
+    RetentionArchiveBatchList:
+      tags: [Retention control]
+      parameters: [{$ref: '#/components/parameters/RetentionTenant'}, {name: cursor, in: query, schema: {type: string, format: uuid}}, {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200}}]
+      responses: {'200': {description: Redacted archive evidence, content: {application/json: {schema: {$ref: './retention-control-openapi.yaml#/components/schemas/ArchiveBatchPage'}}}}, default: {$ref: '#/components/responses/Problem'}}
+    RetentionTombstoneList:
+      tags: [Retention control]
+      parameters: [{$ref: '#/components/parameters/RetentionTenant'}, {name: cursor, in: query, schema: {type: string, format: uuid}}, {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200}}]
+      responses: {'200': {description: Redacted tombstone evidence, content: {application/json: {schema: {$ref: './retention-control-openapi.yaml#/components/schemas/TombstonePage'}}}}, default: {$ref: '#/components/responses/Problem'}}
+    ProviderConfigurationDecision:
+      tags: [Provider configuration]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/ProviderConfigurationTenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderConfigurationDecision'}}}}
+      responses:
+        '200': {description: Independently decided configuration version, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderConfigurationVersion'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+    HostedProviderPolicyDecision:
+      tags: [Provider operations]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProviderDecision'}}}}
+      responses:
+        '200': {description: Independently decided hosted provider policy, content: {application/json: {schema: {$ref: '#/components/schemas/HostedProviderPolicyVersion'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+    DecisionRequest:
+      tags: [Changes]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DecisionInput'}}}}
+      responses:
+        '200': {description: Updated workflow state, content: {application/json: {schema: {$ref: '#/components/schemas/ChangeRequest'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  responses:
+    Problem: {description: Fail-closed error, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+  schemas:
+    ConfigKind:
+      type: string
+      enum: [tenant, merchant_environment, chain, asset_contract, wallet_pool, rpc_provider, rate_source, rate_policy, finality_policy, matching_policy, quota, notification_channel, feature_flag, maintenance_window]
+    ChangeStatus: {type: string, enum: [draft, approval_requested, approved, rejected, scheduled, active, superseded, cancelled]}
+    CreateChange:
+      type: object
+      additionalProperties: false
+      required: [kind, logical_key, based_on_version, payload, reason]
+      properties:
+        tenant_id: {type: string, format: uuid}
+        kind: {$ref: '#/components/schemas/ConfigKind'}
+        logical_key: {type: string, pattern: '^[a-z0-9][a-z0-9._:/-]{0,127}$'}
+        based_on_version: {type: integer, format: int64, minimum: 0}
+        payload: {type: object, description: Secret-free configuration. Exact monetary quantities MUST be base-10 strings.}
+        reason: {type: string, minLength: 3, maxLength: 1000}
+    ChangeRequest:
+      allOf:
+        - $ref: '#/components/schemas/CreateChange'
+        - type: object
+          required: [id, version, payload_hash, status, requested_by, created_at, updated_at, row_version]
+          properties:
+            id: {type: string, format: uuid}
+            version: {type: integer, format: int64, minimum: 1}
+            payload_hash: {type: string, pattern: '^[0-9a-f]{64}$'}
+            status: {$ref: '#/components/schemas/ChangeStatus'}
+            requested_by: {type: string, format: uuid}
+            approved_by: {type: string, format: uuid}
+            rejected_by: {type: string, format: uuid}
+            rollback_of_snapshot_id: {type: string, format: uuid}
+            scheduled_for: {type: string, format: date-time}
+            activated_at: {type: string, format: date-time}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+            row_version: {type: integer, format: int64, minimum: 1}
+    Snapshot:
+      type: object
+      required: [id, change_request_id, kind, logical_key, version, payload, payload_hash, activated_at, fence_token]
+      properties:
+        id: {type: string, format: uuid}
+        tenant_id: {type: string, format: uuid}
+        change_request_id: {type: string, format: uuid}
+        kind: {$ref: '#/components/schemas/ConfigKind'}
+        logical_key: {type: string}
+        version: {type: integer, format: int64}
+        payload: {type: object}
+        payload_hash: {type: string, pattern: '^[0-9a-f]{64}$'}
+        rollback_of_snapshot_id: {type: string, format: uuid}
+        activated_at: {type: string, format: date-time}
+        fence_token: {type: integer, format: int64, minimum: 1}
+    DecisionInput:
+      type: object
+      additionalProperties: false
+      required: [expected_row_version, reason]
+      properties: {expected_row_version: {type: integer, format: int64, minimum: 1}, reason: {type: string, minLength: 3, maxLength: 1000}}
+    ScheduleInput:
+      allOf:
+        - $ref: '#/components/schemas/DecisionInput'
+        - type: object
+          required: [activate_at]
+          properties: {activate_at: {type: string, format: date-time}}
+    ActivateInput:
+      allOf:
+        - $ref: '#/components/schemas/DecisionInput'
+        - type: object
+          required: [expected_fence_token]
+          properties: {expected_fence_token: {type: integer, format: int64, minimum: 0}}
+    RollbackInput:
+      type: object
+      additionalProperties: false
+      required: [snapshot_id, reason]
+      properties: {tenant_id: {type: string, format: uuid}, snapshot_id: {type: string, format: uuid}, reason: {type: string, minLength: 3, maxLength: 1000}}
+    PauseInput:
+      type: object
+      additionalProperties: false
+      required: [kind, logical_key, action, reason]
+      properties: {tenant_id: {type: string, format: uuid}, kind: {$ref: '#/components/schemas/ConfigKind'}, logical_key: {type: string}, action: {type: string, enum: [pause, resume]}, reason: {type: string, minLength: 8, maxLength: 1000}}
+    ProviderHealthState:
+      type: object
+      additionalProperties: false
+      required: [operation, state, error_category, version]
+      properties:
+        operation: {type: string, enum: [health, head, range, transaction_lookup, transfer_verify, create, status, cancel, refund, reconciliation]}
+        state: {type: string, enum: [closed, open, half_open]}
+        error_category: {type: string, enum: [none, timeout, dns, tls, connect, rate_limited, auth_rejected, upstream_4xx, upstream_5xx, invalid_response, chain_mismatch, genesis_mismatch, stale_head, divergent_response, policy_denied]}
+        last_success_at: {type: string, format: date-time}
+        last_observed_at: {type: string, format: date-time}
+        lag_blocks: {type: integer, format: int64, minimum: 0}
+        version: {type: integer, format: int64, minimum: 1}
+    ProviderBinding:
+      type: object
+      additionalProperties: false
+      required: [id, provider_kind, provider_id, status, version, updated_at, health]
+      description: Secret-free operator projection; endpoints, credential references, account addresses, and raw errors are excluded.
+      properties:
+        id: {type: string, format: uuid}
+        provider_kind: {type: string, enum: [on_chain, hosted]}
+        provider_id: {type: string, maxLength: 128}
+        tenant_id: {type: string, format: uuid}
+        merchant_id: {type: string, format: uuid}
+        chain_id: {type: string, maxLength: 128}
+        status: {type: string, enum: [active, paused, disabled]}
+        version: {type: integer, format: int64, minimum: 1}
+        updated_at: {type: string, format: date-time}
+        health: {type: array, maxItems: 10, items: {$ref: '#/components/schemas/ProviderHealthState'}}
+    ProviderStatusRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_binding_version, reason]
+      properties: {expected_binding_version: {type: integer, format: int64, minimum: 1}, reason: {type: string, minLength: 8, maxLength: 1000}}
+    ProviderDecision:
+      type: object
+      additionalProperties: false
+      required: [expected_request_version, reason]
+      properties: {expected_request_version: {type: integer, format: int64, minimum: 1}, reason: {type: string, minLength: 8, maxLength: 1000}}
+    ProviderChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [id, binding_id, requested_status, expected_binding_version, status, reason, requested_by, created_at, expires_at, updated_at, version]
+      properties:
+        id: {type: string, format: uuid}
+        binding_id: {type: string, format: uuid}
+        tenant_id: {type: string, format: uuid}
+        requested_status: {type: string, enum: [active, paused]}
+        expected_binding_version: {type: integer, format: int64, minimum: 1}
+        status: {type: string, enum: [pending_approval, completed, rejected, expired]}
+        reason: {type: string, minLength: 8, maxLength: 1000}
+        requested_by: {type: string, format: uuid}
+        approved_by: {type: string, format: uuid}
+        rejected_by: {type: string, format: uuid}
+        decision_reason: {type: string, minLength: 8, maxLength: 1000}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        decided_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        version: {type: integer, format: int64, minimum: 1}
+    ProviderPolicyParameters:
+      type: object
+      additionalProperties: false
+      required: [timeout_ms, max_attempts, backoff_ms, rate_limit, rate_window_seconds, max_health_age_seconds, failure_threshold, open_seconds, half_open_successes, priority, max_lag_blocks, failure_domain]
+      properties:
+        timeout_ms: {type: integer, minimum: 100, maximum: 30000}
+        max_attempts: {type: integer, minimum: 1, maximum: 5}
+        backoff_ms: {type: integer, minimum: 0, maximum: 30000}
+        rate_limit: {type: integer, minimum: 1, maximum: 10000}
+        rate_window_seconds: {type: integer, minimum: 1, maximum: 3600}
+        max_health_age_seconds: {type: integer, minimum: 5, maximum: 3600}
+        failure_threshold: {type: integer, minimum: 1, maximum: 20}
+        open_seconds: {type: integer, minimum: 1, maximum: 3600}
+        half_open_successes: {type: integer, minimum: 1, maximum: 20}
+        priority: {type: integer, minimum: 0, maximum: 1000}
+        max_lag_blocks: {type: integer, format: int64, minimum: 0, maximum: 1000000000}
+        failure_domain: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'}
+    HostedProviderPolicies:
+      type: object
+      additionalProperties: false
+      required: [health, create, status, cancel, refund, reconciliation]
+      properties:
+        health: {$ref: '#/components/schemas/ProviderPolicyParameters'}
+        create: {$ref: '#/components/schemas/ProviderPolicyParameters'}
+        status: {$ref: '#/components/schemas/ProviderPolicyParameters'}
+        cancel: {$ref: '#/components/schemas/ProviderPolicyParameters'}
+        refund: {$ref: '#/components/schemas/ProviderPolicyParameters'}
+        reconciliation: {$ref: '#/components/schemas/ProviderPolicyParameters'}
+    HostedProviderPolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_binding_version, policies, bootstrap_probe_reference, reason]
+      properties:
+        expected_binding_version: {type: integer, format: int64, minimum: 1}
+        policies: {$ref: '#/components/schemas/HostedProviderPolicies'}
+        bootstrap_probe_reference: {type: string, minLength: 1, maxLength: 255, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$', writeOnly: true, description: Four-eyes bootstrap evidence input; persisted only in the immutable private policy version and never returned.}
+        reason: {type: string, minLength: 8, maxLength: 1000}
+    HostedProviderPolicyVersion:
+      type: object
+      additionalProperties: false
+      required: [id, binding_id, tenant_id, policy_version, policies, payload_hash, status, expected_binding_version, reason, requested_by, created_at, expires_at, updated_at, row_version]
+      description: Secret-free immutable policy projection. The approved bootstrap reference is deliberately omitted.
+      properties:
+        id: {type: string, format: uuid}
+        binding_id: {type: string, format: uuid}
+        tenant_id: {type: string, format: uuid}
+        policy_version: {type: integer, format: int64, minimum: 1}
+        policies: {$ref: '#/components/schemas/HostedProviderPolicies'}
+        payload_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        status: {type: string, enum: [pending_approval, approved_pending_probe, active, rejected, superseded, expired]}
+        expected_binding_version: {type: integer, format: int64, minimum: 1}
+        reason: {type: string, minLength: 8, maxLength: 1000}
+        requested_by: {type: string, format: uuid}
+        approved_by: {type: string, format: uuid}
+        rejected_by: {type: string, format: uuid}
+        decision_reason: {type: string, minLength: 8, maxLength: 1000}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        decided_at: {type: string, format: date-time}
+        activated_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        row_version: {type: integer, format: int64, minimum: 1}
+    ProviderConfigurationRequest:
+      type: object
+      additionalProperties: false
+      required: [merchant_id, expected_head_version, change_kind, adapter_kind, api_origin, create_path, cancel_path, status_path, refund_path, reconcile_path, payment_url_origins, api_credential_ref, api_key_id, callback_secret_ref, callback_key_id, signature_scheme, asset_id, asset_decimals, currency, callback_overlap_seconds, probe_reference, reason]
+      properties:
+        merchant_id: {type: string, format: uuid}
+        expected_head_version: {type: integer, format: int64, minimum: 0}
+        change_kind: {type: string, enum: [provision, rotate, rollback, disable]}
+        adapter_kind: {type: string, enum: [hmac_json_v1]}
+        api_origin: {$ref: '#/components/schemas/ProviderConfigurationWriteOnlyOrigin'}
+        create_path: {$ref: '#/components/schemas/ProviderConfigurationWriteOnlyPath'}
+        cancel_path: {$ref: '#/components/schemas/ProviderConfigurationWriteOnlyPath'}
+        status_path: {$ref: '#/components/schemas/ProviderConfigurationWriteOnlyPath'}
+        refund_path: {$ref: '#/components/schemas/ProviderConfigurationWriteOnlyPath'}
+        reconcile_path: {$ref: '#/components/schemas/ProviderConfigurationWriteOnlyPath'}
+        payment_url_origins: {type: array, minItems: 1, maxItems: 16, uniqueItems: true, writeOnly: true, items: {$ref: '#/components/schemas/ProviderConfigurationWriteOnlyOrigin'}}
+        api_credential_ref: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$', writeOnly: true, description: External mounted-file reference only; secret contents are forbidden.}
+        api_key_id: {type: string, minLength: 1, maxLength: 128}
+        callback_secret_ref: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$', writeOnly: true, description: External mounted-file reference only; secret contents are forbidden.}
+        callback_key_id: {type: string, minLength: 1, maxLength: 128}
+        signature_scheme: {type: string, enum: [hmac-sha256]}
+        asset_id: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'}
+        asset_decimals: {type: integer, minimum: 0, maximum: 77}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        callback_overlap_seconds: {type: integer, minimum: 0, maximum: 86400}
+        probe_reference: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$', writeOnly: true, description: Approved bootstrap probe input; only its bounded private value and digests are retained.}
+        reason: {type: string, minLength: 8, maxLength: 1000}
+    ProviderConfigurationWriteOnlyPath:
+      type: string
+      pattern: '^/[A-Za-z0-9._~!$&''()*+,;=:@%/-]{0,255}$'
+      writeOnly: true
+    ProviderConfigurationWriteOnlyOrigin:
+      type: string
+      format: uri
+      maxLength: 512
+      pattern: '^https://[^/?#@\s]+$'
+      writeOnly: true
+      description: Write-only HTTPS origin without userinfo, path, query, or fragment; never included in a read response, audit event, or outbox payload.
+    ProviderConfigurationDecision:
+      type: object
+      additionalProperties: false
+      required: [expected_row_version, reason]
+      properties:
+        expected_row_version: {type: integer, format: int64, minimum: 1}
+        reason: {type: string, minLength: 8, maxLength: 1000}
+    ProviderConfigurationVersion:
+      type: object
+      additionalProperties: false
+      required: [id, provider_id, tenant_id, merchant_id, manifest_version, change_kind, expected_head_version, status, adapter_kind, asset_id, asset_decimals, currency, api_key_id, callback_key_id, callback_overlap_seconds, payload_hash, reason, requested_by, created_at, expires_at, head_version, row_version]
+      description: Secret-free projection. Origins, paths, credential references, callback references, payment URL origins and probe references are deliberately omitted.
+      properties:
+        id: {type: string, format: uuid}
+        provider_id: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'}
+        tenant_id: {type: string, format: uuid}
+        merchant_id: {type: string, format: uuid}
+        manifest_version: {type: integer, format: int64, minimum: 1}
+        change_kind: {type: string, enum: [provision, rotate, rollback, disable]}
+        expected_head_version: {type: integer, format: int64, minimum: 0}
+        status: {type: string, enum: [pending_approval, approved_pending_probe, active, rejected, superseded, expired, probe_failed, legacy_unadmitted, legacy_superseded]}
+        adapter_kind: {type: string}
+        asset_id: {type: string}
+        asset_decimals: {type: integer, minimum: 0, maximum: 77}
+        currency: {type: string}
+        api_key_id: {type: string}
+        callback_key_id: {type: string}
+        callback_overlap_seconds: {type: integer, minimum: 0, maximum: 86400}
+        payload_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        reason: {type: string}
+        requested_by: {type: string, format: uuid}
+        approved_by: {type: string, format: uuid}
+        rejected_by: {type: string, format: uuid}
+        decision_reason: {type: string}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        decided_at: {type: string, format: date-time}
+        activated_at: {type: string, format: date-time}
+        callback_accept_until: {type: string, format: date-time}
+        probe_response_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        probe_tls_spki_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        probe_observed_at: {type: string, format: date-time}
+        head_version: {type: integer, format: int64, minimum: 0}
+        row_version: {type: integer, format: int64, minimum: 1}
+    ProviderConfigurationPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/ProviderConfigurationVersion'}}, next_cursor: {type: string, format: uuid}}}
+    ProviderPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/ProviderBinding'}}, next_cursor: {type: string, format: uuid}}}
+    ProviderChangePage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/ProviderChangeRequest'}}, next_cursor: {type: string, format: uuid}}}
+    HostedProviderPolicyPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/HostedProviderPolicyVersion'}}, next_cursor: {type: string, format: uuid}}}
+    ChangePage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/ChangeRequest'}}, next_cursor: {type: string, format: uuid}}}
+    SnapshotPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Snapshot'}}, next_cursor: {type: string, format: uuid}}}
+    Problem: {type: object, required: [type, title, status, detail], properties: {type: {type: string, format: uri}, title: {type: string}, status: {type: integer}, detail: {type: string}}}

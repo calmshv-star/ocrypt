@@ -1,0 +1,804 @@
+name: merchant-platform
+
+x-app-security: &app-security
+  init: true
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: ["/tmp:rw,noexec,nosuid,size=32m"]
+
+x-backend-build: &backend-build
+  context: ..
+  dockerfile: deploy/docker/Dockerfile.backend
+
+x-worker: &worker
+  <<: *app-security
+  image: ${WORKER_IMAGE:-merchant-platform-worker:local}
+  profiles: [workers]
+  depends_on:
+    postgres: {condition: service_healthy}
+  networks: [data]
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:18.0-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-merchant}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in an untracked .env file}
+      POSTGRES_USER: ${POSTGRES_USER:-merchant_migrator}
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks: [data]
+    volumes: ["merchant-postgres:/var/lib/postgresql"]
+
+  migration:
+    <<: *app-security
+    image: ${MIGRATION_IMAGE:-merchant-platform-migrations:local}
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.migrations}
+    profiles: [migration]
+    restart: "no"
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:-}
+    networks: [data]
+
+  api:
+    <<: *app-security
+    image: ${API_IMAGE:-merchant-platform-api:local}
+    build:
+      <<: *backend-build
+      args: {BINARY: api}
+    profiles: [application]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      APP_ENV: production
+      API_CREDENTIAL_ENVELOPE_KEY: ${API_CREDENTIAL_ENVELOPE_KEY:-}
+      DATABASE_URL: ${API_DATABASE_URL:-}
+      HTTP_ADDRESS: ":8080"
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://merchant.example.invalid}
+      RECONCILIATION_OBJECT_STORE: s3
+      RECONCILIATION_S3_ENDPOINT: ${RECONCILIATION_S3_ENDPOINT:-}
+      RECONCILIATION_S3_REGION: ${RECONCILIATION_S3_REGION:-}
+      RECONCILIATION_S3_BUCKET: ${RECONCILIATION_S3_BUCKET:-}
+      RECONCILIATION_S3_ACCESS_KEY_ID_FILE: /run/secrets/reconciliation-api-s3-access-key-id
+      RECONCILIATION_S3_SECRET_ACCESS_KEY_FILE: /run/secrets/reconciliation-api-s3-secret-access-key
+      RECONCILIATION_SIGNING_PUBLIC_KEYS: reconciliation-v1=/run/secrets/reconciliation-signing-public-key
+      RECONCILIATION_DOWNLOAD_TIMEOUT_SECONDS: "900"
+      RECONCILIATION_MAX_OBJECT_BYTES: "1073741824"
+    secrets:
+      - {source: reconciliation_api_s3_access_key_id, target: reconciliation-api-s3-access-key-id}
+      - {source: reconciliation_api_s3_secret_access_key, target: reconciliation-api-s3-secret-access-key}
+      - {source: reconciliation_signing_public_key, target: reconciliation-signing-public-key}
+    networks: [data, edge]
+
+  management-api:
+    <<: *app-security
+    image: ${MANAGEMENT_IMAGE:-merchant-platform-management-api:local}
+    build:
+      <<: *backend-build
+      args: {BINARY: management-api}
+    profiles: [application]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      DATABASE_URL: ${MANAGEMENT_DATABASE_URL:-}
+      MANAGEMENT_HTTP_ADDRESS: ":8445"
+      MANAGEMENT_PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://merchant.example.invalid}
+      MANAGEMENT_TLS_CERT_FILE: /run/secrets/management-tls.crt
+      MANAGEMENT_TLS_KEY_FILE: /run/secrets/management-tls.key
+      WEBHOOK_ENVELOPE_KEY_FILE: /run/secrets/webhook-envelope-key
+      API_CREDENTIAL_ENVELOPE_KEY_FILE: /run/secrets/credential-envelope-key
+      MANAGEMENT_RESPONSE_KEY_FILE: /run/secrets/response-key
+      MANAGEMENT_ADMIN_ASSERTION_KEY_FILE: /run/secrets/management-assertion-key
+      RECEIPT_AI_API_KEY_FILE: /run/secrets/receipt-ai-api-key
+    secrets:
+      - {source: webhook_envelope_key, target: webhook-envelope-key}
+      - {source: api_credential_envelope_key, target: credential-envelope-key}
+      - {source: management_response_key, target: response-key}
+      - {source: management_assertion_key, target: management-assertion-key}
+      - {source: management_tls_cert, target: management-tls.crt}
+      - {source: management_tls_key, target: management-tls.key}
+      - {source: receipt_ai_api_key, target: receipt-ai-api-key}
+    networks: [data, edge]
+
+  admin-api:
+    <<: *app-security
+    image: ${ADMIN_IMAGE:-merchant-platform-admin-api:local}
+    build:
+      <<: *backend-build
+      args: {BINARY: admin-api}
+    profiles: [control]
+    depends_on:
+      postgres: {condition: service_healthy}
+      management-api: {condition: service_started}
+      platform-admin-api: {condition: service_started}
+    environment:
+      ADMIN_HTTP_ADDRESS: ":8081"
+      ADMIN_PUBLIC_ORIGIN: ${ADMIN_PUBLIC_ORIGIN:-https://admin.example.invalid}
+      ADMIN_OIDC_ISSUER: ${ADMIN_OIDC_ISSUER:-}
+      ADMIN_OIDC_CLIENT_ID: ${ADMIN_OIDC_CLIENT_ID:-}
+      ADMIN_OIDC_CLIENT_SECRET: ${ADMIN_OIDC_CLIENT_SECRET:-}
+      ADMIN_OIDC_REDIRECT_URI: ${ADMIN_OIDC_REDIRECT_URI:-}
+      ADMIN_REQUIRED_ACR: ${ADMIN_REQUIRED_ACR:-urn:mfa}
+      ADMIN_ACCEPTED_AMR: ${ADMIN_ACCEPTED_AMR:-otp,hwk,webauthn}
+      ADMIN_STATE_ENCRYPTION_KEY: ${ADMIN_STATE_ENCRYPTION_KEY:-}
+      DATABASE_URL: ${ADMIN_DATABASE_URL:-}
+      MANAGEMENT_INTERNAL_URL: ${MANAGEMENT_INTERNAL_URL:-https://management-api:8445}
+      MANAGEMENT_ADMIN_ASSERTION_KEY_FILE: /run/secrets/management-assertion-key
+      MANAGEMENT_INTERNAL_CA_FILE: /run/secrets/management-ca.pem
+      PLATFORM_ADMIN_INTERNAL_URL: ${PLATFORM_ADMIN_INTERNAL_URL:-https://platform-admin-api:8446}
+      PLATFORM_ADMIN_ASSERTION_KEY_FILE: /run/secrets/platform-assertion-key
+      PLATFORM_ADMIN_CA_FILE: /run/secrets/platform-ca.pem
+      PLATFORM_ADMIN_ASSERTION_ISSUER: ${PLATFORM_ADMIN_ASSERTION_ISSUER:-merchant-admin-bff}
+      PLATFORM_ADMIN_ASSERTION_AUDIENCE: ${PLATFORM_ADMIN_ASSERTION_AUDIENCE:-platform-admin-api}
+      MERCHANT_SETTINGS_INTERNAL_URL: ${MERCHANT_SETTINGS_INTERNAL_URL:-https://merchant-settings-api:8447}
+      MERCHANT_SETTINGS_ASSERTION_KEY_FILE: /run/secrets/merchant-settings-assertion-key
+      MERCHANT_SETTINGS_INTERNAL_CA_FILE: /run/secrets/merchant-settings-server-ca.pem
+      MERCHANT_SETTINGS_INTERNAL_CLIENT_CERT_FILE: /run/secrets/merchant-settings-client.crt
+      MERCHANT_SETTINGS_INTERNAL_CLIENT_KEY_FILE: /run/secrets/merchant-settings-client.key
+      MERCHANT_SETTINGS_INTERNAL_SERVER_NAME: ${MERCHANT_SETTINGS_INTERNAL_SERVER_NAME:-merchant-settings-api}
+      FINANCIAL_INTERNAL_URL: ${FINANCIAL_INTERNAL_URL:-https://financial-api:8444}
+      FINANCIAL_INTERNAL_ASSERTION_KEY_FILE: /run/secrets/financial-assertion-key
+      FINANCIAL_INTERNAL_CA_FILE: /run/secrets/financial-server-ca.pem
+      FINANCIAL_INTERNAL_CLIENT_CERT_FILE: /run/secrets/financial-client.crt
+      FINANCIAL_INTERNAL_CLIENT_KEY_FILE: /run/secrets/financial-client.key
+      FINANCIAL_INTERNAL_SERVER_NAME: ${FINANCIAL_INTERNAL_SERVER_NAME:-financial-api}
+    secrets:
+      - {source: management_assertion_key, target: management-assertion-key}
+      - {source: management_ca, target: management-ca.pem}
+      - {source: platform_assertion_key, target: platform-assertion-key}
+      - {source: platform_ca, target: platform-ca.pem}
+      - {source: merchant_settings_assertion_key, target: merchant-settings-assertion-key}
+      - {source: merchant_settings_server_ca, target: merchant-settings-server-ca.pem}
+      - {source: merchant_settings_client_cert, target: merchant-settings-client.crt}
+      - {source: merchant_settings_client_key, target: merchant-settings-client.key}
+      - {source: financial_assertion_key, target: financial-assertion-key}
+      - {source: financial_ca, target: financial-server-ca.pem}
+      - {source: financial_client_cert, target: financial-client.crt}
+      - {source: financial_client_key, target: financial-client.key}
+    networks: [data, edge]
+
+  platform-admin-api:
+    <<: *app-security
+    image: ${PLATFORM_ADMIN_IMAGE:-merchant-platform-platform-admin-api:local}
+    build:
+      <<: *backend-build
+      args: {BINARY: platform-admin-api}
+    profiles: [control]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      PLATFORM_ADMIN_DATABASE_URL: ${PLATFORM_ADMIN_DATABASE_URL:-}
+      PLATFORM_ADMIN_LISTEN_ADDR: ":8446"
+      PLATFORM_ADMIN_TLS_CERT_FILE: /run/secrets/platform-tls.crt
+      PLATFORM_ADMIN_TLS_KEY_FILE: /run/secrets/platform-tls.key
+      PLATFORM_ADMIN_ASSERTION_SECRET_FILE: /run/secrets/platform-assertion-key
+      PLATFORM_ADMIN_ASSERTION_ISSUER: ${PLATFORM_ADMIN_ASSERTION_ISSUER:-merchant-admin-bff}
+      PLATFORM_ADMIN_ASSERTION_AUDIENCE: ${PLATFORM_ADMIN_ASSERTION_AUDIENCE:-platform-admin-api}
+      PLATFORM_ADMIN_SCHEDULER_ACTOR_ID: ${PLATFORM_ADMIN_SCHEDULER_ACTOR_ID:-}
+      PLATFORM_ADMIN_SCHEDULER_WORKER_ID: ${PLATFORM_ADMIN_SCHEDULER_WORKER_ID:-compose-platform-scheduler}
+      MIGRATION_ACTUATOR_DATABASE_URL: ${MIGRATION_ACTUATOR_DATABASE_URL:-}
+      MIGRATION_MANIFEST_PUBLIC_KEYS_FILE: /run/secrets/migration-manifest-public-keys.json
+      MIGRATION_ACTUATOR_PUBLIC_KEYS_FILE: /run/secrets/migration-actuator-public-keys.json
+    secrets:
+      - {source: platform_tls_cert, target: platform-tls.crt}
+      - {source: platform_tls_key, target: platform-tls.key}
+      - {source: platform_assertion_key, target: platform-assertion-key}
+      - {source: migration_manifest_public_keys, target: migration-manifest-public-keys.json}
+      - {source: migration_actuator_public_keys, target: migration-actuator-public-keys.json}
+    networks: [data]
+
+  merchant-settings-api:
+    <<: *app-security
+    image: ${MERCHANT_SETTINGS_API_IMAGE:-merchant-platform-merchant-settings-api:local}
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: merchant-settings-api}}
+    profiles: [merchant-settings]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      DATABASE_URL: ${MERCHANT_SETTINGS_DATABASE_URL:-}
+      MERCHANT_SETTINGS_HTTP_ADDRESS: ":8447"
+      MERCHANT_SETTINGS_HEALTH_ADDRESS: ":9095"
+      MERCHANT_SETTINGS_ASSERTION_KEY_FILE: /run/secrets/merchant-settings-assertion-key
+      MERCHANT_INVITE_TOKEN_KEY_RING_FILE: /run/secrets/invitation-token-keys/key-ring.json
+      MERCHANT_SETTINGS_TLS_CERT_FILE: /run/secrets/merchant-settings-tls.crt
+      MERCHANT_SETTINGS_TLS_KEY_FILE: /run/secrets/merchant-settings-tls.key
+      MERCHANT_SETTINGS_CLIENT_CA_FILE: /run/secrets/merchant-settings-client-ca.pem
+      MERCHANT_SETTINGS_BODY_LIMIT_BYTES: "262144"
+      MERCHANT_SETTINGS_EMAIL_INVITES_ENABLED: ${MERCHANT_SETTINGS_EMAIL_INVITES_ENABLED:-false}
+    secrets:
+      - {source: merchant_settings_assertion_key, target: merchant-settings-assertion-key}
+      - {source: merchant_settings_tls_cert, target: merchant-settings-tls.crt}
+      - {source: merchant_settings_tls_key, target: merchant-settings-tls.key}
+      - {source: merchant_settings_client_ca, target: merchant-settings-client-ca.pem}
+    volumes:
+      - ${MERCHANT_INVITE_TOKEN_KEY_RING_DIR_HOST:-./invitation-token-keys-placeholder}:/run/secrets/invitation-token-keys:ro
+    networks: [data]
+
+  merchant-session-revocation-worker:
+    <<: *app-security
+    image: ${MERCHANT_SESSION_REVOCATION_WORKER_IMAGE:-merchant-platform-merchant-session-revocation-worker:local}
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: merchant-session-revocation-worker}}
+    profiles: [merchant-settings]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      DATABASE_URL: ${MERCHANT_SESSION_REVOCATION_DATABASE_URL:-}
+      MERCHANT_SESSION_REVOCATION_HEALTH_ADDRESS: ":9096"
+      MERCHANT_SESSION_REVOCATION_POLL_INTERVAL: 1s
+      MERCHANT_SESSION_REVOCATION_MAX_READY_AGE: 10s
+      MERCHANT_SESSION_REVOCATION_BATCH_SIZE: "100"
+    networks: [data]
+
+  merchant-invitation-delivery-worker:
+    <<: *app-security
+    image: ${MERCHANT_INVITATION_DELIVERY_WORKER_IMAGE:-merchant-platform-merchant-invitation-delivery-worker:local}
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: merchant-invitation-delivery-worker}}
+    profiles: [merchant-settings]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      DATABASE_URL: ${MERCHANT_INVITATION_DELIVERY_DATABASE_URL:-}
+      MERCHANT_INVITATION_DELIVERY_WORKER_ID: ${MERCHANT_INVITATION_DELIVERY_WORKER_ID:-}
+      MERCHANT_INVITE_TOKEN_KEY_RING_FILE: /run/secrets/invitation-token-keys/key-ring.json
+      MERCHANT_SETTINGS_INVITE_NOTIFIER_URL: ${MERCHANT_SETTINGS_INVITE_NOTIFIER_URL:-}
+      MERCHANT_SETTINGS_INVITE_NOTIFIER_BEARER_FILE: /run/secrets/invitation-notifier-bearer
+      MERCHANT_SETTINGS_INVITE_NOTIFIER_CA_FILE: /run/secrets/invitation-notifier-ca.pem
+      MERCHANT_INVITATION_DELIVERY_HEALTH_ADDRESS: ":9097"
+      MERCHANT_INVITATION_DELIVERY_POLL_INTERVAL: 1s
+      MERCHANT_INVITATION_DELIVERY_LEASE: 30s
+      MERCHANT_INVITATION_DELIVERY_BASE_BACKOFF: 5s
+      MERCHANT_INVITATION_DELIVERY_MAX_BACKOFF: 1h
+      MERCHANT_INVITATION_DELIVERY_MAX_ATTEMPTS: "8"
+      MERCHANT_INVITATION_DELIVERY_BATCH_SIZE: "50"
+    secrets:
+      - {source: merchant_invitation_notifier_bearer, target: invitation-notifier-bearer}
+      - {source: merchant_invitation_notifier_ca, target: invitation-notifier-ca.pem}
+    volumes:
+      - ${MERCHANT_INVITE_TOKEN_KEY_RING_DIR_HOST:-./invitation-token-keys-placeholder}:/run/secrets/invitation-token-keys:ro
+    networks: [data, edge]
+
+  settlement-worker:
+    <<: *worker
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: worker}}
+    environment: {DATABASE_URL: "${SETTLEMENT_DATABASE_URL:-}", WORKER_ID: compose-settlement-1, WORKER_ROLES: settlements, WORKER_HEALTH_ADDRESS: ":9090"}
+  matching-worker:
+    <<: *worker
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: worker}}
+    environment: {DATABASE_URL: "${MATCHING_DATABASE_URL:-}", WORKER_ID: compose-matching-1, WORKER_ROLES: matching, WORKER_HEALTH_ADDRESS: ":9090"}
+  plan-worker:
+    <<: *worker
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: worker}}
+    environment: {DATABASE_URL: "${PLAN_DATABASE_URL:-}", WORKER_ID: compose-plan-1, WORKER_ROLES: plans, WORKER_HEALTH_ADDRESS: ":9090"}
+  callback-worker:
+    <<: *worker
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: worker}}
+    environment: {DATABASE_URL: "${CALLBACK_DATABASE_URL:-}", WEBHOOK_ENVELOPE_KEY: "${WEBHOOK_ENVELOPE_KEY:-}", WORKER_ID: compose-callback-1, WORKER_ROLES: callbacks, WORKER_HEALTH_ADDRESS: ":9090"}
+    networks: [data, edge]
+  outbox-worker:
+    <<: *worker
+    profiles: [jetstream]
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: worker}}
+    depends_on:
+      postgres: {condition: service_healthy}
+      nats-jetstream: {condition: service_healthy}
+    environment:
+      APP_ENV: development
+      DATABASE_URL: ${OUTBOX_DATABASE_URL:-}
+      WORKER_ID: compose-outbox-1
+      WORKER_ROLES: outbox
+      WORKER_HEALTH_ADDRESS: ":9090"
+      OUTBOX_PUBLISHER: jetstream
+      OUTBOX_MAX_RETRY_DELAY: 15m
+      OUTBOX_NATS_URLS: tls://nats-jetstream:4222
+      OUTBOX_NATS_CA_FILE: /run/secrets/outbox-nats-ca.pem
+      OUTBOX_NATS_SERVER_NAME: nats-jetstream
+      OUTBOX_NATS_CLIENT_CERT_FILE: /run/secrets/outbox-nats-client.crt
+      OUTBOX_NATS_CLIENT_KEY_FILE: /run/secrets/outbox-nats-client.key
+      OUTBOX_NATS_CREDS_FILE: /run/secrets/outbox-nats-publisher.creds
+      OUTBOX_NATS_CONNECT_TIMEOUT: 5s
+      OUTBOX_NATS_PUBLISH_TIMEOUT: 10s
+      OUTBOX_NATS_RECONNECT_WAIT: 1s
+      OUTBOX_NATS_MAX_RECONNECTS: "60"
+      OUTBOX_JETSTREAM_MAX_AGE: 168h
+      OUTBOX_JETSTREAM_MAX_BYTES: "10737418240"
+      OUTBOX_JETSTREAM_MAX_MESSAGES: "10000000"
+      OUTBOX_JETSTREAM_MAX_MESSAGE_BYTES: "1048576"
+      OUTBOX_JETSTREAM_DUPLICATE_WINDOW: 30m
+      OUTBOX_JETSTREAM_REPLICAS: "1"
+    secrets:
+      - {source: outbox_nats_ca, target: outbox-nats-ca.pem}
+      - {source: outbox_nats_client_cert, target: outbox-nats-client.crt}
+      - {source: outbox_nats_client_key, target: outbox-nats-client.key}
+      - {source: outbox_nats_publisher_creds, target: outbox-nats-publisher.creds}
+    networks: [data, eventbus]
+
+  nats-jetstream:
+    image: ${NATS_IMAGE:-nats:2.14.3-alpine}
+    profiles: [jetstream]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    entrypoint: [/bin/sh, -ec]
+    command: ["test -s /run/secrets/nats-server.conf && exec /nats-server -c /run/secrets/nats-server.conf"]
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -T 2 -O - 'http://127.0.0.1:8222/healthz?js-enabled-only=true' >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    secrets:
+      - {source: nats_server_config, target: nats-server.conf}
+      - {source: nats_server_ca, target: nats-server-ca.pem}
+      - {source: nats_server_cert, target: nats-server.crt}
+      - {source: nats_server_key, target: nats-server.key}
+      - {source: nats_operator_jwt, target: nats-operator.jwt}
+    volumes: ["merchant-jetstream:/data"]
+    networks: [eventbus]
+  resolution-worker:
+    <<: *worker
+    profiles: [verification]
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: worker}}
+    environment: {DATABASE_URL: "${RESOLUTION_DATABASE_URL:-}", VERIFIER_CHAIN_ID: "${VERIFIER_CHAIN_ID:-}", VERIFIER_PROVIDER_URLS: "${VERIFIER_PROVIDER_URLS:-}", VERIFIER_PROVIDER_TOKEN: "${VERIFIER_PROVIDER_TOKEN:-}", VERIFIER_QUORUM: "${VERIFIER_QUORUM:-2}", WORKER_ID: compose-resolution-1, WORKER_ROLES: resolutions, WORKER_HEALTH_ADDRESS: ":9090"}
+    networks: [data, edge]
+  proof-worker:
+    <<: *worker
+    profiles: [verification]
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: worker}}
+    environment: {DATABASE_URL: "${PROOF_DATABASE_URL:-}", PROOF_VERIFIER_CHAIN_ID: "${PROOF_VERIFIER_CHAIN_ID:-}", PROOF_VERIFIER_PROVIDER_URLS: "${PROOF_VERIFIER_PROVIDER_URLS:-}", PROOF_VERIFIER_PROVIDER_TOKEN: "${PROOF_VERIFIER_PROVIDER_TOKEN:-}", PROOF_VERIFIER_QUORUM: "${PROOF_VERIFIER_QUORUM:-2}", WORKER_ID: compose-proof-1, WORKER_ROLES: proofs, WORKER_HEALTH_ADDRESS: ":9090"}
+    networks: [data, edge]
+
+  scanner:
+    <<: *app-security
+    image: ${SCANNER_IMAGE:-merchant-platform-scanner:local}
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: scanner}}
+    profiles: [scanner]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      DATABASE_URL: ${SCANNER_DATABASE_URL:-}
+      SCANNER_PLATFORM_RUNTIME_JSON: ${SCANNER_PLATFORM_RUNTIME_JSON:-}
+      SCANNER_SECRET_DIR: /run/scanner-secrets
+      SCANNER_HEALTH_ADDRESS: ":9091"
+      WORKER_ID: compose-scanner-1
+    volumes:
+      - ${SCANNER_SECRET_DIR_HOST:-./scanner-secrets-placeholder}:/run/scanner-secrets:ro
+    networks: [data, edge]
+
+  provider-health-worker:
+    <<: *app-security
+    image: ${PROVIDER_HEALTH_WORKER_IMAGE:-merchant-platform-provider-health-worker:local}
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: provider-health-worker}}
+    profiles: [provider-operations]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      DATABASE_URL: ${PROVIDER_HEALTH_DATABASE_URL:-}
+      WORKER_ID: compose-provider-health-1
+      PROVIDER_HEALTH_ADDRESS: ":9100"
+      PROVIDER_HEALTH_POLL_INTERVAL: 15s
+      PROVIDER_HEALTH_READY_AGE: 2m
+      PROVIDER_HEALTH_BATCH_SIZE: "64"
+      PROVIDER_HEALTH_CONCURRENCY: "8"
+      PROVIDER_HEALTH_SECRET_DIR: /run/provider-health-secrets
+    volumes:
+      - ${PROVIDER_HEALTH_SECRET_DIR_HOST:-./provider-health-secrets-placeholder}:/run/provider-health-secrets:ro
+    networks: [data, edge]
+
+  platform-outbox-publisher:
+    <<: *app-security
+    image: ${PLATFORM_OUTBOX_PUBLISHER_IMAGE:-merchant-platform-platform-outbox-publisher:local}
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: platform-outbox-publisher}}
+    profiles: [platform-runtime]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      PLATFORM_OUTBOX_DATABASE_URL: ${PLATFORM_OUTBOX_DATABASE_URL:-}
+      PLATFORM_OUTBOX_WORKER_ID: ${PLATFORM_OUTBOX_WORKER_ID:-}
+      PLATFORM_OUTBOX_HEALTH_ADDRESS: 127.0.0.1:9098
+      PLATFORM_OUTBOX_POLL_INTERVAL: 1s
+      PLATFORM_OUTBOX_LEASE: 30s
+      PLATFORM_OUTBOX_BATCH_SIZE: "50"
+      PLATFORM_OUTBOX_DESTINATION_URL: ${PLATFORM_OUTBOX_DESTINATION_URL:-}
+      PLATFORM_OUTBOX_DESTINATION_CA_FILE: /run/secrets/platform-outbox-destination-ca.pem
+      PLATFORM_OUTBOX_DESTINATION_CERT_FILE: /run/secrets/platform-outbox-destination.crt
+      PLATFORM_OUTBOX_DESTINATION_KEY_FILE: /run/secrets/platform-outbox-destination.key
+      PLATFORM_OUTBOX_DESTINATION_TOKEN_FILE: /run/secrets/platform-outbox-destination.bearer
+    secrets:
+      - {source: platform_outbox_destination_ca, target: platform-outbox-destination-ca.pem}
+      - {source: platform_outbox_destination_cert, target: platform-outbox-destination.crt}
+      - {source: platform_outbox_destination_key, target: platform-outbox-destination.key}
+      - {source: platform_outbox_destination_bearer, target: platform-outbox-destination.bearer}
+    networks: [data, edge]
+
+  rate-worker:
+    <<: *app-security
+    image: ${RATE_WORKER_IMAGE:-merchant-platform-rate-worker:local}
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: rate-worker}}
+    profiles: [rates]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      DATABASE_URL: ${RATE_DATABASE_URL:-}
+      RATE_WORKER_ID: ${RATE_WORKER_ID:-}
+      RATE_TARGETS_JSON: ${RATE_TARGETS_JSON:-[]}
+      RATE_SECRET_DIR: /run/rate-secrets
+      RATE_HEALTH_ADDRESS: ":9092"
+    volumes:
+      - ${RATE_SECRET_DIR_HOST:-./rate-secrets-placeholder}:/run/rate-secrets:ro
+    networks: [data, edge]
+
+  reconciliation-worker:
+    <<: *app-security
+    image: ${RECONCILIATION_WORKER_IMAGE:-merchant-platform-reconciliation-worker:local}
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: reconciliation-worker}}
+    profiles: [reports]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      DATABASE_URL: ${RECONCILIATION_DATABASE_URL:-}
+      RECONCILIATION_OBJECT_STORE: s3
+      RECONCILIATION_S3_ENDPOINT: ${RECONCILIATION_S3_ENDPOINT:-}
+      RECONCILIATION_S3_REGION: ${RECONCILIATION_S3_REGION:-}
+      RECONCILIATION_S3_BUCKET: ${RECONCILIATION_S3_BUCKET:-}
+      RECONCILIATION_S3_ACCESS_KEY_ID_FILE: /run/secrets/reconciliation-worker-s3-access-key-id
+      RECONCILIATION_S3_SECRET_ACCESS_KEY_FILE: /run/secrets/reconciliation-worker-s3-secret-access-key
+      RECONCILIATION_SIGNING_PRIVATE_KEY_FILE: /run/secrets/reconciliation-signing-key
+      RECONCILIATION_SIGNING_KEY_ID: ${RECONCILIATION_SIGNING_KEY_ID:-}
+      RECONCILIATION_WORKER_ID: ${RECONCILIATION_WORKER_ID:-compose-reconciliation-1}
+      RECONCILIATION_HEALTH_ADDRESS: ":9094"
+      RECONCILIATION_MAX_OBJECT_BYTES: "1073741824"
+      RECONCILIATION_MAX_ENTRIES: "1000000"
+    secrets:
+      - {source: reconciliation_worker_s3_access_key_id, target: reconciliation-worker-s3-access-key-id}
+      - {source: reconciliation_worker_s3_secret_access_key, target: reconciliation-worker-s3-secret-access-key}
+      - {source: reconciliation_signing_key, target: reconciliation-signing-key}
+    networks: [data, edge]
+
+  retention-worker:
+    <<: *app-security
+    image: ${RETENTION_WORKER_IMAGE:-merchant-platform-retention-worker:local}
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: retention-worker}}
+    profiles: [retention]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      APP_ENV: production
+      RETENTION_OBJECT_STORE: s3
+      RETENTION_DATABASE_URL: ${RETENTION_DATABASE_URL:-}
+      RETENTION_WORKER_ID: ${RETENTION_WORKER_ID:-compose-retention-1}
+      RETENTION_HEALTH_ADDRESS: ":9099"
+      RETENTION_SIGNING_PRIVATE_KEY_FILE: /run/secrets/retention-signing-private-key
+      RETENTION_SIGNING_KEY_ID: ${RETENTION_SIGNING_KEY_ID:-retention-v1}
+      RETENTION_S3_ENDPOINT: ${RETENTION_S3_ENDPOINT:-}
+      RETENTION_S3_REGION: ${RETENTION_S3_REGION:-}
+      RETENTION_S3_BUCKET: ${RETENTION_S3_BUCKET:-}
+      RETENTION_S3_ACCESS_KEY_ID_FILE: /run/secrets/retention-s3-access-key-id
+      RETENTION_S3_SECRET_ACCESS_KEY_FILE: /run/secrets/retention-s3-secret-access-key
+      RETENTION_S3_SESSION_TOKEN_FILE: /run/secrets/retention-s3-session-token
+      RETENTION_POLL_INTERVAL_MS: "5000"
+      RETENTION_LEASE_SECONDS: "120"
+      RETENTION_READY_STALE_LEASE_SECONDS: "1800"
+      RETENTION_S3_TIMEOUT_SECONDS: "120"
+      RETENTION_BATCH_SIZE: "100"
+      RETENTION_CYCLES_PER_POLL: "5"
+      RETENTION_MAX_OBJECT_BYTES: "67108864"
+    secrets:
+      - {source: retention_signing_private_key, target: retention-signing-private-key}
+      - {source: retention_s3_access_key_id, target: retention-s3-access-key-id}
+      - {source: retention_s3_secret_access_key, target: retention-s3-secret-access-key}
+      - {source: retention_s3_session_token, target: retention-s3-session-token}
+    networks: [data, edge]
+
+  retention-control-scheduler:
+    <<: *app-security
+    image: ${RETENTION_CONTROL_SCHEDULER_IMAGE:-merchant-platform-retention-control-scheduler:local}
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: retention-control-scheduler}}
+    # The control profile starts platform-admin, whose readiness requires this
+    # scheduler heartbeat; the retention profile may also run it independently.
+    profiles: [control, retention]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      APP_ENV: production
+      RETENTION_CONTROL_DATABASE_URL: ${RETENTION_CONTROL_DATABASE_URL:-}
+      RETENTION_CONTROL_WORKER_ID: ${RETENTION_CONTROL_WORKER_ID:-compose-retention-control-1}
+      RETENTION_CONTROL_HEALTH_ADDRESS: "127.0.0.1:9102"
+      RETENTION_CONTROL_POLL_MS: "5000"
+      RETENTION_CONTROL_BATCH_SIZE: "25"
+      RETENTION_CONTROL_STALE_SECONDS: "60"
+    networks: [data]
+
+  migration-control-worker:
+    <<: *app-security
+    restart: "no"
+    image: ${MIGRATION_CONTROL_WORKER_IMAGE:-merchant-platform-migration-control-worker:local}
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: migration-control-worker}}
+    profiles: [migration-control]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      APP_ENV: production
+      MIGRATION_EXECUTE: ${MIGRATION_EXECUTE:-false}
+      MIGRATION_DATABASE_URL: ${MIGRATION_CONTROL_DATABASE_URL:-}
+      MIGRATION_ID: ${MIGRATION_ID:-}
+      MIGRATION_SOURCE_ID: ${MIGRATION_SOURCE_ID:-}
+      MIGRATION_WORKER_ID: ${MIGRATION_WORKER_ID:-compose-migration-verifier-1}
+      MIGRATION_VERIFIER_CONFIG_FILE: /run/secrets/migration-verifier-config.json
+      MIGRATION_PROVIDER_PUBLIC_KEYS_FILE: /run/secrets/migration-provider-public-keys.json
+      MIGRATION_PROVIDER_CA_FILE: /run/secrets/migration-provider-ca.pem
+      MIGRATION_PROVIDER_CLIENT_CERT_FILE: /run/secrets/migration-provider-client.crt
+      MIGRATION_PROVIDER_CLIENT_KEY_FILE: /run/secrets/migration-provider-client.key
+    secrets:
+      - {source: migration_verifier_config, target: migration-verifier-config.json}
+      - {source: migration_provider_public_keys, target: migration-provider-public-keys.json}
+      - {source: migration_provider_ca, target: migration-provider-ca.pem}
+      - {source: migration_provider_client_cert, target: migration-provider-client.crt}
+      - {source: migration_provider_client_key, target: migration-provider-client.key}
+    networks: [data, edge]
+
+  migration-traffic-actuator:
+    <<: *app-security
+    restart: "no"
+    image: ${MIGRATION_TRAFFIC_ACTUATOR_IMAGE:-merchant-platform-migration-traffic-actuator:local}
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: migration-traffic-actuator}}
+    profiles: [migration-control]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      APP_ENV: production
+      MIGRATION_ACTUATOR_DATABASE_URL: ${MIGRATION_TRAFFIC_ACTUATOR_DATABASE_URL:-}
+      MIGRATION_ACTUATOR_MIGRATION_ID: ${MIGRATION_ACTUATOR_MIGRATION_ID:-}
+      MIGRATION_ACTUATOR_SWITCH_URL: ${MIGRATION_ACTUATOR_SWITCH_URL:-}
+      MIGRATION_ACTUATOR_SERVER_NAME: ${MIGRATION_ACTUATOR_SERVER_NAME:-}
+      MIGRATION_ACTUATOR_CA_FILE: /run/secrets/migration-actuator-ca.pem
+      MIGRATION_ACTUATOR_CLIENT_CERT_FILE: /run/secrets/migration-actuator-client.crt
+      MIGRATION_ACTUATOR_CLIENT_KEY_FILE: /run/secrets/migration-actuator-client.key
+      MIGRATION_ACTUATOR_REQUEST_SIGNING_KEY_FILE: /run/secrets/migration-actuator-request.key
+      MIGRATION_ACTUATOR_REQUEST_KEY_ID: ${MIGRATION_ACTUATOR_REQUEST_KEY_ID:-}
+      MIGRATION_ACTUATOR_ACK_PUBLIC_KEYS_FILE: /run/secrets/migration-actuator-ack-public-keys.json
+      MIGRATION_ACTUATOR_TIMEOUT_SECONDS: ${MIGRATION_ACTUATOR_TIMEOUT_SECONDS:-20}
+    secrets:
+      - {source: migration_traffic_actuator_ca, target: migration-actuator-ca.pem}
+      - {source: migration_traffic_actuator_client_cert, target: migration-actuator-client.crt}
+      - {source: migration_traffic_actuator_client_key, target: migration-actuator-client.key}
+      - {source: migration_traffic_actuator_request_key, target: migration-actuator-request.key}
+      - {source: migration_traffic_actuator_ack_public_keys, target: migration-actuator-ack-public-keys.json}
+    networks: [data, edge]
+
+  legacy-gateway:
+    <<: *app-security
+    image: ${LEGACY_GATEWAY_IMAGE:-merchant-platform-legacy-gateway:local}
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: legacy-gateway}}
+    # Closed default: no host port and no edge-gateway route. Production must
+    # attach a source-preserving L4 listener; forwarded client IP headers are
+    # deliberately rejected by the process.
+    profiles: [legacy-compat]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      APP_ENV: production
+      LEGACY_COMPAT_ENABLED: "true"
+      LEGACY_DATABASE_URL: ${LEGACY_DATABASE_URL:-}
+      LEGACY_HTTP_ADDRESS: ":8082"
+      LEGACY_HEALTH_ADDRESS: ":9101"
+      LEGACY_PUBLIC_BASE_URL: ${LEGACY_PUBLIC_BASE_URL:-https://legacy.example.invalid}
+      LEGACY_CHECKOUT_BASE_URL: ${LEGACY_CHECKOUT_BASE_URL:-https://checkout.example.invalid}
+      LEGACY_SECRET_DIR: /run/secrets/legacy-credentials
+      LEGACY_CORE_URL: ${LEGACY_CORE_URL:-https://api.example.invalid}
+      LEGACY_CORE_CA_FILE: /run/secrets/legacy-core-ca.pem
+      LEGACY_CORE_SERVER_NAME: ${LEGACY_CORE_SERVER_NAME:-api.example.invalid}
+      LEGACY_CORE_CLIENT_CERT_FILE: /run/secrets/legacy-core-client.crt
+      LEGACY_CORE_CLIENT_KEY_FILE: /run/secrets/legacy-core-client.key
+      LEGACY_WORKER_ID: ${LEGACY_WORKER_ID:-compose-legacy-1}
+      LEGACY_SUNSET_AT: ${LEGACY_SUNSET_AT:-2026-12-31T23:59:59Z}
+      LEGACY_POLL_INTERVAL: 2s
+      LEGACY_CALLBACK_LEASE: 30s
+      LEGACY_BATCH_SIZE: "50"
+    secrets:
+      - {source: legacy_core_ca, target: legacy-core-ca.pem}
+      - {source: legacy_core_client_cert, target: legacy-core-client.crt}
+      - {source: legacy_core_client_key, target: legacy-core-client.key}
+    volumes:
+      - ${LEGACY_SECRET_DIR_HOST:-./legacy-secrets-placeholder}:/run/secrets/legacy-credentials:ro
+    networks: [data, edge]
+
+  financial-api:
+    <<: *app-security
+    image: ${FINANCIAL_API_IMAGE:-merchant-platform-financial-api:local}
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: financial-api}}
+    profiles: [financial]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      FINANCIAL_DATABASE_URL: ${FINANCIAL_API_DATABASE_URL:-}
+      FINANCIAL_LISTEN_ADDR: ":8444"
+      FINANCIAL_TLS_CERT_FILE: /run/secrets/financial-tls.crt
+      FINANCIAL_TLS_KEY_FILE: /run/secrets/financial-tls.key
+      FINANCIAL_TLS_CLIENT_CA_FILE: /run/secrets/financial-client-ca.pem
+      FINANCIAL_OPERATOR_ASSERTION_SECRET_FILE: /run/secrets/financial-assertion-key
+      FINANCIAL_MONITOR_CLIENT_CERT_FILE: /run/secrets/financial-monitor-client.crt
+      FINANCIAL_MONITOR_CLIENT_KEY_FILE: /run/secrets/financial-monitor-client.key
+      FINANCIAL_MONITOR_CA_FILE: /run/secrets/financial-ca.pem
+      FINANCIAL_MONITOR_SERVER_NAME: ${FINANCIAL_MONITOR_SERVER_NAME:-financial-api}
+    secrets:
+      - {source: financial_tls_cert, target: financial-tls.crt}
+      - {source: financial_tls_key, target: financial-tls.key}
+      - {source: financial_assertion_key, target: financial-assertion-key}
+      - {source: financial_client_ca, target: financial-client-ca.pem}
+      - {source: financial_ca, target: financial-ca.pem}
+      - {source: financial_monitor_client_cert, target: financial-monitor-client.crt}
+      - {source: financial_monitor_client_key, target: financial-monitor-client.key}
+    networks: [data]
+  financial-worker:
+    <<: *app-security
+    image: ${FINANCIAL_WORKER_IMAGE:-merchant-platform-financial-worker:local}
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: financial-worker}}
+    profiles: [financial]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      FINANCIAL_DATABASE_URL: ${FINANCIAL_WORKER_DATABASE_URL:-}
+      FINANCIAL_WORKER_ID: ${FINANCIAL_WORKER_ID:-compose-financial-1}
+      FINANCIAL_WORKER_TENANT_IDS: ${FINANCIAL_WORKER_TENANT_IDS:-}
+      FINANCIAL_WORKER_HEALTH_ADDR: ":9093"
+      FINANCIAL_BUILDER_URL: ${FINANCIAL_BUILDER_URL:-}
+      FINANCIAL_BUILDER_TOKEN_FILE: /run/secrets/builder-token
+      FINANCIAL_SIGNER_URL: ${FINANCIAL_SIGNER_URL:-}
+      FINANCIAL_SIGNER_TOKEN_FILE: /run/secrets/signer-token
+      FINANCIAL_BROADCASTER_URL: ${FINANCIAL_BROADCASTER_URL:-}
+      FINANCIAL_BROADCASTER_TOKEN_FILE: /run/secrets/broadcaster-token
+      FINANCIAL_FINALITY_URL: ${FINANCIAL_FINALITY_URL:-}
+      FINANCIAL_FINALITY_TOKEN_FILE: /run/secrets/finality-token
+      FINANCIAL_EVENT_SINK_URL: ${FINANCIAL_EVENT_SINK_URL:-}
+      FINANCIAL_EVENT_SINK_TOKEN_FILE: /run/secrets/event-sink-token
+    secrets:
+      - {source: financial_builder_token, target: builder-token}
+      - {source: financial_signer_token, target: signer-token}
+      - {source: financial_broadcaster_token, target: broadcaster-token}
+      - {source: financial_finality_token, target: finality-token}
+      - {source: financial_event_sink_token, target: event-sink-token}
+    networks: [data, edge]
+
+  gateway:
+    <<: *app-security
+    image: ${GATEWAY_IMAGE:-nginxinc/nginx-unprivileged:1.29.5-alpine}
+    profiles: [edge]
+    depends_on:
+      api: {condition: service_started}
+      management-api: {condition: service_started}
+      admin-api: {condition: service_started}
+    volumes:
+      - ../deploy/gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    secrets:
+      - {source: management_ca, target: management-ca.pem}
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+      - /var/cache/nginx:rw,noexec,nosuid,size=16m
+    networks: [edge]
+
+  blackbox-exporter:
+    image: ${BLACKBOX_IMAGE:-prom/blackbox-exporter:v0.27.0}
+    command: [--config.file=/etc/blackbox/config.yaml]
+    restart: unless-stopped
+    profiles: [observability]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes: ["../deploy/observability/blackbox.yaml:/etc/blackbox/config.yaml:ro"]
+    secrets:
+      - {source: platform_ca, target: platform-ca.pem}
+      - {source: financial_ca, target: financial-ca.pem}
+      - {source: financial_monitor_client_cert, target: financial-monitor-client.crt}
+      - {source: financial_monitor_client_key, target: financial-monitor-client.key}
+      - {source: management_ca, target: management-ca.pem}
+    networks: [data, edge]
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.7.3}
+    command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.path=/prometheus, --storage.tsdb.retention.time=7d]
+    restart: unless-stopped
+    profiles: [observability]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - ../deploy/observability/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+      - ../deploy/observability/prometheus-local-rules.yaml:/etc/prometheus/rules/merchant-platform.yaml:ro
+      - merchant-prometheus:/prometheus
+    networks: [data]
+
+networks:
+  data: {internal: true}
+  eventbus: {internal: true}
+  edge: {}
+
+volumes:
+  merchant-postgres: {}
+  merchant-jetstream: {}
+  merchant-prometheus: {}
+
+# Defaults make static Compose validation possible but cannot start a protected
+# workload. Real files must be supplied through an untracked .env.
+secrets:
+  webhook_envelope_key: {file: "${WEBHOOK_ENVELOPE_KEY_FILE:-/dev/null}"}
+  api_credential_envelope_key: {file: "${API_CREDENTIAL_ENVELOPE_KEY_FILE:-/dev/null}"}
+  management_response_key: {file: "${MANAGEMENT_RESPONSE_KEY_FILE:-/dev/null}"}
+  management_assertion_key: {file: "${MANAGEMENT_ASSERTION_KEY_FILE:-/dev/null}"}
+  management_ca: {file: "${MANAGEMENT_CA_FILE:-/dev/null}"}
+  management_tls_cert: {file: "${MANAGEMENT_TLS_CERT_FILE:-/dev/null}"}
+  management_tls_key: {file: "${MANAGEMENT_TLS_KEY_FILE:-/dev/null}"}
+  receipt_ai_api_key: {file: "${RECEIPT_AI_API_KEY_FILE:-/dev/null}"}
+  platform_assertion_key: {file: "${PLATFORM_ASSERTION_KEY_FILE:-/dev/null}"}
+  platform_ca: {file: "${PLATFORM_CA_FILE:-/dev/null}"}
+  platform_tls_cert: {file: "${PLATFORM_TLS_CERT_FILE:-/dev/null}"}
+  platform_tls_key: {file: "${PLATFORM_TLS_KEY_FILE:-/dev/null}"}
+  migration_manifest_public_keys: {file: "${MIGRATION_MANIFEST_PUBLIC_KEYS_FILE:-/dev/null}"}
+  migration_actuator_public_keys: {file: "${MIGRATION_ACTUATOR_PUBLIC_KEYS_FILE:-/dev/null}"}
+  migration_verifier_config: {file: "${MIGRATION_VERIFIER_CONFIG_FILE:-/dev/null}"}
+  migration_provider_public_keys: {file: "${MIGRATION_PROVIDER_PUBLIC_KEYS_FILE:-/dev/null}"}
+  migration_provider_ca: {file: "${MIGRATION_PROVIDER_CA_FILE:-/dev/null}"}
+  migration_provider_client_cert: {file: "${MIGRATION_PROVIDER_CLIENT_CERT_FILE:-/dev/null}"}
+  migration_provider_client_key: {file: "${MIGRATION_PROVIDER_CLIENT_KEY_FILE:-/dev/null}"}
+  migration_traffic_actuator_ca: {file: "${MIGRATION_ACTUATOR_CA_FILE:-/dev/null}"}
+  migration_traffic_actuator_client_cert: {file: "${MIGRATION_ACTUATOR_CLIENT_CERT_FILE:-/dev/null}"}
+  migration_traffic_actuator_client_key: {file: "${MIGRATION_ACTUATOR_CLIENT_KEY_FILE:-/dev/null}"}
+  migration_traffic_actuator_request_key: {file: "${MIGRATION_ACTUATOR_REQUEST_SIGNING_KEY_FILE:-/dev/null}"}
+  migration_traffic_actuator_ack_public_keys: {file: "${MIGRATION_ACTUATOR_ACK_PUBLIC_KEYS_FILE:-/dev/null}"}
+  platform_outbox_destination_ca: {file: "${PLATFORM_OUTBOX_DESTINATION_CA_FILE:-/dev/null}"}
+  platform_outbox_destination_cert: {file: "${PLATFORM_OUTBOX_DESTINATION_CERT_FILE:-/dev/null}"}
+  platform_outbox_destination_key: {file: "${PLATFORM_OUTBOX_DESTINATION_KEY_FILE:-/dev/null}"}
+  platform_outbox_destination_bearer: {file: "${PLATFORM_OUTBOX_DESTINATION_TOKEN_FILE:-/dev/null}"}
+  merchant_settings_assertion_key: {file: "${MERCHANT_SETTINGS_ASSERTION_KEY_FILE:-/dev/null}"}
+  merchant_settings_tls_cert: {file: "${MERCHANT_SETTINGS_TLS_CERT_FILE:-/dev/null}"}
+  merchant_settings_tls_key: {file: "${MERCHANT_SETTINGS_TLS_KEY_FILE:-/dev/null}"}
+  merchant_settings_client_ca: {file: "${MERCHANT_SETTINGS_CLIENT_CA_FILE:-/dev/null}"}
+  merchant_settings_server_ca: {file: "${MERCHANT_SETTINGS_SERVER_CA_FILE:-/dev/null}"}
+  merchant_settings_client_cert: {file: "${MERCHANT_SETTINGS_INTERNAL_CLIENT_CERT_FILE:-/dev/null}"}
+  merchant_settings_client_key: {file: "${MERCHANT_SETTINGS_INTERNAL_CLIENT_KEY_FILE:-/dev/null}"}
+  merchant_invitation_notifier_bearer: {file: "${MERCHANT_SETTINGS_INVITE_NOTIFIER_BEARER_FILE:-/dev/null}"}
+  merchant_invitation_notifier_ca: {file: "${MERCHANT_SETTINGS_INVITE_NOTIFIER_CA_FILE:-/dev/null}"}
+  financial_assertion_key: {file: "${FINANCIAL_ASSERTION_KEY_FILE:-/dev/null}"}
+  financial_ca: {file: "${FINANCIAL_CA_FILE:-/dev/null}"}
+  financial_tls_cert: {file: "${FINANCIAL_TLS_CERT_FILE:-/dev/null}"}
+  financial_tls_key: {file: "${FINANCIAL_TLS_KEY_FILE:-/dev/null}"}
+  financial_client_ca: {file: "${FINANCIAL_CLIENT_CA_FILE:-/dev/null}"}
+  financial_client_cert: {file: "${FINANCIAL_INTERNAL_CLIENT_CERT_FILE:-/dev/null}"}
+  financial_client_key: {file: "${FINANCIAL_INTERNAL_CLIENT_KEY_FILE:-/dev/null}"}
+  financial_monitor_client_cert: {file: "${FINANCIAL_MONITOR_CLIENT_CERT_FILE:-/dev/null}"}
+  financial_monitor_client_key: {file: "${FINANCIAL_MONITOR_CLIENT_KEY_FILE:-/dev/null}"}
+  financial_builder_token: {file: "${FINANCIAL_BUILDER_TOKEN_FILE:-/dev/null}"}
+  financial_signer_token: {file: "${FINANCIAL_SIGNER_TOKEN_FILE:-/dev/null}"}
+  financial_broadcaster_token: {file: "${FINANCIAL_BROADCASTER_TOKEN_FILE:-/dev/null}"}
+  financial_finality_token: {file: "${FINANCIAL_FINALITY_TOKEN_FILE:-/dev/null}"}
+  financial_event_sink_token: {file: "${FINANCIAL_EVENT_SINK_TOKEN_FILE:-/dev/null}"}
+  reconciliation_api_s3_access_key_id: {file: "${RECONCILIATION_API_S3_ACCESS_KEY_ID_FILE:-/dev/null}"}
+  reconciliation_api_s3_secret_access_key: {file: "${RECONCILIATION_API_S3_SECRET_ACCESS_KEY_FILE:-/dev/null}"}
+  reconciliation_worker_s3_access_key_id: {file: "${RECONCILIATION_WORKER_S3_ACCESS_KEY_ID_FILE:-/dev/null}"}
+  reconciliation_worker_s3_secret_access_key: {file: "${RECONCILIATION_WORKER_S3_SECRET_ACCESS_KEY_FILE:-/dev/null}"}
+  reconciliation_signing_public_key: {file: "${RECONCILIATION_SIGNING_PUBLIC_KEY_FILE:-/dev/null}"}
+  reconciliation_signing_key: {file: "${RECONCILIATION_SIGNING_PRIVATE_KEY_FILE:-/dev/null}"}
+  retention_signing_private_key: {file: "${RETENTION_SIGNING_PRIVATE_KEY_FILE:-/dev/null}"}
+  retention_s3_access_key_id: {file: "${RETENTION_S3_ACCESS_KEY_ID_FILE:-/dev/null}"}
+  retention_s3_secret_access_key: {file: "${RETENTION_S3_SECRET_ACCESS_KEY_FILE:-/dev/null}"}
+  retention_s3_session_token: {file: "${RETENTION_S3_SESSION_TOKEN_FILE:-/dev/null}"}
+  legacy_core_ca: {file: "${LEGACY_CORE_CA_FILE:-/dev/null}"}
+  legacy_core_client_cert: {file: "${LEGACY_CORE_CLIENT_CERT_FILE:-/dev/null}"}
+  legacy_core_client_key: {file: "${LEGACY_CORE_CLIENT_KEY_FILE:-/dev/null}"}
+  nats_server_config: {file: "${NATS_SERVER_CONFIG_FILE:-/dev/null}"}
+  nats_server_ca: {file: "${NATS_SERVER_CA_FILE:-/dev/null}"}
+  nats_server_cert: {file: "${NATS_SERVER_CERT_FILE:-/dev/null}"}
+  nats_server_key: {file: "${NATS_SERVER_KEY_FILE:-/dev/null}"}
+  nats_operator_jwt: {file: "${NATS_OPERATOR_JWT_FILE:-/dev/null}"}
+  outbox_nats_ca: {file: "${OUTBOX_NATS_CA_FILE:-/dev/null}"}
+  outbox_nats_client_cert: {file: "${OUTBOX_NATS_CLIENT_CERT_FILE:-/dev/null}"}
+  outbox_nats_client_key: {file: "${OUTBOX_NATS_CLIENT_KEY_FILE:-/dev/null}"}
+  outbox_nats_publisher_creds: {file: "${OUTBOX_NATS_CREDS_FILE:-/dev/null}"}

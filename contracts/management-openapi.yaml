@@ -1,0 +1,939 @@
+openapi: 3.1.0
+info:
+  title: Merchant Platform Management API
+  version: 2026-08-01
+  description: |
+    Private tenant/merchant management API plus the display-safe public payment-link
+    and checkout capability endpoints. Management mutations are exactly idempotent.
+    One-time secrets are returned only by create/rotate responses.
+servers:
+  - url: https://management.example
+tags:
+  - { name: Public payment links }
+  - { name: Public checkout }
+  - { name: Payment links }
+  - { name: Checkout }
+  - { name: Webhooks }
+  - { name: API clients }
+  - { name: Four-eyes actions }
+  - { name: Matching policies }
+  - { name: Audit }
+paths:
+  /healthz:
+    get:
+      security: []
+      responses:
+        '200': { description: Process is alive, content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } } }
+  /readyz:
+    get:
+      security: []
+      responses:
+        '200': { description: Database and migration are ready, content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } } }
+        '503': { $ref: '#/components/responses/DependencyUnavailable' }
+  /v1/public/payment-links/{token}:
+    get:
+      tags: [Public payment links]
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/PaymentLinkToken'
+      responses:
+        '200':
+          description: Display-safe active link metadata. Payment links have exactly one route.
+          headers: { Cache-Control: { schema: { type: string, const: no-store } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/PublicPaymentLink' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/public/payment-links/{token}/redeem:
+    post:
+      tags: [Public payment links]
+      security: []
+      description: |
+        Atomically consumes one link use, creates a real payment intent, persisted quote,
+        address lease and route, and issues a read-only checkout token. A rollback consumes
+        neither use nor address. The same key/request replays the same token for 24 hours.
+        Return URLs are fixed by the merchant; this request cannot override them.
+      parameters:
+        - $ref: '#/components/parameters/PaymentLinkToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/Origin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RedeemPaymentLinkInput' }
+      responses:
+        '201':
+          description: Bound payment and immediately usable checkout.
+          headers:
+            Idempotency-Replayed: { schema: { type: string, enum: ['true'] } }
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/PaymentLinkRedemption' } } }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/DependencyUnavailable' }
+  /v1/checkout-sessions/{token}:
+    get:
+      tags: [Public checkout]
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CheckoutToken'
+        - $ref: '#/components/parameters/Origin'
+        - { name: If-None-Match, in: header, schema: { type: string } }
+      responses:
+        '200':
+          description: Display-safe checkout polling state.
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string, const: no-store } }
+            Access-Control-Allow-Origin: { schema: { type: string, format: uri } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/CheckoutSession' } } }
+        '304': { description: State is unchanged }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/checkout-sessions/{token}/select-route:
+    post:
+      tags: [Public checkout]
+      security: []
+      description: Available only when the capability includes `select_route`. Embedded tokens require their exact bound Origin; hosted tokens accept no Origin or the exact platform origin.
+      parameters:
+        - $ref: '#/components/parameters/CheckoutToken'
+        - $ref: '#/components/parameters/Origin'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SelectRouteInput' } } }
+      responses:
+        '200': { description: Selected checkout state, content: { application/json: { schema: { $ref: '#/components/schemas/CheckoutSession' } } } }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/checkout-sessions/{token}/receipt:
+    post:
+      tags: [Public checkout]
+      security: []
+      description: |
+        Accepts raw JPEG, PNG, or WebP receipt evidence up to 5 MiB. The admitted
+        Gemini analyzer extracts a possible transaction ID, but the screenshot is
+        never sufficient for credit. A proof worker independently verifies the
+        transaction against the selected route and chain quorum. Raw image bytes are
+        discarded after analysis; only digests and bounded structured evidence remain.
+      parameters:
+        - $ref: '#/components/parameters/CheckoutToken'
+        - $ref: '#/components/parameters/Origin'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          image/jpeg: { schema: { type: string, format: binary, minLength: 128, maxLength: 5242880 } }
+          image/png: { schema: { type: string, format: binary, minLength: 128, maxLength: 5242880 } }
+          image/webp: { schema: { type: string, format: binary, minLength: 128, maxLength: 5242880 } }
+      responses:
+        '202': { description: Receipt analyzed and either a proof was queued or a clearer receipt is required., content: { application/json: { schema: { $ref: '#/components/schemas/ReceiptSubmission' } } } }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/DependencyUnavailable' }
+  /v1/payment-links:
+    post:
+      tags: [Payment links]
+      security: [ { MerchantHMAC: [] } ]
+      description: Stable universal-integration alias owned by management-api. Requires `payment-links:write`; admin assertions are rejected.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PaymentLinkInput' } } } }
+      responses:
+        '201': { description: Created or exact idempotent replay; public_url is revealed only here., content: { application/json: { schema: { $ref: '#/components/schemas/PaymentLink' } } } }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/DependencyUnavailable' }
+    get:
+      tags: [Payment links]
+      security: [ { MerchantHMAC: [] } ]
+      description: Requires `payment-links:read`; returns no bearer token or derived public URL.
+      parameters:
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': { description: Tenant-isolated page., content: { application/json: { schema: { $ref: '#/components/schemas/PaymentLinkPage' } } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/payment-links/{id}:
+    get:
+      tags: [Payment links]
+      security: [ { MerchantHMAC: [] } ]
+      description: Requires `payment-links:read`; admin assertions are rejected.
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      responses:
+        '200': { description: Tenant-isolated link without bearer secret., content: { application/json: { schema: { $ref: '#/components/schemas/PaymentLink' } } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/payment-links/{id}/disable:
+    post:
+      tags: [Payment links]
+      security: [ { MerchantHMAC: [] } ]
+      description: Requires `payment-links:write`, exact expected version and a path-bound idempotency key.
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/VersionInput' } } } }
+      responses:
+        '200': { description: Disabled or exact idempotent replay., content: { application/json: { schema: { $ref: '#/components/schemas/PaymentLink' } } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/checkout-sessions:
+    post:
+      tags: [Checkout]
+      security: [ { MerchantHMAC: [] } ]
+      description: Stable universal-integration alias for issuing a checkout capability for an existing intent. Requires `checkout:write`; admin assertions are rejected.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CheckoutIssueInput' } } } }
+      responses:
+        '201': { description: Opaque capability revealed only now or on exact replay., content: { application/json: { schema: { $ref: '#/components/schemas/CheckoutIssue' } } } }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/DependencyUnavailable' }
+  /v1/management/payment-links:
+    post:
+      tags: [Payment links]
+      security: [ { MerchantHMAC: [] }, { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PaymentLinkInput' } } } }
+      responses:
+        '201': { description: Created; `public_url` is revealed only in this response/replay, content: { application/json: { schema: { $ref: '#/components/schemas/PaymentLink' } } } }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/DependencyUnavailable' }
+    get:
+      tags: [Payment links]
+      security: [ { MerchantHMAC: [] }, { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' } ]
+      responses:
+        '200': { description: Hash-only link records; no bearer token or public URL, content: { application/json: { schema: { $ref: '#/components/schemas/PaymentLinkPage' } } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/management/payment-links/{id}:
+    get:
+      tags: [Payment links]
+      security: [ { MerchantHMAC: [] }, { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
+      responses:
+        '200': { description: Payment link, content: { application/json: { schema: { $ref: '#/components/schemas/PaymentLink' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/management/payment-links/{id}/disable:
+    post:
+      tags: [Payment links]
+      security: [ { MerchantHMAC: [] }, { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ResourceID' }, { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/VersionInput' } } } }
+      responses:
+        '200': { description: Disabled, content: { application/json: { schema: { $ref: '#/components/schemas/PaymentLink' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/management/checkout-sessions:
+    post:
+      tags: [Checkout]
+      security: [ { MerchantHMAC: [] }, { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CheckoutIssueInput' } } } }
+      responses:
+        '201': { description: Opaque token revealed only now/replay, content: { application/json: { schema: { $ref: '#/components/schemas/CheckoutIssue' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/management/webhook-endpoints:
+    post:
+      tags: [Webhooks]
+      security: [ { MerchantHMAC: [] }, { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/WebhookEndpointInput' } } } }
+      responses:
+        '201': { description: Unverified endpoint and one-time signing secret, content: { application/json: { schema: { $ref: '#/components/schemas/WebhookEndpointSecret' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    get:
+      tags: [Webhooks]
+      security: [ { MerchantHMAC: [] }, { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' } ]
+      responses:
+        '200': { description: Endpoints, content: { application/json: { schema: { $ref: '#/components/schemas/WebhookEndpointPage' } } } }
+  /v1/management/webhook-endpoints/{id}:
+    get:
+      tags: [Webhooks]
+      security: [ { MerchantHMAC: [] }, { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
+      responses:
+        '200': { description: Endpoint, content: { application/json: { schema: { $ref: '#/components/schemas/WebhookEndpoint' } } } }
+    patch:
+      tags: [Webhooks]
+      security: [ { MerchantHMAC: [] }, { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ResourceID' }, { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/WebhookUpdateInput' } } } }
+      responses:
+        '200': { description: Updated; URL changes return endpoint to unverified, content: { application/json: { schema: { $ref: '#/components/schemas/WebhookEndpoint' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/management/webhook-endpoints/{id}/verify:
+    post:
+      tags: [Webhooks]
+      security: [ { MerchantHMAC: [] }, { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ResourceID' }, { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false } } } }
+      responses:
+        '200': { description: Challenge verified with pinned public IP and no redirects, content: { application/json: { schema: { $ref: '#/components/schemas/WebhookEndpoint' } } } }
+        '503': { $ref: '#/components/responses/DependencyUnavailable' }
+  /v1/management/webhook-endpoints/{id}/rotate-secret:
+    post:
+      tags: [Webhooks]
+      security: [ { MerchantHMAC: [] }, { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ResourceID' }, { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OverlapInput' } } } }
+      responses:
+        '200': { description: New one-time secret; old event key remains usable only during overlap, content: { application/json: { schema: { $ref: '#/components/schemas/WebhookEndpointSecret' } } } }
+  /v1/management/webhook-endpoints/{id}/disable:
+    post:
+      tags: [Webhooks]
+      description: Internal execution endpoint. Requires a request-bound admin assertion containing the two actors frozen by an approved durable action; the admin BFF never forwards browser calls here directly.
+      security: [ { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ResourceID' }, { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DangerousInput' } } } }
+      responses:
+        '200': { description: Disabled, content: { application/json: { schema: { $ref: '#/components/schemas/WebhookEndpoint' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/management/webhook-endpoints/{id}/disable-requests:
+    post:
+      tags: [Four-eyes actions]
+      description: Freezes the exact webhook, resource version, reason, request hash and mutation idempotency key for ten minutes. Requires recent step-up; does not disable the endpoint yet.
+      security: [ { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ResourceID' }, { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DangerousInput' } } } }
+      responses:
+        '202': { description: Pending approval or exact idempotent replay, content: { application/json: { schema: { $ref: '#/components/schemas/ManagementActionRequest' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/management/webhook-endpoints/{id}/deliveries:
+    get:
+      tags: [Webhooks]
+      security: [ { MerchantHMAC: [] }, { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ResourceID' }, { $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' } ]
+      responses:
+        '200': { description: Sanitized delivery metadata, content: { application/json: { schema: { $ref: '#/components/schemas/WebhookDeliveryPage' } } } }
+  /v1/management/webhook-deliveries/{id}/retry:
+    post:
+      tags: [Webhooks]
+      description: Requeues the existing delivery for the same public event ID; no replacement event is generated.
+      security: [ { MerchantHMAC: [] }, { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ResourceID' }, { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DangerousInput' } } } }
+      responses:
+        '200': { description: Same delivery requeued, content: { application/json: { schema: { $ref: '#/components/schemas/WebhookDelivery' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/management/api-clients:
+    post:
+      tags: [API clients]
+      security: [ { MerchantHMAC: [] }, { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/APIClientInput' } } } }
+      responses:
+        '201': { description: Client plus one-time HMAC secret, content: { application/json: { schema: { $ref: '#/components/schemas/APIClientSecret' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    get:
+      tags: [API clients]
+      security: [ { MerchantHMAC: [] }, { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' } ]
+      responses:
+        '200': { description: Metadata only, content: { application/json: { schema: { $ref: '#/components/schemas/APIClientPage' } } } }
+  /v1/management/api-clients/{id}/rotate:
+    post:
+      tags: [API clients]
+      security: [ { MerchantHMAC: [] }, { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ResourceID' }, { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OverlapInput' } } } }
+      responses:
+        '200': { description: New one-time secret and overlap metadata, content: { application/json: { schema: { $ref: '#/components/schemas/APIClientSecret' } } } }
+  /v1/management/api-clients/{id}/revoke:
+    post:
+      tags: [API clients]
+      description: Internal execution endpoint reached only by the durable action executor after distinct approval.
+      security: [ { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ResourceID' }, { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DangerousInput' } } } }
+      responses:
+        '200': { description: Every key version revoked, content: { application/json: { schema: { $ref: '#/components/schemas/APIClient' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/management/api-clients/{id}/revoke-requests:
+    post:
+      tags: [Four-eyes actions]
+      description: Freezes the exact API client, resource version, reason, request hash and mutation idempotency key for ten minutes. Requires recent step-up; does not revoke credentials yet.
+      security: [ { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ResourceID' }, { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DangerousInput' } } } }
+      responses:
+        '202': { description: Pending approval or exact idempotent replay, content: { application/json: { schema: { $ref: '#/components/schemas/ManagementActionRequest' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/management/action-requests/{category}:
+    get:
+      tags: [Four-eyes actions]
+      security: [ { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ActionCategory' }, { $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' } ]
+      responses:
+        '200': { description: Tenant- and merchant-scoped action requests for the selected permission category, content: { application/json: { schema: { $ref: '#/components/schemas/ManagementActionPage' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/management/action-requests/{category}/{id}:
+    get:
+      tags: [Four-eyes actions]
+      security: [ { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ActionCategory' }, { $ref: '#/components/parameters/ResourceID' } ]
+      responses:
+        '200': { description: Durable action metadata; frozen body and mutation key are never returned, content: { application/json: { schema: { $ref: '#/components/schemas/ManagementActionRequest' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/management/action-requests/{category}/{id}/approve:
+    post:
+      tags: [Four-eyes actions]
+      description: Requires a distinct administrator with recent step-up and the same category permission. Approval is bound to this method, target and exact body; successful approval executes the frozen mutation with its original idempotency key.
+      security: [ { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ActionCategory' }, { $ref: '#/components/parameters/ResourceID' }, { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ManagementActionDecision' } } } }
+      responses:
+        '200': { description: Completed action or exact approval replay, content: { application/json: { schema: { $ref: '#/components/schemas/ManagementActionRequest' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/DependencyUnavailable' }
+  /v1/management/action-requests/{category}/{id}/reject:
+    post:
+      tags: [Four-eyes actions]
+      description: Rejects a pending request. The rejecting administrator must be distinct, recently stepped-up, and have the same category permission.
+      security: [ { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ActionCategory' }, { $ref: '#/components/parameters/ResourceID' }, { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ManagementActionDecision' } } } }
+      responses:
+        '200': { description: Rejected action or exact decision replay, content: { application/json: { schema: { $ref: '#/components/schemas/ManagementActionRequest' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/management/audit:
+    get:
+      tags: [Audit]
+      security: [ { MerchantHMAC: [] }, { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' } ]
+      responses:
+        '200': { description: Hash-chained append-only audit page, content: { application/json: { schema: { $ref: '#/components/schemas/AuditPage' } } } }
+  /v1/management/matching-policies:
+    get:
+      tags: [Matching policies]
+      security: [ { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' } ]
+      responses:
+        '200': { description: Merchant-scoped policy change page, content: { application/json: { schema: { $ref: '#/components/schemas/MatchingPolicyPage' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Matching policies]
+      description: Creates a deterministic matching-policy draft. Interactive admin step-up is required; API keys are rejected.
+      security: [ { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/MatchingPolicyInput' } } } }
+      responses:
+        '201': { description: Draft created, content: { application/json: { schema: { $ref: '#/components/schemas/MatchingPolicyChange' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/management/matching-policies/{id}:
+    get:
+      tags: [Matching policies]
+      security: [ { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
+      responses:
+        '200': { description: Policy change, content: { application/json: { schema: { $ref: '#/components/schemas/MatchingPolicyChange' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/management/matching-policies/{id}/request-approval:
+    post:
+      tags: [Matching policies]
+      security: [ { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ResourceID' }, { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/MatchingPolicyMutation' } } } }
+      responses:
+        '200': { description: Approval requested, content: { application/json: { schema: { $ref: '#/components/schemas/MatchingPolicyChange' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/management/matching-policies/{id}/approve:
+    post:
+      tags: [Matching policies]
+      description: Requires a distinct, recently stepped-up approver with `matching_policy:approve`.
+      security: [ { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ResourceID' }, { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/MatchingPolicyMutation' } } } }
+      responses:
+        '200': { description: Approved, content: { application/json: { schema: { $ref: '#/components/schemas/MatchingPolicyChange' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/management/matching-policies/{id}/activate:
+    post:
+      tags: [Matching policies]
+      description: Activates an approved immutable policy for routes created at or after `effective_at`; existing routes retain their bound version.
+      security: [ { ManagementAdmin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/ResourceID' }, { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/MatchingPolicyActivation' } } } }
+      responses:
+        '200': { description: Activated, content: { application/json: { schema: { $ref: '#/components/schemas/MatchingPolicyChange' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+components:
+  securitySchemes:
+    MerchantHMAC:
+      type: apiKey
+      in: header
+      name: Merchant-Signature
+      description: Existing request-bound merchant HMAC scheme; key, timestamp, nonce and content digest headers are also required.
+    ManagementAdmin:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: "ManagementAdmin <payload>.<hmac>, issued server-side by the admin BFF and bound to audience, method, canonical target, exact body SHA-256 and single-use JTI."
+  parameters:
+    PaymentLinkToken: { name: token, in: path, required: true, schema: { type: string, pattern: '^pl_[A-Za-z0-9_-]{43}$' } }
+    CheckoutToken: { name: token, in: path, required: true, schema: { type: string, pattern: '^cs_[A-Za-z0-9_-]{43}$' } }
+    ResourceID: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    ActionCategory: { name: category, in: path, required: true, schema: { type: string, enum: [webhook-disable, api-client-revoke] } }
+    IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 8, maxLength: 255 } }
+    MerchantKeyId: { name: Merchant-Key-Id, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+    MerchantTimestamp: { name: Merchant-Timestamp, in: header, required: true, schema: { type: integer, format: int64 } }
+    MerchantNonce: { name: Merchant-Nonce, in: header, required: true, schema: { type: string, minLength: 16, maxLength: 128 } }
+    ContentDigest: { name: Content-Digest, in: header, required: true, description: Exact SHA-256 digest of the request body; GET signs the empty-body digest., schema: { type: string } }
+    MerchantSignature: { name: Merchant-Signature, in: header, required: true, schema: { type: string } }
+    Origin: { name: Origin, in: header, required: false, schema: { type: string, format: uri, pattern: '^https://[^/?#]+$' } }
+    Cursor: { name: cursor, in: query, schema: { type: string, format: uuid } }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+  responses:
+    InvalidRequest: { description: Invalid or ambiguous request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
+    Unauthenticated: { description: Authentication failed, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
+    Forbidden: { description: Scope, step-up, or approval is missing, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
+    NotFound: { description: Unknown or unusable capability/resource; sensitive states are indistinguishable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
+    Conflict: { description: State/version/idempotency conflict, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
+    RateLimited: { description: Public capability rate limit exceeded, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
+    DependencyUnavailable: { description: Required database, KMS key, quote, address pool, DNS, or remote verifier unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
+  schemas:
+    ReceiptAnalysis:
+      type: object
+      additionalProperties: false
+      required: [confidence, reason_codes]
+      properties:
+        transaction_id: { type: string, minLength: 6, maxLength: 256 }
+        network_hint: { type: string, maxLength: 128 }
+        asset_hint: { type: string, maxLength: 128 }
+        amount: { type: string, maxLength: 128 }
+        destination: { type: string, maxLength: 512 }
+        occurred_at: { type: string, format: date-time }
+        confidence: { type: integer, minimum: 0, maximum: 100 }
+        reason_codes: { type: array, maxItems: 16, uniqueItems: true, items: { type: string, maxLength: 64 } }
+    ReceiptSubmission:
+      type: object
+      additionalProperties: false
+      required: [id, payment_id, status, chain_id, analysis, message, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        payment_id: { type: string, format: uuid }
+        status: { type: string, enum: [transaction_not_visible, proof_queued] }
+        proof_id: { type: string, format: uuid }
+        chain_id: { type: string }
+        transaction_id: { type: string, minLength: 6, maxLength: 256 }
+        correlation_method: { type: string, enum: [receipt_transaction_id, unique_amount_time_transfer] }
+        matched_transfer_event_id: { type: string, format: uuid }
+        analysis: { $ref: '#/components/schemas/ReceiptAnalysis' }
+        message: { type: string }
+        created_at: { type: string, format: date-time }
+    Health: { type: object, additionalProperties: false, required: [status], properties: { status: { type: string, enum: [ok, ready] } } }
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error, request_id]
+      properties:
+        error: { type: object, additionalProperties: false, required: [code, message], properties: { code: { type: string }, message: { type: string } } }
+        request_id: { type: string }
+    RouteSelector:
+      type: object
+      additionalProperties: false
+      required: [provider]
+      oneOf:
+        - required: [chain_id, asset_id]
+          properties: { provider: { const: on_chain } }
+          not: { required: [provider_id] }
+        - required: [provider_id, asset_id]
+          properties: { provider: { const: hosted_gateway } }
+          not: { required: [chain_id] }
+      properties:
+        provider: { type: string, enum: [on_chain, hosted_gateway] }
+        chain_id: { type: string, minLength: 1, maxLength: 128 }
+        provider_id: { type: string, minLength: 1, maxLength: 128 }
+        asset_id: { type: string, minLength: 1, maxLength: 128 }
+    PublicPaymentLink:
+      type: object
+      additionalProperties: false
+      required: [name, amount_minor, currency, currency_scale, description, allowed_routes]
+      properties:
+        name: { type: string }
+        amount_minor: { type: string, pattern: '^[1-9][0-9]{0,77}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        currency_scale: { type: integer, minimum: 0, maximum: 9 }
+        description: { type: string, maxLength: 1000 }
+        allowed_routes: { type: array, minItems: 1, maxItems: 1, items: { $ref: '#/components/schemas/RouteSelector' } }
+        expires_at: { type: string, format: date-time }
+    RedeemPaymentLinkInput:
+      type: object
+      additionalProperties: false
+      properties:
+        customer_reference: { type: string, maxLength: 128 }
+        metadata: { type: object, additionalProperties: true, maxProperties: 64 }
+    PaymentLinkRedemption:
+      type: object
+      additionalProperties: false
+      required: [intent_id, checkout, session, success_url, cancel_url]
+      properties:
+        intent_id: { type: string, format: uuid }
+        checkout: { $ref: '#/components/schemas/CheckoutIssue' }
+        session: { $ref: '#/components/schemas/CheckoutSession' }
+        success_url: { type: string, format: uri, pattern: '^https://' }
+        cancel_url: { type: string, format: uri, pattern: '^https://' }
+    CheckoutIssueInput:
+      type: object
+      additionalProperties: false
+      required: [intent_id, ttl_seconds]
+      properties:
+        intent_id: { type: string, format: uuid }
+        audience: { type: string, enum: [hosted_checkout, embedded_checkout], default: hosted_checkout }
+        allowed_origin: { type: string, format: uri, pattern: '^https://[^/?#]+$' }
+        ttl_seconds: { type: integer, minimum: 60, maximum: 1800 }
+        allowed_actions: { type: array, uniqueItems: true, minItems: 1, maxItems: 2, items: { type: string, enum: [read, select_route] } }
+    CheckoutIssue:
+      type: object
+      additionalProperties: false
+      required: [token, url, expires_at]
+      properties:
+        token: { type: string, pattern: '^cs_[A-Za-z0-9_-]{43}$' }
+        url: { type: string, format: uri, pattern: '^https://.*/checkout\?token=cs_' }
+        expires_at: { type: string, format: date-time }
+    CheckoutSession:
+      type: object
+      additionalProperties: false
+      required: [intent_id, order_id, status, expires_at, selected_route_id, routes]
+      oneOf:
+        - properties:
+            status: { enum: [pending, detected, partially_paid, confirming, needs_review, settled, expired] }
+            routes: { minItems: 1 }
+        - properties:
+            status: { const: preparing_payment_route }
+            selected_route_id: { const: '' }
+            routes: { maxItems: 0 }
+        - properties:
+            status: { const: payment_route_failed }
+            selected_route_id: { const: '' }
+            routes: { maxItems: 0 }
+      properties:
+        intent_id: { type: string, format: uuid }
+        order_id: { type: string }
+        status: { type: string, enum: [pending, detected, partially_paid, confirming, needs_review, settled, expired, preparing_payment_route, payment_route_failed] }
+        expires_at: { type: string, format: date-time }
+        selected_route_id: { type: string }
+        routes: { type: array, maxItems: 64, items: { $ref: '#/components/schemas/CheckoutRoute' } }
+    CheckoutRoute:
+      type: object
+      additionalProperties: false
+      required: [id, provider, asset, amount]
+      allOf:
+        - oneOf:
+            - not: { anyOf: [ { required: [received_amount] }, { required: [remaining_amount] }, { required: [payment_count] }, { required: [top_up_allowed] } ] }
+            - required: [received_amount, remaining_amount, payment_count, top_up_allowed]
+      oneOf:
+        - required: [network, address]
+          properties: { provider: { const: on_chain } }
+          not: { anyOf: [ { required: [provider_id] }, { required: [payment_url] } ] }
+        - required: [provider_id, payment_url]
+          properties: { provider: { const: hosted_gateway } }
+          not: { anyOf: [ { required: [network] }, { required: [address] }, { required: [transaction_hash] }, { required: [explorer_url] }, { required: [received_amount] }, { required: [remaining_amount] }, { required: [payment_count] }, { required: [top_up_allowed] } ] }
+      properties:
+        id: { type: string, format: uuid }
+        provider: { type: string, enum: [on_chain, hosted_gateway] }
+        provider_id: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' }
+        network: { type: string }
+        asset: { type: string }
+        amount: { type: string, pattern: '^[0-9]+(?:\.[0-9]+)?$' }
+        received_amount: { type: string, pattern: '^[0-9]+(?:\.[0-9]+)?$' }
+        remaining_amount: { type: string, pattern: '^[0-9]+(?:\.[0-9]+)?$' }
+        payment_count: { type: integer, minimum: 1 }
+        top_up_allowed: { type: boolean, description: True only while the frozen route policy permits another transfer to this exact on-chain route. }
+        address: { type: string }
+        payment_url: { type: string, format: uri, pattern: '^https://' }
+        transaction_hash: { type: string }
+        explorer_url: { type: string, format: uri, pattern: '^https://' }
+    SelectRouteInput: { type: object, additionalProperties: false, required: [route_id], properties: { route_id: { type: string, format: uuid } } }
+    PaymentLinkInput:
+      type: object
+      additionalProperties: false
+      required: [name, amount_minor, currency, currency_scale, description, allowed_routes, metadata, success_url, cancel_url, max_uses]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        amount_minor: { type: string, pattern: '^[1-9][0-9]{0,77}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        currency_scale: { type: integer, minimum: 0, maximum: 9 }
+        description: { type: string, maxLength: 1000 }
+        allowed_routes: { type: array, minItems: 1, maxItems: 1, items: { $ref: '#/components/schemas/RouteSelector' } }
+        metadata: { type: object, additionalProperties: true }
+        allowed_origin: { type: string, format: uri, pattern: '^https://[^/?#]+$' }
+        success_url: { type: string, format: uri, pattern: '^https://' }
+        cancel_url: { type: string, format: uri, pattern: '^https://' }
+        max_uses: { type: integer, minimum: 1, maximum: 1000000 }
+        expires_at: { type: string, format: date-time }
+    PaymentLink:
+      type: object
+      additionalProperties: false
+      required: [id, name, amount_minor, currency, currency_scale, description, allowed_routes, metadata, success_url, cancel_url, max_uses, use_count, settled_count, settled_minor, status, created_at, updated_at, version]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        public_url: { type: string, format: uri, description: Present only on create idempotency response }
+        amount_minor: { type: string, pattern: '^[1-9][0-9]{0,77}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        currency_scale: { type: integer, minimum: 0, maximum: 9 }
+        description: { type: string, maxLength: 1000 }
+        allowed_routes: { type: array, minItems: 1, maxItems: 1, items: { $ref: '#/components/schemas/RouteSelector' } }
+        metadata: { type: object, additionalProperties: true }
+        allowed_origin: { type: string, format: uri, pattern: '^https://[^/?#]+$' }
+        success_url: { type: string, format: uri, pattern: '^https://' }
+        cancel_url: { type: string, format: uri, pattern: '^https://' }
+        max_uses: { type: integer, minimum: 1, maximum: 1000000 }
+        expires_at: { type: string, format: date-time }
+        use_count: { type: integer, minimum: 0 }
+        settled_count: { type: integer, minimum: 0 }
+        settled_minor: { type: string, pattern: '^[0-9]{1,78}$' }
+        status: { type: string, enum: [active, disabled, expired] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+    PaymentLinkPage: { type: object, additionalProperties: false, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/PaymentLink' } }, next_cursor: { type: string, format: uuid } } }
+    VersionInput: { type: object, additionalProperties: false, required: [version], properties: { version: { type: integer, minimum: 1 } } }
+    OverlapInput: { type: object, additionalProperties: false, required: [version, overlap_seconds], properties: { version: { type: integer, minimum: 1 }, overlap_seconds: { type: integer, minimum: 300, maximum: 604800 } } }
+    DangerousInput: { type: object, additionalProperties: false, required: [version, reason], properties: { version: { type: integer, minimum: 1 }, reason: { type: string, minLength: 1, maxLength: 1000 } } }
+    ManagementActionDecision: { type: object, additionalProperties: false, required: [reason], properties: { reason: { type: string, minLength: 1, maxLength: 1000 } } }
+    ManagementActionRequest:
+      type: object
+      additionalProperties: false
+      required: [id, operation, resource_type, resource_id, resource_version, request_reason, requested_by, status, created_at, expires_at, updated_at, version]
+      properties:
+        id: { type: string, format: uuid }
+        operation: { type: string, enum: [webhook.disable, api_client.revoke] }
+        resource_type: { type: string, enum: [webhook_endpoint, api_client] }
+        resource_id: { type: string, format: uuid }
+        resource_version: { type: integer, minimum: 1 }
+        request_reason: { type: string, minLength: 1, maxLength: 1000 }
+        requested_by: { type: string, format: uuid }
+        approved_by: { type: string, format: uuid }
+        approval_reason: { type: string, minLength: 1, maxLength: 1000 }
+        status: { type: string, enum: [pending_approval, executing, completed, rejected, failed] }
+        failure_code: { type: string, enum: [stale_resource_version, resource_not_found, authorization_changed, invalid_action] }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        approved_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+    ManagementActionPage: { type: object, additionalProperties: false, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/ManagementActionRequest' } }, next_cursor: { type: string, format: uuid } } }
+    MatchingPolicyInput:
+      type: object
+      additionalProperties: false
+      required: [accumulate_partials, underpayment_tolerance_bps, overpayment_mode, accept_late_within_grace, require_same_sender, gasfree_enabled, gasfree_fee_collectors]
+      properties:
+        accumulate_partials: { type: boolean }
+        underpayment_tolerance_bps: { type: integer, minimum: 0, maximum: 10000 }
+        overpayment_mode: { type: string, enum: [manual_review, credit_all, credit_expected_hold_excess] }
+        accept_late_within_grace: { type: boolean }
+        require_same_sender: { type: boolean }
+        gasfree_enabled: { type: boolean }
+        gasfree_fee_collectors: { type: array, uniqueItems: true, maxItems: 100, items: { type: string, minLength: 1, maxLength: 256 } }
+    MatchingPolicyMutation: { type: object, additionalProperties: false, required: [version, reason], properties: { version: { type: integer, minimum: 1 }, reason: { type: string, minLength: 8, maxLength: 1000 } } }
+    MatchingPolicyActivation: { type: object, additionalProperties: false, required: [version, reason, effective_at], properties: { version: { type: integer, minimum: 1 }, reason: { type: string, minLength: 8, maxLength: 1000 }, effective_at: { type: string, format: date-time } } }
+    MatchingPolicyChange:
+      type: object
+      additionalProperties: false
+      required: [id, proposed_version, accumulate_partials, underpayment_tolerance_bps, overpayment_mode, accept_late_within_grace, require_same_sender, gasfree_enabled, gasfree_fee_collectors, status, created_by, created_at, updated_at, version]
+      properties:
+        id: { type: string, format: uuid }
+        proposed_version: { type: integer, minimum: 1 }
+        accumulate_partials: { type: boolean }
+        underpayment_tolerance_bps: { type: integer, minimum: 0, maximum: 10000 }
+        overpayment_mode: { type: string, enum: [manual_review, credit_all, credit_expected_hold_excess] }
+        accept_late_within_grace: { type: boolean }
+        require_same_sender: { type: boolean }
+        gasfree_enabled: { type: boolean }
+        gasfree_fee_collectors: { type: array, uniqueItems: true, items: { type: string } }
+        status: { type: string, enum: [draft, pending_approval, approved, activated, rejected] }
+        created_by: { type: string, format: uuid }
+        requested_by: { type: string, format: uuid }
+        approved_by: { type: string, format: uuid }
+        activated_by: { type: string, format: uuid }
+        request_reason: { type: string }
+        approval_reason: { type: string }
+        activation_reason: { type: string }
+        approved_at: { type: string, format: date-time }
+        activated_at: { type: string, format: date-time }
+        effective_at: { type: string, format: date-time }
+        activated_policy_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+    MatchingPolicyPage: { type: object, additionalProperties: false, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/MatchingPolicyChange' } }, next_cursor: { type: string, format: uuid } } }
+    WebhookEndpointInput:
+      type: object
+      additionalProperties: false
+      required: [url, event_types, timeout_ms, max_concurrency]
+      properties:
+        url: { type: string, format: uri, pattern: '^https://' }
+        event_types: { $ref: '#/components/schemas/WebhookEventTypeSelection' }
+        timeout_ms: { type: integer, minimum: 100, maximum: 30000 }
+        max_concurrency: { type: integer, minimum: 1, maximum: 100 }
+    WebhookUpdateInput:
+      type: object
+      additionalProperties: false
+      required: [url, event_types, timeout_ms, max_concurrency, version]
+      properties:
+        url: { type: string, format: uri, pattern: '^https://' }
+        event_types: { $ref: '#/components/schemas/WebhookEventTypeSelection' }
+        timeout_ms: { type: integer, minimum: 100, maximum: 30000 }
+        max_concurrency: { type: integer, minimum: 1, maximum: 100 }
+        version: { type: integer, minimum: 1 }
+    WebhookEndpoint:
+      type: object
+      additionalProperties: false
+      required: [id, url, event_types, timeout_ms, max_concurrency, status, signing_key_id, created_at, updated_at, version]
+      properties:
+        id: { type: string, format: uuid }
+        url: { type: string, format: uri, pattern: '^https://' }
+        event_types: { $ref: '#/components/schemas/WebhookEventTypeSelection' }
+        timeout_ms: { type: integer, minimum: 100, maximum: 30000 }
+        max_concurrency: { type: integer, minimum: 1, maximum: 100 }
+        status: { type: string, enum: [unverified, active, disabled] }
+        signing_key_id: { type: string }
+        overlap_ends_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+    WebhookEventTypeSelection:
+      type: array
+      uniqueItems: true
+      minItems: 1
+      maxItems: 32
+      items:
+        type: string
+        enum: ['*', payment.intent.created, payment.route.created, payment.observed, payment.confirming, payment.partially_paid, payment.needs_review, payment.settled, payment.overpaid, payment.expired, payment.cancelled, payment.reorged, payment.resolution.updated]
+    WebhookEndpointSecret:
+      type: object
+      additionalProperties: false
+      required: [endpoint, key_id, secret]
+      properties: { endpoint: { $ref: '#/components/schemas/WebhookEndpoint' }, key_id: { type: string }, secret: { type: string, writeOnly: true } }
+    WebhookEndpointPage: { type: object, additionalProperties: false, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/WebhookEndpoint' } }, next_cursor: { type: string, format: uuid } } }
+    WebhookDelivery:
+      type: object
+      additionalProperties: false
+      required: [id, event_id, event_type, status, attempt_count, next_attempt_at, created_at, updated_at, version]
+      properties:
+        id: { type: string, format: uuid }
+        event_id: { type: string, format: uuid }
+        event_type: { type: string }
+        status: { type: string, enum: [pending, leased, retry, acknowledged, dead_letter] }
+        attempt_count: { type: integer, minimum: 0 }
+        last_http_status: { type: integer }
+        last_error_category: { type: string }
+        response_snippet: { type: string, maxLength: 512 }
+        next_attempt_at: { type: string, format: date-time }
+        acknowledged_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+    WebhookDeliveryPage: { type: object, additionalProperties: false, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/WebhookDelivery' } }, next_cursor: { type: string, format: uuid } } }
+    APIClientInput:
+      type: object
+      additionalProperties: false
+      required: [name, scopes]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        scopes: { type: array, uniqueItems: true, minItems: 1, maxItems: 32, items: { type: string, description: 'Includes the least-privilege `reconciliation:read` scope for signed ledger report creation, status, and download.' } }
+        valid_until: { type: string, format: date-time }
+    APIKeyVersion:
+      type: object
+      additionalProperties: false
+      required: [id, key_id, number, status, valid_from]
+      properties:
+        id: { type: string, format: uuid }
+        key_id: { type: string }
+        number: { type: integer, minimum: 1 }
+        status: { type: string, enum: [current, overlap, revoked] }
+        valid_from: { type: string, format: date-time }
+        valid_until: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+    APIClient:
+      type: object
+      additionalProperties: false
+      required: [id, name, status, scopes, versions, created_at, updated_at, version]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        status: { type: string, enum: [active, revoked] }
+        scopes: { type: array, uniqueItems: true, items: { type: string } }
+        versions: { type: array, items: { $ref: '#/components/schemas/APIKeyVersion' } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+    APIClientSecret:
+      type: object
+      additionalProperties: false
+      required: [client, key_id, secret]
+      properties: { client: { $ref: '#/components/schemas/APIClient' }, key_id: { type: string }, secret: { type: string, writeOnly: true } }
+    APIClientPage: { type: object, additionalProperties: false, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/APIClient' } }, next_cursor: { type: string, format: uuid } } }
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required: [id, sequence, actor_id, action, resource_type, resource_id, details, previous_hash, entry_hash, occurred_at]
+      properties:
+        id: { type: string, format: uuid }
+        sequence: { type: integer, minimum: 1 }
+        actor_id: { type: string, format: uuid }
+        session_id: { type: string }
+        action: { type: string }
+        resource_type: { type: string }
+        resource_id: { type: string, format: uuid }
+        reason: { type: string }
+        details: { type: object, additionalProperties: true }
+        previous_hash: { type: string, pattern: '^[0-9a-f]*$' }
+        entry_hash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        occurred_at: { type: string, format: date-time }
+    AuditPage: { type: object, additionalProperties: false, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/AuditEvent' } }, next_cursor: { type: string, format: uuid } } }

@@ -1,0 +1,42 @@
+# syntax=docker/dockerfile:1.7
+# Build exactly one Go command per image. BINARY is intentionally a command
+# directory name, not an arbitrary package path.
+ARG GO_IMAGE=golang:1.26.5-bookworm
+ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
+
+FROM ${GO_IMAGE} AS build
+WORKDIR /src
+COPY backend/go.mod backend/go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY backend/ ./
+COPY deploy/docker/probe.go /probe/main.go
+ARG BINARY
+ARG VERSION=dev
+ARG REVISION=unknown
+ARG TARGETOS=linux
+ARG TARGETARCH
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    case "${BINARY}" in \
+      api|worker|scanner|provider-health-worker|admin-api|management-api|platform-admin-api|platform-outbox-publisher|financial-api|financial-worker|rate-worker|reconciliation-worker|retention-worker|retention-control-scheduler|legacy-gateway|merchant-settings-api|merchant-session-revocation-worker|merchant-invitation-delivery-worker|migration-control|migration-control-worker|migration-traffic-actuator) ;; \
+      *) echo "unsupported BINARY=${BINARY}" >&2; exit 2 ;; \
+    esac && \
+    test -d "./cmd/${BINARY}" && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
+      -buildvcs=false -trimpath \
+      -ldflags="-s -w -X main.version=${VERSION} -X main.revision=${REVISION}" \
+      -o /out/service "./cmd/${BINARY}" && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
+      -buildvcs=false -trimpath -ldflags="-s -w" -o /out/probe /probe/main.go
+
+FROM ${RUNTIME_IMAGE}
+ARG BINARY
+ARG VERSION=dev
+ARG REVISION=unknown
+LABEL org.opencontainers.image.title="Merchant Platform ${BINARY}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}"
+COPY --from=build --chown=65532:65532 /out/service /app/service
+COPY --from=build --chown=65532:65532 /out/probe /app/probe
+USER 65532:65532
+ENTRYPOINT ["/app/service"]

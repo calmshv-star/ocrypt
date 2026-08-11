@@ -1,0 +1,36 @@
+name: Feature request
+description: Propose a bounded product, protocol, SDK, or operations improvement.
+title: "[Feature]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user or operator problem without prescribing an unsafe implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+    validations:
+      required: true
+  - type: textarea
+    id: invariants
+    attributes:
+      label: Financial, security, compatibility, and legal constraints
+      description: Include exact-money, idempotency, reorg, custody, privacy, licensing, and rollout considerations where relevant.
+    validations:
+      required: true
+  - type: dropdown
+    id: compatibility
+    attributes:
+      label: Compatibility impact
+      options:
+        - Backward compatible
+        - New versioned contract required
+        - Migration required
+        - Unknown
+    validations:
+      required: true

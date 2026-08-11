@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://merchant.example/schemas/rate-provider-v1.schema.json",
+  "title": "Normalized rate provider response v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "base_asset",
+    "quote_asset",
+    "price_numerator",
+    "price_denominator",
+    "observed_at",
+    "provider_observation_id"
+  ],
+  "properties": {
+    "base_asset": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$", "description": "Exact platform assets.id." },
+    "quote_asset": { "type": "string", "pattern": "^[A-Z]{3}$", "description": "Three-letter fiat currency used by PersistedPlanner." },
+    "price_numerator": { "type": "string", "pattern": "^[1-9][0-9]{0,77}$", "description": "Numerator of quote-fiat units per one whole base asset; positive uint256." },
+    "price_denominator": { "type": "string", "pattern": "^[1-9][0-9]{0,77}$", "description": "Denominator of quote-fiat units per one whole base asset; positive uint256." },
+    "observed_at": { "type": "string", "format": "date-time" },
+    "provider_observation_id": { "type": "string", "minLength": 1, "maxLength": 256 }
+  }
+}

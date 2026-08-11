@@ -1,0 +1,1198 @@
+openapi: 3.1.0
+info:
+  title: Merchant Platform Admin BFF API
+  version: 1.0.0
+  description: >-
+    Same-origin operator control plane. It uses an opaque server-side session;
+    merchant HMAC credentials and signing secrets are never accepted from or
+    returned to the browser. All financial overrides require a recent MFA
+    step-up and an independent second operator before the core verifier runs.
+servers:
+  - url: https://admin.example
+    description: Replace with the exact ADMIN_PUBLIC_ORIGIN. Cross-origin use is unsupported.
+tags:
+  - name: Authentication
+  - name: Operations
+  - name: Read models
+  - name: Availability
+  - name: Merchant management
+  - name: Matching policies
+  - name: Platform configuration
+  - name: Migration control
+  - name: Provider configuration
+  - name: Retention control
+paths:
+  /admin/v1/auth/login:
+    get:
+      tags: [Authentication]
+      summary: Start OIDC authorization-code with PKCE
+      security: []
+      parameters:
+        - {name: return, in: query, schema: {type: string, pattern: '^/(?!/)'}, required: false}
+      responses:
+        '303': {description: Redirect to the pinned OIDC authorization endpoint}
+        '400': {$ref: '#/components/responses/Problem'}
+  /admin/v1/auth/invitation:
+    post:
+      tags: [Authentication]
+      summary: Start an invitation-bound OIDC enrollment with MFA and PKCE
+      description: >-
+        Same-origin browser initiation only. The BFF canonical-decodes the 43-character token,
+        resolves its SHA-256 through lookup_merchant_invitation(bytea), and persists only the
+        invitation ID, scope and normalized email in the one-time login attempt. The response
+        never reflects the token or invitation metadata. Invalid, expired, revoked and used
+        invitations are indistinguishable.
+      security: []
+      parameters:
+        - {name: Origin, in: header, required: true, schema: {type: string, format: uri}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [token]
+              properties:
+                token: {type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$'}
+      responses:
+        '200':
+          description: Generic pinned authorization URL; an HttpOnly OIDC correlation cookie is set.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [authorization_url]
+                properties: {authorization_url: {type: string, format: uri}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '429': {$ref: '#/components/responses/Problem'}
+  /admin/v1/auth/callback:
+    get:
+      tags: [Authentication]
+      summary: Consume one-time OIDC state and establish the admin session
+      security: []
+      parameters:
+        - {name: state, in: query, required: true, schema: {type: string, minLength: 43}}
+        - {name: code, in: query, required: true, schema: {type: string, minLength: 1}}
+      responses:
+        '303': {description: Session and CSRF cookies set; invitation callbacks receive an inert invitation-bound session and a generic /#/invite redirect}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/auth/step-up:
+    get:
+      tags: [Authentication]
+      summary: Start a fresh MFA ceremony for sensitive operations
+      parameters:
+        - {name: return, in: query, schema: {type: string, pattern: '^/(?!/)'}, required: false}
+      responses:
+        '303': {description: Redirect to pinned OIDC endpoint with prompt=login and required ACR}
+        '401': {$ref: '#/components/responses/Problem'}
+  /admin/v1/session/me:
+    get:
+      tags: [Authentication]
+      summary: Return server-derived roles, permissions and scopes
+      responses:
+        '200':
+          description: Active principal. No merchant credentials are present.
+          content: {application/json: {schema: {$ref: '#/components/schemas/Principal'}}}
+        '401': {$ref: '#/components/responses/Problem'}
+  /admin/v1/session/logout:
+    post:
+      tags: [Authentication]
+      summary: Revoke the current server-side session
+      security: [{sessionCookie: [], csrfHeader: []}]
+      responses:
+        '204': {description: Session revoked and cookies cleared}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/overview:
+    get:
+      tags: [Read models]
+      summary: Operational overview
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
+      responses:
+        '200': {description: Overview, content: {application/json: {schema: {$ref: '#/components/schemas/Overview'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/intents:
+    get:
+      tags: [Read models]
+      summary: Payment intents page
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Intents, content: {application/json: {schema: {$ref: '#/components/schemas/IntentPage'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/transfers:
+    get:
+      tags: [Read models]
+      summary: On-chain transfers page
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Transfers, content: {application/json: {schema: {$ref: '#/components/schemas/TransferPage'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/unmatched:
+    get:
+      tags: [Read models]
+      summary: Merchant-scoped unmatched cases with latest candidate set only
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Cases, content: {application/json: {schema: {$ref: '#/components/schemas/UnmatchedPage'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/webhooks/endpoints:
+    get:
+      tags: [Read models]
+      summary: Webhook endpoint metadata and health; signing secrets are excluded
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Endpoints, content: {application/json: {schema: {$ref: '#/components/schemas/WebhookPage'}}}}
+    post:
+      tags: [Merchant management]
+      summary: Create a webhook endpoint and reveal its signing secret once
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/WebhookEndpointInput'}}}}
+      responses:
+        '201': {description: Created endpoint and one-time secret, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/WebhookEndpointSecret'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/assets:
+    get:
+      tags: [Read models]
+      summary: Assets and scanner health
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Assets, content: {application/json: {schema: {$ref: '#/components/schemas/AssetPage'}}}}
+  /admin/v1/reconciliation:
+    get:
+      tags: [Read models]
+      summary: Tenant-level reconciliation runs
+      description: Merchant-scoped callers receive no tenant-wide reconciliation rows.
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Runs, content: {application/json: {schema: {$ref: '#/components/schemas/ReconciliationPage'}}}}
+  /admin/v1/audit:
+    get:
+      tags: [Read models]
+      summary: Tamper-evident scoped audit chain
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Audit rows, content: {application/json: {schema: {$ref: '#/components/schemas/AuditPage'}}}}
+  /admin/v1/unmatched/{id}/claim:
+    post:
+      tags: [Operations]
+      summary: Claim a case using optimistic version and idempotency fences
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
+      requestBody: {$ref: '#/components/requestBodies/OperatorCommand'}
+      responses:
+        '200': {description: Updated case, content: {application/json: {schema: {$ref: '#/components/schemas/Unmatched'}}}}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/unmatched/{id}/release:
+    post:
+      tags: [Operations]
+      summary: Release a claimed case
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
+      requestBody: {$ref: '#/components/requestBodies/OperatorCommand'}
+      responses:
+        '200': {description: Updated case, content: {application/json: {schema: {$ref: '#/components/schemas/Unmatched'}}}}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/unmatched/{id}/resolution-requests:
+    post:
+      tags: [Operations]
+      summary: Create the real core manual resolution and request second approval
+      description: >-
+        Atomically fences the latest merchant candidate, case version and route,
+        inserts core manual_resolutions in approval_required, updates the case,
+        stores idempotency, and appends audit. AI output alone is never sufficient.
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ResolutionInput'}}}
+      responses:
+        '202': {description: Pending independent approval, content: {application/json: {schema: {$ref: '#/components/schemas/Action'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/action-requests/{id}:
+    get:
+      tags: [Operations]
+      summary: Inspect approval state
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
+      responses:
+        '200': {description: Action, content: {application/json: {schema: {$ref: '#/components/schemas/Action'}}}}
+  /admin/v1/action-requests/{id}/approve:
+    post:
+      tags: [Operations]
+      summary: Approve with a different operator and queue independent verification
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
+      requestBody: {$ref: '#/components/requestBodies/Decision'}
+      responses:
+        '200': {description: Core resolution moved to verification_requested, content: {application/json: {schema: {$ref: '#/components/schemas/Action'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/action-requests/{id}/reject:
+    post:
+      tags: [Operations]
+      summary: Reject with a different operator and reopen the case
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
+      requestBody: {$ref: '#/components/requestBodies/Decision'}
+      responses:
+        '200': {description: Rejected action, content: {application/json: {schema: {$ref: '#/components/schemas/Action'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/webhook-deliveries/{id}/replay:
+    post:
+      tags: [Operations]
+      summary: Requeue a persisted failed delivery
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ReplayInput'}}}
+      responses:
+        '204': {description: Delivery requeued}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/webhook-deliveries/{id}/retry:
+    post:
+      tags: [Merchant management]
+      summary: Retry the same persisted delivery and event ID
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/DangerousInput'}}}}
+      responses:
+        '200': {description: Delivery requeued, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/WebhookDelivery'}}}}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/api-clients:
+    get:
+      tags: [Merchant management]
+      summary: List API clients without secrets
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: API client metadata, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/APIClientPage'}}}}
+    post:
+      tags: [Merchant management]
+      summary: Create an API client and reveal its secret once
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/APIClientInput'}}}}
+      responses:
+        '201': {description: Client and one-time secret, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/APIClientSecret'}}}}
+  /admin/v1/payment-links:
+    get:
+      tags: [Merchant management]
+      summary: List payment links without bearer capabilities
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Payment links, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/PaymentLinkPage'}}}}
+    post:
+      tags: [Merchant management]
+      summary: Create a payment link and reveal its public URL once
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/PaymentLinkInput'}}}}
+      responses:
+        '201': {description: Payment link, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/PaymentLink'}}}}
+  /admin/v1/payment-links/{id}:
+    get:
+      tags: [Merchant management]
+      summary: Get payment-link metadata
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
+      responses:
+        '200': {description: Payment link, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/PaymentLink'}}}}
+  /admin/v1/payment-links/{id}/disable:
+    post:
+      tags: [Merchant management]
+      summary: Disable a payment link with optimistic versioning
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/VersionInput'}}}}
+      responses:
+        '200': {description: Disabled link, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/PaymentLink'}}}}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/checkout-sessions:
+    post:
+      tags: [Merchant management]
+      summary: Issue a short-lived hosted or embedded checkout capability
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/CheckoutIssueInput'}}}}
+      responses:
+        '201': {description: One-time checkout token and URL, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/CheckoutIssue'}}}}
+  /admin/v1/webhooks/endpoints/{id}:
+    get:
+      tags: [Merchant management]
+      summary: Get webhook endpoint metadata
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
+      responses:
+        '200': {description: Endpoint, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/WebhookEndpoint'}}}}
+    patch:
+      tags: [Merchant management]
+      summary: Update a webhook endpoint
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/WebhookUpdateInput'}}}}
+      responses:
+        '200': {description: Updated endpoint, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/WebhookEndpoint'}}}}
+  /admin/v1/webhooks/endpoints/{id}/verify:
+    post:
+      tags: [Merchant management]
+      summary: Verify the endpoint with a pinned-public-IP challenge
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
+      responses:
+        '200': {description: Verified endpoint, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/WebhookEndpoint'}}}}
+  /admin/v1/webhooks/endpoints/{id}/rotate-secret:
+    post:
+      tags: [Merchant management]
+      summary: Rotate a webhook secret with bounded overlap
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/OverlapInput'}}}}
+      responses:
+        '200': {description: Endpoint and one-time new secret, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/WebhookEndpointSecret'}}}}
+  /admin/v1/webhooks/endpoints/{id}/deliveries:
+    get:
+      tags: [Merchant management]
+      summary: List sanitized delivery history
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Deliveries, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/WebhookDeliveryPage'}}}}
+  /admin/v1/api-clients/{id}/rotate:
+    post:
+      tags: [Merchant management]
+      summary: Rotate an API credential with bounded overlap
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/OverlapInput'}}}}
+      responses:
+        '200': {description: Client and one-time new secret, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/APIClientSecret'}}}}
+  /admin/v1/webhooks/endpoints/{id}/disable-requests:
+    post:
+      tags: [Merchant management]
+      summary: Create a ten-minute four-eyes webhook-disable request
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/DangerousInput'}}}}
+      responses:
+        '202': {description: Pending action, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/ManagementActionRequest'}}}}
+  /admin/v1/api-clients/{id}/revoke-requests:
+    post:
+      tags: [Merchant management]
+      summary: Create a ten-minute four-eyes API-client revoke request
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/DangerousInput'}}}}
+      responses:
+        '202': {description: Pending action, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/ManagementActionRequest'}}}}
+  /admin/v1/management-audit:
+    get:
+      tags: [Merchant management]
+      summary: Read the management hash chain
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Management audit, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/AuditPage'}}}}
+  /admin/v1/management-actions/{category}:
+    get:
+      tags: [Merchant management]
+      summary: List durable four-eyes management actions
+      parameters: [{$ref: '#/components/parameters/ManagementActionCategory'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Action requests, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/ManagementActionPage'}}}}
+  /admin/v1/management-actions/{category}/{id}:
+    get:
+      tags: [Merchant management]
+      summary: Get a durable four-eyes action
+      parameters: [{$ref: '#/components/parameters/ManagementActionCategory'}, {$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
+      responses:
+        '200': {description: Action request, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/ManagementActionRequest'}}}}
+  /admin/v1/management-actions/{category}/{id}/approve:
+    post:
+      tags: [Merchant management]
+      summary: Independently approve and execute the frozen dangerous mutation
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ManagementActionCategory'}, {$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/ManagementActionDecision'}}}}
+      responses:
+        '200': {description: Completed action or exact replay, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/ManagementActionRequest'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/management-actions/{category}/{id}/reject:
+    post:
+      tags: [Merchant management]
+      summary: Independently reject the frozen dangerous mutation
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ManagementActionCategory'}, {$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/ManagementActionDecision'}}}}
+      responses:
+        '200': {description: Rejected action or exact replay, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/ManagementActionRequest'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/matching-policies:
+    get:
+      tags: [Matching policies]
+      summary: List deterministic matching-policy changes
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Policy change page, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/MatchingPolicyPage'}}}}
+    post:
+      tags: [Matching policies]
+      summary: Create a matching-policy draft
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/MatchingPolicyInput'}}}}
+      responses:
+        '201': {description: Draft, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/MatchingPolicyChange'}}}}
+  /admin/v1/matching-policies/{id}:
+    get:
+      tags: [Matching policies]
+      summary: Get matching-policy change
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
+      responses:
+        '200': {description: Policy change, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/MatchingPolicyChange'}}}}
+  /admin/v1/matching-policies/{id}/request-approval:
+    post:
+      tags: [Matching policies]
+      summary: Request independent policy approval
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/MatchingPolicyMutation'}}}}
+      responses:
+        '200': {description: Approval requested, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/MatchingPolicyChange'}}}}
+  /admin/v1/matching-policies/{id}/approve:
+    post:
+      tags: [Matching policies]
+      summary: Approve as a distinct stepped-up operator
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/MatchingPolicyMutation'}}}}
+      responses:
+        '200': {description: Approved change, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/MatchingPolicyChange'}}}}
+  /admin/v1/matching-policies/{id}/activate:
+    post:
+      tags: [Matching policies]
+      summary: Activate an approved immutable policy version
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/MatchingPolicyActivation'}}}}
+      responses:
+        '200': {description: Activated change, content: {application/json: {schema: {$ref: './management-openapi.yaml#/components/schemas/MatchingPolicyChange'}}}}
+  /admin/v1/platform/changes:
+    get:
+      tags: [Platform configuration]
+      summary: List platform configuration changes
+      parameters: [{$ref: '#/components/parameters/PlatformTenant'}]
+      responses:
+        '200': {description: Change page, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ChangePage'}}}}
+    post:
+      tags: [Platform configuration]
+      summary: Create a platform configuration draft
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/PlatformTenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/CreateChange'}}}}
+      responses:
+        '201': {description: Draft, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ChangeRequest'}}}}
+  /admin/v1/platform/changes/{id}:
+    get:
+      tags: [Platform configuration]
+      summary: Get platform configuration change
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/PlatformTenant'}]
+      responses:
+        '200': {description: Change, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ChangeRequest'}}}}
+  /admin/v1/platform/changes/{id}/request-approval:
+    $ref: '#/components/pathItems/PlatformDecision'
+  /admin/v1/platform/changes/{id}/approve:
+    $ref: '#/components/pathItems/PlatformDecision'
+  /admin/v1/platform/changes/{id}/reject:
+    $ref: '#/components/pathItems/PlatformDecision'
+  /admin/v1/platform/changes/{id}/schedule:
+    post:
+      tags: [Platform configuration]
+      summary: Schedule an approved change
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/PlatformTenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ScheduleInput'}}}}
+      responses:
+        '200': {description: Scheduled change, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ChangeRequest'}}}}
+  /admin/v1/platform/changes/{id}/activate:
+    post:
+      tags: [Platform configuration]
+      summary: Activate an approved due change
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/PlatformTenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ActivateInput'}}}}
+      responses:
+        '200': {description: Immutable snapshot, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/Snapshot'}}}}
+  /admin/v1/platform/rollbacks:
+    post:
+      tags: [Platform configuration]
+      summary: Create a rollback change request
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/PlatformTenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/RollbackInput'}}}}
+      responses:
+        '201': {description: Rollback draft, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ChangeRequest'}}}}
+  /admin/v1/platform/snapshots:
+    get:
+      tags: [Platform configuration]
+      summary: List immutable active and historic snapshots
+      parameters: [{$ref: '#/components/parameters/PlatformTenant'}]
+      responses:
+        '200': {description: Snapshot page, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/SnapshotPage'}}}}
+  /admin/v1/platform/emergency-pauses:
+    post:
+      tags: [Platform configuration]
+      summary: Execute an audited emergency pause
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/PlatformTenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/PauseInput'}}}}
+      responses:
+        '204': {description: Pause applied}
+  /admin/v1/platform/migrations:
+    get:
+      tags: [Migration control]
+      operationId: listAdminMigrationRuns
+      summary: List tenant-scoped secret-free migration runs
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Migration run page, content: {application/json: {schema: {$ref: '#/components/schemas/MigrationRunPage'}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+    post:
+      tags: [Migration control]
+      operationId: createAdminMigrationRun
+      summary: Dry-run or create a tenant migration run
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './migration-control-openapi.yaml#/components/schemas/CreateRun'}}}}
+      responses:
+        '200': {description: Non-mutating admission report, content: {application/json: {schema: {$ref: '#/components/schemas/MigrationAdmissionReport'}}}}
+        '201': {description: Created migration run, content: {application/json: {schema: {$ref: './migration-control-openapi.yaml#/components/schemas/Run'}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /admin/v1/platform/migrations/{id}:
+    get:
+      tags: [Migration control]
+      operationId: getAdminMigrationRun
+      summary: Get a tenant migration run
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}]
+      responses:
+        '200': {description: Migration run, content: {application/json: {schema: {$ref: './migration-control-openapi.yaml#/components/schemas/Run'}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /admin/v1/platform/migrations/{id}/manifests:
+    post:
+      tags: [Migration control]
+      operationId: attachAdminMigrationManifest
+      summary: Validate or attach immutable two-signer manifest evidence
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './migration-control-openapi.yaml#/components/schemas/AttachManifest'}}}}
+      responses:
+        '200': {description: Non-mutating or inadmissible report, content: {application/json: {schema: {$ref: '#/components/schemas/MigrationAdmissionReport'}}}}
+        '201': {description: Immutable signed manifest evidence, content: {application/json: {schema: {$ref: '#/components/schemas/MigrationStoredManifest'}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /admin/v1/platform/migrations/{id}/transition-requests:
+    post:
+      tags: [Migration control]
+      operationId: requestAdminMigrationTransition
+      summary: Dry-run or request a versioned migration transition
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './migration-control-openapi.yaml#/components/schemas/TransitionInput'}}}}
+      responses:
+        '200': {description: Non-mutating or inadmissible report, content: {application/json: {schema: {$ref: '#/components/schemas/MigrationAdmissionReport'}}}}
+        '202': {description: Pending independent decision, content: {application/json: {schema: {$ref: '#/components/schemas/MigrationTransitionRequest'}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /admin/v1/platform/migration-transition-requests/{id}/approve:
+    post: {$ref: '#/components/pathItems/MigrationDecision'}
+  /admin/v1/platform/migration-transition-requests/{id}/reject:
+    post: {$ref: '#/components/pathItems/MigrationDecision'}
+  /admin/v1/platform/migration-transition-requests/{id}/execute:
+    post:
+      tags: [Migration control]
+      operationId: executeAdminMigrationTransition
+      summary: Execute an approved transition as a distinct senior operator
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './migration-control-openapi.yaml#/components/schemas/ExecuteInput'}}}}
+      responses:
+        '200': {description: Non-mutating admission report, content: {application/json: {schema: {$ref: '#/components/schemas/MigrationAdmissionReport'}}}}
+        '202': {description: Executed transition or exact action awaiting the traffic actuator, content: {application/json: {schema: {$ref: './migration-control-openapi.yaml#/components/schemas/Run'}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /admin/v1/team/roles:
+    get:
+      tags: [Merchant management]
+      summary: List the closed merchant role catalogue after DB-backed membership authorization
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/RequiredMerchant'}]
+      responses:
+        '200': {description: Merchant roles, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/RolePage'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/team/members:
+    get:
+      tags: [Merchant management]
+      summary: List active and historical merchant members
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/RequiredMerchant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Merchant members, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/MemberPage'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/team/members/{id}/roles:
+    post:
+      tags: [Merchant management]
+      summary: Replace ordinary roles or return the frozen high-risk approval requirement
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/RequiredMerchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/RoleChange'}}}}
+      responses:
+        '200': {description: Updated member, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/Member'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/team/members/{id}/disable:
+    post: {$ref: '#/components/pathItems/MemberMutation'}
+  /admin/v1/team/members/{id}/remove:
+    post: {$ref: '#/components/pathItems/MemberMutation'}
+  /admin/v1/team/invitations:
+    get:
+      tags: [Merchant management]
+      summary: List merchant invitations without token material
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/RequiredMerchant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Invitations, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/InvitationPage'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+    post:
+      tags: [Merchant management]
+      summary: Create an invitation; a copy-once token is returned only in this response
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/RequiredMerchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/CreateInvitation'}}}}
+      responses:
+        '201': {description: Invitation, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/Invitation'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/team/invitations/{id}/revoke:
+    post:
+      tags: [Merchant management]
+      summary: Revoke an invitation with optimistic version fencing
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/RequiredMerchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/VersionReason'}}}}
+      responses:
+        '200': {description: Revoked invitation, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/Invitation'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/team/invitations/accept:
+    post:
+      tags: [Merchant management]
+      summary: Accept an opaque invitation with the matching invitation-bound OIDC session
+      description: >-
+        Tenant and merchant headers are forbidden. The BFF derives scope only from a canonical
+        token hash lookup and requires the session's bound invitation ID and verified email to
+        match; an already-active verified identity may accept a fresh matching-email invitation.
+        A used token is visible only to the exact user/session enrollment that accepted it, solely
+        to replay the same idempotency key after a lost response. Acceptance creates merchant membership in the private service and, in the same
+        PostgreSQL transaction, activates any inert JIT identity and promotes that session.
+        The JIT path creates no platform role binding or financial permission. Invalid, expired,
+        revoked, used or differently bound invitations are indistinguishable.
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [token], properties: {token: {type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$'}}}}}}
+      responses:
+        '200': {description: Created or restored merchant membership, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/Member'}}}}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/team/security-actions:
+    get:
+      tags: [Merchant management]
+      summary: List high-risk merchant access requests
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/RequiredMerchant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Security requests, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/SecurityActionPage'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+    post:
+      tags: [Merchant management]
+      summary: Create a frozen high-risk request after fresh MFA
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/RequiredMerchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/CreateSecurityAction'}}}}
+      responses:
+        '202': {description: Pending independent approval, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/SecurityAction'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/team/security-actions/{id}/approve:
+    post: {$ref: '#/components/pathItems/SecurityActionDecision'}
+  /admin/v1/team/security-actions/{id}/reject:
+    post: {$ref: '#/components/pathItems/SecurityActionDecision'}
+  /admin/v1/project-settings:
+    get:
+      tags: [Merchant management]
+      summary: Read non-financial merchant project settings
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/RequiredMerchant'}]
+      responses:
+        '200': {description: Project settings, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/ProjectSettings'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+    put:
+      tags: [Merchant management]
+      summary: Update the allowed non-financial project settings with optimistic version fencing
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/RequiredMerchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/UpdateProjectSettings'}}}}
+      responses:
+        '200': {description: Updated settings, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/ProjectSettings'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/financial/sweeps:
+    get:
+      tags: [Financial cabinet]
+      summary: List tenant-scoped treasury sweeps from the private financial service
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/FinancialAfter'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Sweep page, content: {application/json: {schema: {$ref: './financial-openapi.yaml#/components/schemas/SweepPageEnvelope'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+    post:
+      tags: [Financial cabinet]
+      summary: Request a policy-constrained sweep; custody execution is not exposed
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './financial-openapi.yaml#/components/schemas/SweepRequestInput'}}}}
+      responses:
+        '201': {description: Sweep aggregate, content: {application/json: {schema: {$ref: './financial-openapi.yaml#/components/schemas/SweepEnvelope'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/financial/sweeps/{id}:
+    get:
+      tags: [Financial cabinet]
+      summary: Get one tenant-scoped sweep
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}]
+      responses:
+        '200': {description: Sweep aggregate, content: {application/json: {schema: {$ref: './financial-openapi.yaml#/components/schemas/SweepEnvelope'}}}}
+        '404': {$ref: '#/components/responses/Problem'}
+  /admin/v1/financial/sweeps/{id}/approve:
+    post: {$ref: '#/components/pathItems/FinancialSweepDecision'}
+  /admin/v1/financial/sweeps/{id}/cancel:
+    post: {$ref: '#/components/pathItems/FinancialSweepDecision'}
+  /admin/v1/financial/refunds:
+    get:
+      tags: [Financial cabinet]
+      summary: List tenant-scoped verified-destination refunds
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/FinancialAfter'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Refund page, content: {application/json: {schema: {$ref: './financial-openapi.yaml#/components/schemas/RefundPageEnvelope'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+    post:
+      tags: [Financial cabinet]
+      summary: Request a policy-constrained verified-destination refund; custody execution is not exposed
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './financial-openapi.yaml#/components/schemas/RefundRequestInput'}}}}
+      responses:
+        '201': {description: Refund aggregate, content: {application/json: {schema: {$ref: './financial-openapi.yaml#/components/schemas/RefundEnvelope'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/financial/refunds/{id}:
+    get:
+      tags: [Financial cabinet]
+      summary: Get one tenant-scoped refund
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}]
+      responses:
+        '200': {description: Refund aggregate, content: {application/json: {schema: {$ref: './financial-openapi.yaml#/components/schemas/RefundEnvelope'}}}}
+        '404': {$ref: '#/components/responses/Problem'}
+  /admin/v1/financial/refunds/{id}/approve:
+    post: {$ref: '#/components/pathItems/FinancialRefundDecision'}
+  /admin/v1/financial/refunds/{id}/cancel:
+    post: {$ref: '#/components/pathItems/FinancialRefundDecision'}
+  /admin/v1/financial/reconciliation-runs:
+    get:
+      tags: [Financial cabinet]
+      summary: List tenant-scoped financial reconciliation runs
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/FinancialAfter'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Reconciliation page, content: {application/json: {schema: {$ref: './financial-openapi.yaml#/components/schemas/ReconciliationPageEnvelope'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+    post:
+      tags: [Financial cabinet]
+      summary: Request a deterministic financial reconciliation run
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [asset_ids], properties: {asset_ids: {type: array, minItems: 1, uniqueItems: true, items: {type: string}}}}}}}
+      responses:
+        '201': {description: Reconciliation aggregate, content: {application/json: {schema: {$ref: './financial-openapi.yaml#/components/schemas/ReconciliationEnvelope'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/financial/reconciliation-runs/{id}:
+    get:
+      tags: [Financial cabinet]
+      summary: Get one reconciliation aggregate and its completed report evidence
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}]
+      responses:
+        '200': {description: Reconciliation aggregate, content: {application/json: {schema: {$ref: './financial-openapi.yaml#/components/schemas/ReconciliationEnvelope'}}}}
+        '404': {$ref: '#/components/responses/Problem'}
+  /admin/v1/financial/reconciliation-runs/{id}/execute:
+    post:
+      tags: [Financial cabinet]
+      summary: Execute an evidence-only reconciliation as an independent approver
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_version,cutoff_at,reason], properties: {expected_version: {type: integer, minimum: 1}, cutoff_at: {type: string, format: date-time}, reason: {type: string, minLength: 1, maxLength: 2048}}}}}}
+      responses:
+        '200': {description: Completed reconciliation aggregate, content: {application/json: {schema: {$ref: './financial-openapi.yaml#/components/schemas/ReconciliationEnvelope'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/providers:
+    get:
+      tags: [Provider operations]
+      summary: List secret-free provider bindings and closed health state
+      parameters: [{$ref: '#/components/parameters/PlatformTenant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Provider page, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ProviderPage'}}}}
+  /admin/v1/providers/{id}:
+    get:
+      tags: [Provider operations]
+      summary: Get one secret-free provider binding
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/PlatformTenant'}]
+      responses:
+        '200': {description: Provider binding, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ProviderBinding'}}}}
+  /admin/v1/provider-change-requests:
+    get:
+      tags: [Provider operations]
+      summary: List provider pause and unpause requests
+      parameters: [{$ref: '#/components/parameters/PlatformTenant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Provider change page, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ProviderChangePage'}}}}
+  /admin/v1/provider-policy-requests:
+    get:
+      tags: [Provider operations]
+      summary: List secret-free hosted provider policy requests and activation state
+      parameters: [{$ref: '#/components/parameters/PlatformTenant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Hosted provider policy page, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/HostedProviderPolicyPage'}}}}
+  /admin/v1/providers/{id}/pause-requests:
+    post:
+      tags: [Provider operations]
+      summary: Request a provider pause with recent step-up and version fencing
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/PlatformTenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ProviderStatusRequest'}}}}
+      responses:
+        '202': {description: Pending independent approval, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ProviderChangeRequest'}}}}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/providers/{id}/unpause-requests:
+    post:
+      tags: [Provider operations]
+      summary: Request an approved-policy provider unpause with recent step-up
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/PlatformTenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ProviderStatusRequest'}}}}
+      responses:
+        '202': {description: Pending independent approval, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ProviderChangeRequest'}}}}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/providers/{id}/policy-requests:
+    post:
+      tags: [Provider operations]
+      summary: Request an immutable bounded hosted-provider policy and private bootstrap probe
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/PlatformTenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/HostedProviderPolicyRequest'}}}}
+      responses:
+        '202': {description: Pending independent approval; the bootstrap reference is never returned, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/HostedProviderPolicyVersion'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/provider-change-requests/{id}/approve:
+    post: {$ref: '#/components/pathItems/ProviderDecision'}
+  /admin/v1/provider-change-requests/{id}/reject:
+    post: {$ref: '#/components/pathItems/ProviderDecision'}
+  /admin/v1/provider-policy-requests/{id}/approve:
+    post: {$ref: '#/components/pathItems/HostedProviderPolicyDecision'}
+  /admin/v1/provider-policy-requests/{id}/reject:
+    post: {$ref: '#/components/pathItems/HostedProviderPolicyDecision'}
+  /admin/v1/provider-config-versions:
+    get:
+      tags: [Provider configuration]
+      summary: List scoped secret-free hosted-provider configuration versions
+      parameters: [{$ref: '#/components/parameters/ProviderConfigurationTenant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Secret-free immutable configuration page, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ProviderConfigurationPage'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/provider-config-versions/{id}:
+    get:
+      tags: [Provider configuration]
+      summary: Get one scoped secret-free configuration version
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/ProviderConfigurationTenant'}]
+      responses:
+        '200': {description: Secret-free immutable configuration version, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ProviderConfigurationVersion'}}}}
+        '404': {$ref: '#/components/responses/Problem'}
+  /admin/v1/provider-configurations/{id}/requests:
+    post:
+      tags: [Provider configuration]
+      summary: Request an immutable provider configuration version with write-only external references
+      description: Origins, paths, external file references and the private probe reference are accepted only on this write path and never returned to the browser, audit stream or outbox.
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'}}
+        - $ref: '#/components/parameters/ProviderConfigurationTenant'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ProviderConfigurationRequest'}}}}
+      responses:
+        '202': {description: Pending distinct approval, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ProviderConfigurationVersion'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/provider-config-requests/{id}/approve:
+    post: {$ref: '#/components/pathItems/ProviderConfigurationDecision'}
+  /admin/v1/provider-config-requests/{id}/reject:
+    post: {$ref: '#/components/pathItems/ProviderConfigurationDecision'}
+  /admin/v1/retention/policies:
+    get: {$ref: './retention-control-openapi.yaml#/paths/~1admin~1v1~1retention~1policies/get'}
+  /admin/v1/retention/policy-requests:
+    get: {$ref: './retention-control-openapi.yaml#/paths/~1admin~1v1~1retention~1policy-requests/get'}
+    post: {$ref: './retention-control-openapi.yaml#/paths/~1admin~1v1~1retention~1policy-requests/post'}
+  /admin/v1/retention/policy-requests/{id}/approve:
+    post: {$ref: './retention-control-openapi.yaml#/paths/~1admin~1v1~1retention~1policy-requests~1{id}~1approve/post'}
+  /admin/v1/retention/policy-requests/{id}/reject:
+    post: {$ref: './retention-control-openapi.yaml#/paths/~1admin~1v1~1retention~1policy-requests~1{id}~1reject/post'}
+  /admin/v1/retention/holds:
+    get: {$ref: './retention-control-openapi.yaml#/paths/~1admin~1v1~1retention~1holds/get'}
+    post: {$ref: './retention-control-openapi.yaml#/paths/~1admin~1v1~1retention~1holds/post'}
+  /admin/v1/retention/holds/{id}/release-requests:
+    post: {$ref: './retention-control-openapi.yaml#/paths/~1admin~1v1~1retention~1holds~1{id}~1release-requests/post'}
+  /admin/v1/retention/hold-release-requests:
+    get: {$ref: './retention-control-openapi.yaml#/paths/~1admin~1v1~1retention~1hold-release-requests/get'}
+  /admin/v1/retention/hold-release-requests/{id}/approve:
+    post: {$ref: './retention-control-openapi.yaml#/paths/~1admin~1v1~1retention~1hold-release-requests~1{id}~1approve/post'}
+  /admin/v1/retention/hold-release-requests/{id}/reject:
+    post: {$ref: './retention-control-openapi.yaml#/paths/~1admin~1v1~1retention~1hold-release-requests~1{id}~1reject/post'}
+  /admin/v1/retention/archive-batches:
+    get: {$ref: './retention-control-openapi.yaml#/paths/~1admin~1v1~1retention~1archive-batches/get'}
+  /admin/v1/retention/tombstones:
+    get: {$ref: './retention-control-openapi.yaml#/paths/~1admin~1v1~1retention~1tombstones/get'}
+components:
+  securitySchemes:
+    sessionCookie: {type: apiKey, in: cookie, name: __Host-admin_session, description: Opaque random token; only SHA-256 is persisted.}
+    csrfHeader: {type: apiKey, in: header, name: X-CSRF-Token, description: Must equal the Strict same-origin CSRF cookie and its server-side hash.}
+  parameters:
+    ID: {name: id, in: path, required: true, schema: {$ref: '#/components/schemas/UUID'}}
+    Tenant: {name: X-Admin-Tenant-ID, in: header, required: true, schema: {$ref: '#/components/schemas/UUID'}}
+    Merchant: {name: X-Admin-Merchant-ID, in: header, required: false, schema: {$ref: '#/components/schemas/UUID'}}
+    RequiredMerchant: {name: X-Admin-Merchant-ID, in: header, required: true, schema: {$ref: '#/components/schemas/UUID'}}
+    Cursor: {name: cursor, in: query, required: false, schema: {type: string, maxLength: 256}}
+    Limit: {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+    FinancialAfter: {name: after, in: query, required: false, schema: {$ref: '#/components/schemas/UUID'}}
+    IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 255}}
+    ManagementActionCategory: {name: category, in: path, required: true, schema: {type: string, enum: [webhook-disable, api-client-revoke]}}
+    PlatformTenant: {name: X-Admin-Tenant-ID, in: header, required: false, schema: {$ref: '#/components/schemas/UUID'}, description: Omit only for an explicitly global DB-backed platform grant.}
+    ProviderConfigurationTenant: {name: X-Admin-Tenant-ID, in: header, required: true, schema: {$ref: '#/components/schemas/UUID'}, description: Exact tenant selected for the secret-free provider configuration control plane.}
+  requestBodies:
+    OperatorCommand:
+      required: true
+      content: {application/json: {schema: {$ref: '#/components/schemas/OperatorInput'}}}
+    Decision:
+      required: true
+      content: {application/json: {schema: {type: object, additionalProperties: false, required: [reason], properties: {reason: {type: string, minLength: 1, maxLength: 1000}}}}}
+    FinancialDecision:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [expected_version, reason]
+            properties:
+              expected_version: {type: integer, minimum: 1}
+              reason: {type: string, minLength: 1, maxLength: 2048}
+  responses:
+    Problem:
+      description: RFC 9457-style bounded public error; internal errors and PII are excluded.
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    NotImplemented:
+      description: Production endpoint intentionally fails closed; no fixture response is substituted.
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+  pathItems:
+    MigrationDecision:
+      tags: [Migration control]
+      summary: Approve or reject as a distinct freshly stepped-up operator
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './migration-control-openapi.yaml#/components/schemas/DecisionInput'}}}}
+      responses:
+        '200': {description: Dry-run report or versioned decision, content: {application/json: {schema: {oneOf: [{$ref: '#/components/schemas/MigrationAdmissionReport'}, {$ref: '#/components/schemas/MigrationTransitionRequest'}]}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+    ProviderConfigurationDecision:
+      tags: [Provider configuration]
+      summary: Approve or reject as a distinct freshly stepped-up operator
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/ProviderConfigurationTenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ProviderConfigurationDecision'}}}}
+      responses:
+        '200': {description: Decided configuration version, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ProviderConfigurationVersion'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+    HostedProviderPolicyDecision:
+      tags: [Provider operations]
+      summary: Approve or reject immutable provider policy evidence as a distinct freshly stepped-up operator
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/PlatformTenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ProviderDecision'}}}}
+      responses:
+        '200': {description: Decided hosted provider policy, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/HostedProviderPolicyVersion'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+    ProviderDecision:
+      tags: [Provider operations]
+      summary: Approve or reject as a distinct freshly stepped-up operator
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/PlatformTenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ProviderDecision'}}}}
+      responses:
+        '200': {description: Decided provider change, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ProviderChangeRequest'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+    FinancialSweepDecision:
+      tags: [Financial cabinet]
+      summary: Approve as a distinct operator or cancel with version fencing and durable replay
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/FinancialDecision'}
+      responses:
+        '200': {description: Sweep aggregate, content: {application/json: {schema: {$ref: './financial-openapi.yaml#/components/schemas/SweepEnvelope'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+    FinancialRefundDecision:
+      tags: [Financial cabinet]
+      summary: Approve as a distinct operator or cancel with version fencing and durable replay
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {$ref: '#/components/requestBodies/FinancialDecision'}
+      responses:
+        '200': {description: Refund aggregate, content: {application/json: {schema: {$ref: './financial-openapi.yaml#/components/schemas/RefundEnvelope'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+    MemberMutation:
+      tags: [Merchant management]
+      summary: Disable or remove an ordinary member; high-risk targets require the security-action workflow
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/RequiredMerchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/VersionReason'}}}}
+      responses:
+        '200': {description: Updated member, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/Member'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+    SecurityActionDecision:
+      tags: [Merchant management]
+      summary: Decide as a distinct freshly MFA-authenticated merchant security administrator
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/RequiredMerchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/VersionReason'}}}}
+      responses:
+        '200': {description: Decided security request, content: {application/json: {schema: {$ref: './merchant-settings-openapi.yaml#/components/schemas/SecurityAction'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+    PlatformDecision:
+      post:
+        tags: [Platform configuration]
+        summary: Advance the four-eyes platform change workflow
+        security: [{sessionCookie: [], csrfHeader: []}]
+        parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/PlatformTenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+        requestBody: {required: true, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/DecisionInput'}}}}
+        responses:
+          '200': {description: Updated change, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/ChangeRequest'}}}}
+          '403': {$ref: '#/components/responses/Problem'}
+          '409': {$ref: '#/components/responses/Problem'}
+    NotImplementedGet:
+      tags: [Availability]
+      summary: Dashboard surface is not connected to a production repository yet
+      responses:
+        '501': {$ref: '#/components/responses/NotImplemented'}
+  schemas:
+    UUID: {type: string, format: uuid, pattern: '^[0-9a-f-]{36}$'}
+    MigrationAdmissionReport:
+      type: object
+      additionalProperties: false
+      required: [dry_run, admissible, checks, blockers]
+      properties:
+        dry_run: {type: boolean}
+        admissible: {type: boolean}
+        checks: {type: array, maxItems: 64, items: {type: string, maxLength: 128}}
+        blockers: {type: array, maxItems: 64, items: {type: string, maxLength: 256}}
+        payload_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        target_state: {$ref: './migration-control-openapi.yaml#/components/schemas/State'}
+    MigrationStoredManifest:
+      type: object
+      additionalProperties: false
+      required: [id, migration_id, kind, payload_hash, signer_key_ids, created_at]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        migration_id: {$ref: '#/components/schemas/UUID'}
+        kind: {type: string, enum: [inventory, dry_run, canary, cutover, decommission]}
+        payload_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        signer_key_ids: {type: array, minItems: 2, maxItems: 2, uniqueItems: true, items: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,254}$'}}
+        created_at: {type: string, format: date-time}
+    MigrationTransitionRequest:
+      type: object
+      additionalProperties: false
+      required: [id, migration_id, from_state, target_state, status, requested_by, expected_row_version, expected_fence_token, created_at, expires_at, version]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        migration_id: {$ref: '#/components/schemas/UUID'}
+        from_state: {$ref: './migration-control-openapi.yaml#/components/schemas/State'}
+        target_state: {$ref: './migration-control-openapi.yaml#/components/schemas/State'}
+        status: {type: string, enum: [pending_approval, approved, rejected, expired, awaiting_actuator, executed]}
+        requested_by: {$ref: '#/components/schemas/UUID'}
+        approved_by: {$ref: '#/components/schemas/UUID'}
+        expected_row_version: {type: integer, minimum: 1}
+        expected_fence_token: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        decided_at: {type: string, format: date-time}
+        version: {type: integer, minimum: 1}
+    MigrationRunPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, maxItems: 200, items: {$ref: './migration-control-openapi.yaml#/components/schemas/Run'}}
+        next_cursor: {type: string, maxLength: 256}
+    Problem: {type: object, additionalProperties: false, required: [type,title,status,code,detail], properties: {type: {type: string}, title: {type: string}, status: {type: integer}, code: {type: string}, detail: {type: string}}}
+    Scope: {type: object, additionalProperties: false, properties: {tenant_id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}}}
+    Principal: {type: object, additionalProperties: false, required: [user_id,session_id,display_name,roles,permissions,scopes,amr], properties: {user_id: {$ref: '#/components/schemas/UUID'}, session_id: {$ref: '#/components/schemas/UUID'}, display_name: {type: string}, email: {type: string, format: email}, roles: {type: array, items: {type: string}}, permissions: {type: array, items: {type: string}}, scopes: {type: array, items: {$ref: '#/components/schemas/Scope'}}, acr: {type: string}, amr: {type: array, items: {type: string}}, step_up_until: {type: string, format: date-time}}}
+    Overview: {type: object, additionalProperties: false, required: [open_intents,settled_today,unmatched,webhook_backlog,scanner_gap_count], properties: {open_intents: {type: integer}, settled_today: {type: integer}, unmatched: {type: integer}, webhook_backlog: {type: integer}, scanner_gap_count: {type: integer}, latest_cursor: {type: string}}}
+    Intent: {type: object, required: [id,merchant_id,merchant_order_id,amount_minor,currency,currency_scale,status,created_at,expires_at], properties: {id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, merchant_order_id: {type: string}, amount_minor: {type: string, pattern: '^[0-9]+$'}, currency: {type: string}, currency_scale: {type: integer}, status: {type: string}, created_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time}}}
+    Transfer: {type: object, required: [id,chain_id,transaction_id,asset_id,amount_atomic,status,confirmations,observed_at], properties: {id: {$ref: '#/components/schemas/UUID'}, chain_id: {type: string}, transaction_id: {type: string}, asset_id: {type: string}, amount_atomic: {type: string, pattern: '^[0-9]+$'}, status: {type: string}, confirmations: {type: integer}, observed_at: {type: string, format: date-time}}}
+    Candidate: {type: object, required: [id,route_id,rank,score,evidence,disqualified], properties: {id: {$ref: '#/components/schemas/UUID'}, route_id: {$ref: '#/components/schemas/UUID'}, rank: {type: integer}, score: {type: integer}, evidence: {type: object}, disqualified: {type: boolean}}}
+    Unmatched: {type: object, required: [id,event_id,classification,status,severity,version,created_at,candidates], properties: {id: {$ref: '#/components/schemas/UUID'}, event_id: {$ref: '#/components/schemas/UUID'}, classification: {type: string}, status: {type: string}, severity: {type: string}, assigned_operator_id: {$ref: '#/components/schemas/UUID'}, version: {type: integer}, created_at: {type: string, format: date-time}, candidates: {type: array, items: {$ref: '#/components/schemas/Candidate'}}}}
+    Webhook: {type: object, required: [id,merchant_id,url,status,failure_count], properties: {id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, url: {type: string, format: uri}, status: {type: string}, failure_count: {type: integer}, last_success_at: {type: string, format: date-time}}}
+    Asset: {type: object, required: [asset_id,chain_id,symbol,status,required_confirmations,open_gaps], properties: {asset_id: {type: string}, chain_id: {type: string}, symbol: {type: string}, status: {type: string}, required_confirmations: {type: integer}, open_gaps: {type: integer}}}
+    Reconciliation: {type: object, required: [id,run_type,status,started_at], properties: {id: {$ref: '#/components/schemas/UUID'}, run_type: {type: string}, status: {type: string}, started_at: {type: string, format: date-time}, ended_at: {type: string, format: date-time}}}
+    Audit: {type: object, required: [event_id,actor_user_id,action,resource_type,resource_id,reason,details,occurred_at,entry_hash], properties: {event_id: {$ref: '#/components/schemas/UUID'}, actor_user_id: {$ref: '#/components/schemas/UUID'}, action: {type: string}, resource_type: {type: string}, resource_id: {type: string}, reason: {type: string}, details: {type: object}, occurred_at: {type: string, format: date-time}, entry_hash: {type: string, pattern: '^[0-9a-f]{64}$'}}}
+    Action: {type: object, required: [id,tenant_id,kind,resource_type,resource_id,object_version,requested_by,reason,payload,status,requires_step_up,created_at,expires_at], properties: {id: {$ref: '#/components/schemas/UUID'}, tenant_id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, kind: {const: manual_resolution}, resource_type: {type: string}, resource_id: {type: string}, object_version: {type: integer}, requested_by: {$ref: '#/components/schemas/UUID'}, approved_by: {$ref: '#/components/schemas/UUID'}, rejected_by: {$ref: '#/components/schemas/UUID'}, reason: {type: string}, payload: {type: object}, status: {type: string}, requires_step_up: {type: boolean}, created_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time}}}
+    OperatorInput: {type: object, additionalProperties: false, required: [version,reason,idempotency_key], properties: {version: {type: integer, minimum: 1}, reason: {type: string, minLength: 1, maxLength: 1000}, idempotency_key: {type: string, minLength: 8, maxLength: 255}}}
+    ResolutionInput: {type: object, additionalProperties: false, required: [version,target_route_id,reason,idempotency_key,accept_shortfall,accept_late_payment,accept_cross_asset], properties: {version: {type: integer, minimum: 1}, target_route_id: {$ref: '#/components/schemas/UUID'}, reason: {type: string, minLength: 1, maxLength: 1000}, idempotency_key: {type: string, minLength: 8, maxLength: 255}, accept_shortfall: {type: boolean}, accept_late_payment: {type: boolean}, accept_cross_asset: {type: boolean}}}
+    ReplayInput: {type: object, additionalProperties: false, required: [reason,idempotency_key], properties: {reason: {type: string, minLength: 1, maxLength: 1000}, idempotency_key: {type: string, minLength: 8, maxLength: 255}}}
+    IntentPage: {allOf: [{$ref: '#/components/schemas/Page'}, {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/Intent'}}}}]}
+    TransferPage: {allOf: [{$ref: '#/components/schemas/Page'}, {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/Transfer'}}}}]}
+    UnmatchedPage: {allOf: [{$ref: '#/components/schemas/Page'}, {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/Unmatched'}}}}]}
+    WebhookPage: {allOf: [{$ref: '#/components/schemas/Page'}, {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/Webhook'}}}}]}
+    AssetPage: {allOf: [{$ref: '#/components/schemas/Page'}, {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/Asset'}}}}]}
+    ReconciliationPage: {allOf: [{$ref: '#/components/schemas/Page'}, {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/Reconciliation'}}}}]}
+    AuditPage: {allOf: [{$ref: '#/components/schemas/Page'}, {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/Audit'}}}}]}
+    Page: {type: object, required: [items], properties: {items: {type: array}, next_cursor: {type: string}}}
+security:
+  - sessionCookie: []

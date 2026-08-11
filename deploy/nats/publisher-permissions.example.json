@@ -1,0 +1,17 @@
+{
+  "role": "merchant-events-publisher",
+  "publish": {
+    "allow": [
+      "merchant.events.v1",
+      "$JS.API.STREAM.INFO.MERCHANT_EVENTS_V1"
+    ],
+    "deny": [
+      "$JS.API.STREAM.DELETE.>",
+      "$JS.API.STREAM.PURGE.>",
+      "$JS.API.STREAM.MSG.DELETE.>"
+    ]
+  },
+  "subscribe": {
+    "allow": ["_INBOX.>"]
+  }
+}

@@ -1,0 +1,13 @@
+# Hosted-платёжные провайдеры
+
+Hosted gateway использует тот же payment-intent API, что и on-chain маршрут. Выбор задаётся строго: `{"provider":"hosted_gateway","hosted_gateway":{"provider_id":"provider-account-1","asset_id":"usdt-tron"}}`. Для on-chain применяется `provider=on_chain` и объект `on_chain`. Смешанные, старые и неоднозначные тела отклоняются.
+
+Hosted route возвращает `provider_id`, `provider_reference`, asset, точную целую сумму и проверенный сервером HTTPS `payment_url`. Адрес получения, chain, confirmations и transaction hash не подделываются. Fiat-to-asset quote, округление вверх, время и digest ответа провайдера сохраняются неизменно и без floating point.
+
+Callback попадает в append-only inbox только после ограничения размера и проверки HMAC. Точный повтор идемпотентен; тот же event ID с другими фактами вызывает конфликт; старое событие не откатывает состояние. Callback, пришедший до привязки route, хранится в ограниченном pre-bind inbox и повторно обрабатывается после появления durable provider order.
+
+Первый подтверждённый sibling route, выполнивший settlement, выигрывает под блокировкой payment intent. Остальные становятся superseded, но поздние evidence сохраняются. Callback во время pause помещается в quarantine и создаёт incident без проводки ledger. Status/reconcile и refund после settlement могут создать только evidence/incident; автоматическое выполнение refund остаётся выключенным.
+
+Публичная hosted payment link погашается без вызова провайдера внутри транзакции ссылки. Транзакция резервирует одно использование и создаёт intent, checkout capability, неизменяемую create attempt и preparation job. Checkout возвращает `preparing_payment_route` без адреса и URL, пока fenced worker не привяжет проверенный маршрут провайдера. Replay возвращает ту же capability; expiry или исчерпание recovery переводит checkout в `payment_route_failed` с durable incident и не восстанавливает лимит ссылки скрытно.
+
+Production требует миграции `000016`, `000017`, `000019` и `000020`, точные grants, внешние HMAC-ключи, admission policy и readiness API/workers. Same-origin кабинет platform-admin — единственный поддерживаемый интерфейс provisioning и ротации: неизменяемые манифесты без секретов, внешние ссылки только для записи, одобрение другим оператором со свежей MFA и приватная TLS-проверка с привязанными дайджестами ответа и сертификата. После активации провайдер остаётся на паузе; всё ещё нужны новая политика шести операций и отдельное возобновление по правилу четырёх глаз. Устаревшие строки мигрируют в `legacy_unadmitted` без выдуманных probe-доказательств. Нельзя использовать merchant API или произвольный SQL от DB owner.

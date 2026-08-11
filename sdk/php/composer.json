@@ -1,0 +1,10 @@
+{
+  "name": "merchant-platform/sdk",
+  "description": "Official Merchant Platform API SDK",
+  "type": "library",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/calmshv-star/ocrypt",
+  "require": { "php": ">=8.1" },
+  "suggest": { "ext-sodium": "Required for reconciliation report signature verification" },
+  "autoload": { "files": ["src/Models.php", "src/Signing.php", "src/Webhooks.php", "src/Reports.php", "src/Client.php", "src/Integration.php"] }
+}

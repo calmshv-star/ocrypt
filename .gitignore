@@ -1,0 +1,30 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.idea/
+.vscode/
+coverage/
+dist/
+node_modules/
+playwright-report/
+test-results/
+tmp/
+*.local
+*.log
+*.tsbuildinfo
+
+# Generated TypeScript configuration output
+**/vite.config.js
+**/vite.config.d.ts
+
+# Go
+backend/bin/
+backend/coverage.out
+
+# Generated API clients
+generated/

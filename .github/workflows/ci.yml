@@ -1,0 +1,847 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    env:
+      GOFLAGS: -mod=readonly
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Verify formatting
+        run: test -z "$(gofmt -l .)"
+      - name: Test
+        run: go test ./...
+      - name: Build every executable
+        run: go build ./cmd/...
+      - name: Vet
+        run: go vet ./...
+      - name: Race test
+        run: go test -race ./...
+
+  schema:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: merchant
+          POSTGRES_USER: merchant
+          POSTGRES_PASSWORD: merchant-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U merchant -d merchant"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      PGPASSWORD: merchant-ci-only
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Pre-create least-privilege capability roles
+        run: |
+          psql -h 127.0.0.1 -U merchant -d merchant -v ON_ERROR_STOP=1 -f deploy/postgres/bootstrap-roles.sql
+          psql -h 127.0.0.1 -U merchant -d merchant -v ON_ERROR_STOP=1 <<'SQL'
+          ALTER ROLE merchant_api_runtime SUPERUSER LOGIN CREATEDB CREATEROLE REPLICATION BYPASSRLS;
+          ALTER ROLE merchant_scanner_worker LOGIN NOBYPASSRLS;
+          ALTER ROLE retention_archive_worker SUPERUSER LOGIN CREATEDB CREATEROLE REPLICATION BYPASSRLS;
+          SQL
+          psql -h 127.0.0.1 -U merchant -d merchant -v ON_ERROR_STOP=1 -f deploy/postgres/bootstrap-roles.sql
+          psql -h 127.0.0.1 -U merchant -d merchant -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$ BEGIN
+            IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname IN('merchant_api_runtime','merchant_scanner_worker','retention_archive_worker') AND (rolsuper OR rolcanlogin OR rolcreatedb OR rolcreaterole OR rolreplication)) THEN
+              RAISE EXCEPTION 'bootstrap did not converge dangerous role attributes';
+            END IF;
+            IF (SELECT rolbypassrls FROM pg_roles WHERE rolname='merchant_api_runtime')
+               OR (SELECT rolbypassrls FROM pg_roles WHERE rolname='retention_archive_worker')
+               OR NOT (SELECT rolbypassrls FROM pg_roles WHERE rolname='merchant_scanner_worker') THEN
+              RAISE EXCEPTION 'bootstrap did not converge RLS attributes';
+            END IF;
+          END $$;
+          SQL
+      - name: Apply all migrations in order
+        run: |
+          while IFS= read -r migration; do
+            psql -h 127.0.0.1 -U merchant -d merchant -v ON_ERROR_STOP=1 -f "$migration"
+          done < <(find backend/migrations -maxdepth 1 -type f -name '*.up.sql' | sort)
+          psql -h 127.0.0.1 -U merchant -d merchant -v ON_ERROR_STOP=1 -f deploy/postgres/runtime-grants.sql
+      - name: Assert runtime role boundaries
+        run: |
+          psql -h 127.0.0.1 -U merchant -d merchant -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('merchant_api_runtime','merchant_management_runtime','merchant_admin_runtime','platform_admin_runtime','platform_outbox_publisher','merchant_financial_runtime','rate_runtime_worker','merchant_settings_api_runtime','merchant_session_revocation_worker','merchant_invitation_delivery_worker','retention_archive_worker','migration_control_worker','migration_traffic_actuator') AND rolbypassrls) THEN
+              RAISE EXCEPTION 'merchant/control runtime role unexpectedly bypasses RLS';
+            END IF;
+            IF (SELECT count(*) FROM pg_roles WHERE rolname IN ('merchant_scanner_worker','merchant_settlement_worker','merchant_matching_worker','merchant_callback_worker','merchant_outbox_worker','merchant_resolution_worker','merchant_proof_worker','merchant_plan_worker','merchant_financial_worker','merchant_reconciliation_worker') AND rolbypassrls) <> 10 THEN
+              RAISE EXCEPTION 'cross-tenant worker BYPASSRLS inventory differs';
+            END IF;
+            IF NOT has_table_privilege('merchant_api_runtime','event_history','SELECT')
+               OR NOT has_table_privilege('merchant_api_runtime','reconciliation_reports','INSERT')
+               OR NOT has_table_privilege('merchant_api_runtime','sandbox_workspaces','SELECT,INSERT,UPDATE')
+               OR NOT has_table_privilege('merchant_api_runtime','sandbox_scenarios','SELECT,INSERT,UPDATE,DELETE')
+               OR NOT has_table_privilege('merchant_api_runtime','sandbox_events','SELECT,INSERT')
+               OR NOT has_table_privilege('merchant_api_runtime','sandbox_callbacks','SELECT,INSERT,UPDATE')
+               OR NOT has_table_privilege('merchant_api_runtime','sandbox_callback_attempts','SELECT,INSERT')
+               OR NOT has_table_privilege('merchant_api_runtime','sandbox_idempotency','SELECT,INSERT,DELETE')
+               OR NOT has_function_privilege('merchant_api_runtime','sandbox_test_credential_admitted(uuid,uuid,text)','EXECUTE')
+               OR NOT has_table_privilege('merchant_scanner_worker','ledger_transactions','INSERT')
+               OR NOT has_table_privilege('merchant_scanner_worker','outbox_events','INSERT')
+               OR NOT has_table_privilege('merchant_matching_worker','outbox_events','INSERT')
+               OR NOT has_table_privilege('merchant_resolution_worker','outbox_events','INSERT')
+               OR NOT has_table_privilege('merchant_proof_worker','ledger_entries','INSERT')
+               OR NOT has_table_privilege('merchant_proof_worker','payment_routes','UPDATE')
+               OR NOT has_table_privilege('merchant_plan_worker','payment_intents','UPDATE')
+               OR NOT has_table_privilege('merchant_plan_worker','callback_events','INSERT')
+               OR NOT has_table_privilege('merchant_plan_worker','outbox_events','INSERT')
+               OR NOT has_table_privilege('merchant_api_runtime','callback_events','INSERT')
+               OR NOT has_table_privilege('merchant_reconciliation_worker','reconciliation_reports','UPDATE')
+               OR NOT has_table_privilege('merchant_settings_api_runtime','merchant_members','UPDATE')
+               OR NOT has_table_privilege('merchant_settings_api_runtime','merchant_session_revocation_signals','INSERT')
+               OR NOT has_table_privilege('merchant_settings_api_runtime','merchant_invitation_delivery_jobs','INSERT')
+               OR NOT has_table_privilege('merchant_settings_api_runtime','merchant_invitation_delivery_workers','SELECT')
+               OR NOT has_table_privilege('merchant_admin_runtime','merchant_members','SELECT')
+               OR NOT has_table_privilege('merchant_admin_runtime','merchant_member_role_bindings','SELECT')
+               OR NOT has_table_privilege('merchant_admin_runtime','merchant_cabinet_role_permissions','SELECT')
+               OR NOT has_function_privilege('merchant_settings_api_runtime','merchant_invitation_delivery_keys_admitted(text[])','EXECUTE')
+               OR NOT has_function_privilege('merchant_admin_runtime','lookup_merchant_invitation(bytea)','EXECUTE')
+               OR NOT has_function_privilege('merchant_admin_runtime','list_current_admin_merchant_memberships()','EXECUTE')
+               OR NOT has_function_privilege('merchant_api_runtime','platform_route_runtime_admission(uuid,uuid,text,text)','EXECUTE')
+               OR NOT has_function_privilege('merchant_management_runtime','platform_wallet_runtime_admission(uuid,uuid,text)','EXECUTE')
+               OR NOT has_table_privilege('merchant_scanner_worker','platform_config_snapshots','SELECT')
+               OR NOT has_table_privilege('merchant_scanner_worker','scanner_runtime_config_evidence','SELECT,INSERT')
+               OR NOT has_table_privilege('platform_outbox_publisher','platform_admin_service_identities','SELECT')
+               OR NOT has_table_privilege('platform_outbox_publisher','platform_admin_outbox','SELECT,UPDATE')
+               OR NOT has_function_privilege('merchant_session_revocation_worker','consume_merchant_session_revocations(integer)','EXECUTE')
+               OR EXISTS (
+                 SELECT 1 FROM unnest(ARRAY[
+                   'retention_policy_versions','retention_legal_holds','retention_archive_jobs',
+                   'retention_archive_batches','retention_archive_batch_items',
+                   'retention_archive_objects','retention_archive_index'
+                 ]) AS table_name
+                 WHERE NOT has_table_privilege('retention_archive_worker',table_name,'SELECT')
+               )
+               OR NOT has_function_privilege('retention_archive_worker','retention_claim_archive_batch(text,timestamptz,integer,integer)','EXECUTE')
+               OR NOT has_function_privilege('retention_archive_worker','retention_acknowledge_archive(uuid,uuid,bigint,text,text,bigint,bytea,bytea,text,bytea,text,timestamptz,timestamptz,timestamptz)','EXECUTE')
+               OR NOT has_function_privilege('retention_archive_worker','retention_fail_archive(uuid,uuid,bigint,text,timestamptz)','EXECUTE')
+               OR NOT has_function_privilege('retention_archive_worker','retention_claim_prune(text,timestamptz,integer)','EXECUTE')
+               OR NOT has_function_privilege('retention_archive_worker','retention_advance_prune(uuid,uuid,bigint,timestamptz)','EXECUTE')
+               OR NOT has_function_privilege('retention_archive_worker','retention_worker_health(timestamptz,integer)','EXECUTE') THEN
+              RAISE EXCEPTION 'runtime composite transaction grants are incomplete';
+            END IF;
+            IF NOT has_function_privilege('migration_control_worker','claim_migration_workload(uuid,text,integer)','EXECUTE')
+               OR NOT has_function_privilege('migration_control_worker','migration_apply_watch_address(uuid,text,uuid,bigint,text,uuid,uuid,text,text,text)','EXECUTE')
+               OR NOT has_function_privilege('migration_control_worker','migration_post_verified_opening(uuid,text,uuid,bigint,text,uuid)','EXECUTE')
+               OR NOT has_function_privilege('migration_traffic_actuator','acknowledge_migration_actuator(uuid,bigint,bigint,text,text,text,text)','EXECUTE')
+               OR has_table_privilege('migration_control_worker','migration_runs','INSERT,UPDATE,DELETE')
+               OR has_table_privilege('migration_traffic_actuator','migration_runs','INSERT,UPDATE,DELETE') THEN
+              RAISE EXCEPTION 'migration worker/actuator function-only boundary differs';
+            END IF;
+            IF EXISTS (
+              SELECT 1 FROM unnest(ARRAY[
+                'merchant_api_runtime','merchant_management_runtime','merchant_scanner_worker',
+                'merchant_settlement_worker','merchant_matching_worker','merchant_resolution_worker',
+                'merchant_proof_worker','merchant_plan_worker'
+              ]) AS role_name
+              WHERE NOT has_table_privilege(role_name,'merchant_event_sequences','SELECT,INSERT,UPDATE')
+            ) OR has_table_privilege('merchant_reconciliation_worker','merchant_event_sequences','SELECT') THEN
+              RAISE EXCEPTION 'callback sequence allocator role matrix differs';
+            END IF;
+            IF EXISTS (
+              SELECT 1 FROM unnest(ARRAY[
+                'merchant_api_runtime','merchant_management_runtime','merchant_scanner_worker',
+                'merchant_settlement_worker','merchant_matching_worker','merchant_resolution_worker',
+                'merchant_proof_worker','merchant_plan_worker'
+              ]) AS role_name
+              WHERE NOT has_table_privilege(role_name,'payment_intent_versions','INSERT')
+            ) THEN
+              RAISE EXCEPTION 'payment intent transition role cannot append an immutable version';
+            END IF;
+            IF has_table_privilege('merchant_scanner_worker','ledger_transactions','DELETE')
+               OR has_table_privilege('merchant_api_runtime','sandbox_workspaces','DELETE')
+               OR has_table_privilege('merchant_api_runtime','sandbox_events','UPDATE')
+               OR has_table_privilege('merchant_api_runtime','sandbox_events','DELETE')
+               OR has_table_privilege('merchant_api_runtime','sandbox_callbacks','DELETE')
+               OR has_table_privilege('merchant_api_runtime','sandbox_callback_attempts','UPDATE')
+               OR has_table_privilege('merchant_api_runtime','sandbox_callback_attempts','DELETE')
+               OR has_table_privilege('merchant_api_runtime','sandbox_idempotency','UPDATE')
+               OR has_table_privilege('merchant_proof_worker','payment_matches','DELETE')
+               OR has_table_privilege('merchant_financial_worker','financial_refund_requests','DELETE')
+               OR has_table_privilege('merchant_settings_api_runtime','merchant_members','DELETE')
+               OR has_table_privilege('merchant_session_revocation_worker','merchant_session_revocation_signals','SELECT')
+               OR has_table_privilege('merchant_invitation_delivery_worker','merchant_invitation_delivery_jobs','SELECT')
+               OR has_table_privilege('merchant_admin_runtime','merchant_members','INSERT')
+               OR has_table_privilege('merchant_admin_runtime','merchant_members','UPDATE')
+               OR has_table_privilege('merchant_admin_runtime','merchant_members','DELETE')
+               OR has_function_privilege('merchant_settings_api_runtime','consume_merchant_session_revocations(integer)','EXECUTE')
+               OR has_function_privilege('merchant_settings_api_runtime','claim_merchant_invitation_delivery(uuid,integer)','EXECUTE')
+               OR has_function_privilege('merchant_admin_runtime','consume_merchant_session_revocations(integer)','EXECUTE')
+               OR has_function_privilege('merchant_admin_runtime','claim_merchant_invitation_delivery(uuid,integer)','EXECUTE')
+               OR has_function_privilege('merchant_admin_runtime','merchant_invitation_delivery_keys_admitted(text[])','EXECUTE')
+               OR has_table_privilege('merchant_scanner_worker','scanner_runtime_config_evidence','UPDATE')
+               OR has_table_privilege('platform_outbox_publisher','platform_admin_outbox','INSERT')
+               OR has_table_privilege('platform_outbox_publisher','platform_admin_outbox','DELETE')
+               OR has_table_privilege('platform_outbox_publisher','platform_config_snapshots','SELECT')
+               OR EXISTS (
+                 SELECT 1
+                 FROM unnest(ARRAY['callback_events','callback_deliveries','outbox_events','event_history']) AS table_name,
+                      unnest(ARRAY['INSERT','UPDATE','DELETE','TRUNCATE']) AS privilege_name
+                 WHERE has_table_privilege('retention_archive_worker',table_name,privilege_name)
+               )
+               OR has_function_privilege('retention_archive_worker','create_retention_policy_version(uuid,uuid,text,bigint,integer,integer,integer,boolean,timestamptz,text,timestamptz)','EXECUTE')
+               OR has_function_privilege('retention_archive_worker','create_retention_legal_hold(uuid,uuid,text,text,uuid,text,uuid,text,text,timestamptz,timestamptz)','EXECUTE')
+               OR has_function_privilege('retention_archive_worker','release_retention_legal_hold(uuid,text,text,timestamptz)','EXECUTE')
+               OR has_sequence_privilege('merchant_api_runtime','ledger_transaction_sequence','USAGE')
+               OR NOT has_sequence_privilege('merchant_scanner_worker','ledger_transaction_sequence','USAGE')
+               OR NOT has_sequence_privilege('rate_runtime_worker','rate_collection_dead_letters_id_seq','USAGE') THEN
+              RAISE EXCEPTION 'runtime role has an unadmitted destructive grant';
+            END IF;
+            IF NOT has_function_privilege('merchant_invitation_delivery_worker','merchant_invitation_delivery_keys_admitted(text[])','EXECUTE')
+               OR NOT has_function_privilege('merchant_invitation_delivery_worker','merchant_invitation_delivery_heartbeat(uuid)','EXECUTE')
+               OR NOT has_function_privilege('merchant_invitation_delivery_worker','claim_merchant_invitation_delivery(uuid,integer)','EXECUTE')
+               OR NOT has_function_privilege('merchant_invitation_delivery_worker','complete_merchant_invitation_delivery(uuid,uuid,text)','EXECUTE')
+               OR NOT has_function_privilege('merchant_invitation_delivery_worker','fail_merchant_invitation_delivery(uuid,uuid,text,integer,integer)','EXECUTE') THEN
+              RAISE EXCEPTION 'invitation delivery worker function-only capability is incomplete';
+            END IF;
+            IF EXISTS (SELECT 1 FROM information_schema.role_table_grants WHERE grantee IN ('merchant_invitation_delivery_worker','merchant_session_revocation_worker'))
+               OR EXISTS (SELECT 1 FROM information_schema.role_usage_grants WHERE grantee IN ('merchant_invitation_delivery_worker','merchant_session_revocation_worker') AND object_type='SEQUENCE') THEN
+              RAISE EXCEPTION 'function-only merchant worker received a table or sequence capability';
+            END IF;
+          END $$;
+          SET ROLE rate_runtime_worker;
+          SELECT count(*) FROM platform_config_heads;
+          RESET ROLE;
+          SET ROLE merchant_api_runtime;
+          SELECT count(*) FROM payment_intents;
+          RESET ROLE;
+          SQL
+      - name: Prove sandbox merchant isolation and reset delete scope
+        run: |
+          psql -h 127.0.0.1 -U merchant -d merchant -v ON_ERROR_STOP=1 <<'SQL'
+          BEGIN;
+          INSERT INTO tenants(id,public_id,name,status,created_at,updated_at) VALUES
+            ('61000000-0000-7000-8000-000000000001','sandbox-rls','Sandbox RLS','active',clock_timestamp(),clock_timestamp());
+          INSERT INTO merchants(id,tenant_id,code,display_name,environment,settlement_currency,status,created_at,updated_at) VALUES
+            ('62000000-0000-7000-8000-000000000001','61000000-0000-7000-8000-000000000001','sandbox-a','Sandbox A','test','USD','active',clock_timestamp(),clock_timestamp()),
+            ('62000000-0000-7000-8000-000000000002','61000000-0000-7000-8000-000000000001','sandbox-b','Sandbox B','test','USD','active',clock_timestamp(),clock_timestamp());
+          INSERT INTO api_clients(id,tenant_id,merchant_id,key_id,algorithm,scopes,encrypted_secret,valid_from,created_at,updated_at,version) VALUES
+            ('63000000-0000-7000-8000-000000000001','61000000-0000-7000-8000-000000000001','62000000-0000-7000-8000-000000000001','mk_test_sandbox_a','hmac-sha256',ARRAY['payments:read','payments:write'],decode(repeat('11',32),'hex'),clock_timestamp()-interval '1 minute',clock_timestamp(),clock_timestamp(),1),
+            ('63000000-0000-7000-8000-000000000002','61000000-0000-7000-8000-000000000001','62000000-0000-7000-8000-000000000002','mk_test_sandbox_b','hmac-sha256',ARRAY['payments:read','payments:write'],decode(repeat('22',32),'hex'),clock_timestamp()-interval '1 minute',clock_timestamp(),clock_timestamp(),1);
+          INSERT INTO sandbox_workspaces(tenant_id,merchant_id,test_clock,credential_key_id,addresses,version,created_at,updated_at) VALUES
+            ('61000000-0000-7000-8000-000000000001','62000000-0000-7000-8000-000000000001','2026-08-01T00:00:00Z','mk_test_sandbox_a','[]',1,clock_timestamp(),clock_timestamp()),
+            ('61000000-0000-7000-8000-000000000001','62000000-0000-7000-8000-000000000002','2026-08-01T00:00:00Z','mk_test_sandbox_b','[]',1,clock_timestamp(),clock_timestamp());
+          INSERT INTO sandbox_scenarios(id,tenant_id,merchant_id,kind,merchant_order_id,payment_intent_id,payment_route_id,intent_snapshot,route_snapshot,observed_amount_atomic,observed_asset_id,confirmations,finalized,last_event_sequence,version,created_at,updated_at) VALUES
+            ('64000000-0000-7000-8000-000000000001','61000000-0000-7000-8000-000000000001','62000000-0000-7000-8000-000000000001','exact_payment','sandbox-a-order','65000000-0000-7000-8000-000000000001','66000000-0000-7000-8000-000000000001','{}','{}',0,'',0,false,0,1,'2026-08-01T00:00:00Z','2026-08-01T00:00:00Z'),
+            ('64000000-0000-7000-8000-000000000002','61000000-0000-7000-8000-000000000001','62000000-0000-7000-8000-000000000002','exact_payment','sandbox-b-order','65000000-0000-7000-8000-000000000002','66000000-0000-7000-8000-000000000002','{}','{}',0,'',0,false,0,1,'2026-08-01T00:00:00Z','2026-08-01T00:00:00Z');
+          INSERT INTO sandbox_idempotency(tenant_id,merchant_id,operation,idempotency_key,request_hash,resource_type,resource_id,response_body,created_at) VALUES
+            ('61000000-0000-7000-8000-000000000001','62000000-0000-7000-8000-000000000001','scenario:seed','sandbox-seed-a',decode(repeat('aa',32),'hex'),'scenario','64000000-0000-7000-8000-000000000001','{}','2026-08-01T00:00:00Z'),
+            ('61000000-0000-7000-8000-000000000001','62000000-0000-7000-8000-000000000002','scenario:seed','sandbox-seed-b',decode(repeat('bb',32),'hex'),'scenario','64000000-0000-7000-8000-000000000002','{}','2026-08-01T00:00:00Z');
+
+          SET LOCAL ROLE merchant_api_runtime;
+          SELECT set_config('app.tenant_id','61000000-0000-7000-8000-000000000001',true),
+                 set_config('app.merchant_id','62000000-0000-7000-8000-000000000001',true);
+          SELECT 1/(CASE WHEN sandbox_test_credential_admitted(
+            '61000000-0000-7000-8000-000000000001','62000000-0000-7000-8000-000000000001','mk_test_sandbox_a') THEN 1 ELSE 0 END);
+          SELECT 1/(CASE WHEN count(*)=1 THEN 1 ELSE 0 END) FROM sandbox_scenarios;
+          WITH removed AS (
+            DELETE FROM sandbox_scenarios WHERE id='64000000-0000-7000-8000-000000000001' RETURNING 1
+          ) SELECT 1/(CASE WHEN count(*)=1 THEN 1 ELSE 0 END) FROM removed;
+          WITH removed AS (
+            DELETE FROM sandbox_scenarios WHERE id='64000000-0000-7000-8000-000000000002' RETURNING 1
+          ) SELECT 1/(CASE WHEN count(*)=0 THEN 1 ELSE 0 END) FROM removed;
+          WITH removed AS (
+            DELETE FROM sandbox_idempotency WHERE operation<>'workspace:reset' RETURNING 1
+          ) SELECT 1/(CASE WHEN count(*)=1 THEN 1 ELSE 0 END) FROM removed;
+          RESET ROLE;
+          SELECT 1/(CASE WHEN count(*)=1 THEN 1 ELSE 0 END) FROM sandbox_scenarios;
+          SELECT 1/(CASE WHEN count(*)=1 THEN 1 ELSE 0 END) FROM sandbox_idempotency;
+          ROLLBACK;
+          SQL
+      - name: Prove invitation enrollment tenant isolation
+        run: |
+          psql -h 127.0.0.1 -U merchant -d merchant -v ON_ERROR_STOP=1 <<'SQL'
+          BEGIN;
+          INSERT INTO tenants(id,public_id,name,status,created_at,updated_at) VALUES
+            ('10000000-0000-7000-8000-000000000001','invite-rls-a','Invite RLS A','active',clock_timestamp(),clock_timestamp()),
+            ('10000000-0000-7000-8000-000000000002','invite-rls-b','Invite RLS B','active',clock_timestamp(),clock_timestamp());
+          INSERT INTO merchants(id,tenant_id,code,display_name,environment,settlement_currency,status,created_at,updated_at) VALUES
+            ('20000000-0000-7000-8000-000000000001','10000000-0000-7000-8000-000000000001','invite-rls-a','Invite RLS A','test','USD','active',clock_timestamp(),clock_timestamp()),
+            ('20000000-0000-7000-8000-000000000002','10000000-0000-7000-8000-000000000002','invite-rls-b','Invite RLS B','test','USD','active',clock_timestamp(),clock_timestamp());
+          INSERT INTO admin_users(id,oidc_issuer,oidc_subject,display_name,email,status,created_at,updated_at,version) VALUES
+            ('30000000-0000-7000-8000-000000000001','https://id.example','invite-rls-user','Invite RLS User','invite-rls@example.com','invited',clock_timestamp(),clock_timestamp(),1);
+          INSERT INTO merchant_member_invitations(id,tenant_id,merchant_id,email,token_hash,token_key_id,role_keys,delivery_mode,status,invited_by,created_at,expires_at,activated_at,version) VALUES
+            ('40000000-0000-7000-8000-000000000001','10000000-0000-7000-8000-000000000001','20000000-0000-7000-8000-000000000001','invite-rls@example.com',decode(repeat('11',32),'hex'),'ci-key',ARRAY['viewer'],'copy_once','active','30000000-0000-7000-8000-000000000001',clock_timestamp(),clock_timestamp()+interval '1 hour',clock_timestamp(),1),
+            ('40000000-0000-7000-8000-000000000002','10000000-0000-7000-8000-000000000002','20000000-0000-7000-8000-000000000002','invite-rls@example.com',decode(repeat('22',32),'hex'),'ci-key',ARRAY['viewer'],'copy_once','active','30000000-0000-7000-8000-000000000001',clock_timestamp(),clock_timestamp()+interval '1 hour',clock_timestamp(),1);
+          INSERT INTO admin_sessions(id,session_hash,csrf_hash,user_id,oidc_issuer,oidc_subject,purpose,invitation_id,acr,amr,created_at,last_seen_at,idle_expires_at,absolute_expires_at,step_up_until,rotated_at) VALUES
+            ('50000000-0000-7000-8000-000000000001',decode(repeat('31',32),'hex'),decode(repeat('41',32),'hex'),'30000000-0000-7000-8000-000000000001','https://id.example','invite-rls-user','invitation','40000000-0000-7000-8000-000000000001','urn:mfa',ARRAY['otp'],clock_timestamp(),clock_timestamp(),clock_timestamp()+interval '30 minutes',clock_timestamp()+interval '1 hour',clock_timestamp()+interval '10 minutes',clock_timestamp()),
+            ('50000000-0000-7000-8000-000000000002',decode(repeat('32',32),'hex'),decode(repeat('42',32),'hex'),'30000000-0000-7000-8000-000000000001','https://id.example','invite-rls-user','invitation','40000000-0000-7000-8000-000000000002','urn:mfa',ARRAY['otp'],clock_timestamp(),clock_timestamp(),clock_timestamp()+interval '30 minutes',clock_timestamp()+interval '1 hour',clock_timestamp()+interval '10 minutes',clock_timestamp());
+          INSERT INTO admin_invitation_enrollments(invitation_id,tenant_id,merchant_id,user_id,session_id,oidc_issuer,oidc_subject,email,status,created_at,expires_at) VALUES
+            ('40000000-0000-7000-8000-000000000001','10000000-0000-7000-8000-000000000001','20000000-0000-7000-8000-000000000001','30000000-0000-7000-8000-000000000001','50000000-0000-7000-8000-000000000001','https://id.example','invite-rls-user','invite-rls@example.com','pending',clock_timestamp(),clock_timestamp()+interval '1 hour'),
+            ('40000000-0000-7000-8000-000000000002','10000000-0000-7000-8000-000000000002','20000000-0000-7000-8000-000000000002','30000000-0000-7000-8000-000000000001','50000000-0000-7000-8000-000000000002','https://id.example','invite-rls-user','invite-rls@example.com','pending',clock_timestamp(),clock_timestamp()+interval '1 hour');
+          SET LOCAL ROLE merchant_admin_runtime;
+          SELECT set_config('app.tenant_id','10000000-0000-7000-8000-000000000001',true),
+                 set_config('app.merchant_id','20000000-0000-7000-8000-000000000001',true);
+          SELECT 1/(CASE WHEN count(*)=1 THEN 1 ELSE 0 END) FROM admin_invitation_enrollments;
+          WITH changed AS (
+            UPDATE admin_invitation_enrollments SET expires_at=expires_at
+            WHERE invitation_id='40000000-0000-7000-8000-000000000001' RETURNING 1
+          ) SELECT 1/(CASE WHEN count(*)=1 THEN 1 ELSE 0 END) FROM changed;
+          WITH changed AS (
+            UPDATE admin_invitation_enrollments SET expires_at=expires_at
+            WHERE invitation_id='40000000-0000-7000-8000-000000000002' RETURNING 1
+          ) SELECT 1/(CASE WHEN count(*)=0 THEN 1 ELSE 0 END) FROM changed;
+          ROLLBACK;
+          SQL
+      - name: Prove every admitted transition role can fire the version trigger
+        run: |
+          psql -h 127.0.0.1 -U merchant -d merchant -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO tenants(id,public_id,name,status,created_at,updated_at)
+          VALUES('00000000-0000-7000-8000-000000000010','ci-role-matrix','CI role matrix','active',clock_timestamp(),clock_timestamp());
+          INSERT INTO merchants(id,tenant_id,code,display_name,environment,settlement_currency,status,created_at,updated_at)
+          VALUES('00000000-0000-7000-8000-000000000020','00000000-0000-7000-8000-000000000010','ci-role-matrix','CI role matrix','test','USD','active',clock_timestamp(),clock_timestamp());
+          INSERT INTO payment_intents(
+            id,tenant_id,merchant_id,merchant_order_id,amount_minor,currency,currency_scale,
+            description,metadata,allowed_routes,status,status_reason,policy_snapshot,
+            version,created_at,updated_at,expires_at
+          )
+          SELECT md5(role_name)::uuid,'00000000-0000-7000-8000-000000000010',
+            '00000000-0000-7000-8000-000000000020',role_name,100,'USD',2,'','{}','[]',
+            'created','role-matrix-v1','{}',1,clock_timestamp(),clock_timestamp(),clock_timestamp()+interval '1 day'
+          FROM unnest(ARRAY[
+            'merchant_api_runtime','merchant_management_runtime','merchant_scanner_worker',
+            'merchant_settlement_worker','merchant_matching_worker','merchant_resolution_worker',
+            'merchant_proof_worker','merchant_plan_worker'
+          ]) AS role_name;
+          SQL
+          for role in \
+            merchant_api_runtime merchant_management_runtime merchant_scanner_worker \
+            merchant_settlement_worker merchant_matching_worker merchant_resolution_worker \
+            merchant_proof_worker merchant_plan_worker; do
+            psql -h 127.0.0.1 -U merchant -d merchant -v ON_ERROR_STOP=1 -v role="$role" <<'SQL'
+          BEGIN;
+          SET LOCAL ROLE :"role";
+          SELECT set_config('app.tenant_id','00000000-0000-7000-8000-000000000010',true);
+          UPDATE payment_intents
+             SET status_reason=:'role',version=version+1,updated_at=clock_timestamp()
+           WHERE id=md5(:'role')::uuid;
+          COMMIT;
+          SQL
+          done
+          test "$(psql -h 127.0.0.1 -U merchant -d merchant -Atc "select count(*) from payment_intent_versions where version=2 and tenant_id='00000000-0000-7000-8000-000000000010'")" = 8
+      - name: Rehearse complete down and up cycle
+        run: |
+          while IFS= read -r migration; do
+            psql -h 127.0.0.1 -U merchant -d merchant -v ON_ERROR_STOP=1 -f "$migration"
+          done < <(find backend/migrations -maxdepth 1 -type f -name '*.down.sql' | sort --reverse)
+          while IFS= read -r migration; do
+            psql -h 127.0.0.1 -U merchant -d merchant -v ON_ERROR_STOP=1 -f "$migration"
+          done < <(find backend/migrations -maxdepth 1 -type f -name '*.up.sql' | sort)
+          psql -h 127.0.0.1 -U merchant -d merchant -v ON_ERROR_STOP=1 -f deploy/postgres/runtime-grants.sql
+      - name: Exercise crash-safe, concurrent, immutable migration runner
+        run: |
+          docker build --file deploy/docker/Dockerfile.migrations --tag merchant-platform-migrations:schema-ci .
+          createdb -h 127.0.0.1 -U merchant merchant_runner_crash
+          if docker run --rm --network host \
+            -e MIGRATION_DATABASE_URL=postgres://merchant:merchant-ci-only@127.0.0.1:5432/merchant_runner_crash?sslmode=disable \
+            -e MIGRATION_ALLOW_TEST_HOOKS=1 \
+            -e MIGRATION_TEST_ABORT_AFTER_BODY=000001_platform.up.sql \
+            merchant-platform-migrations:schema-ci; then
+            echo "migration crash hook unexpectedly succeeded" >&2
+            exit 1
+          fi
+          residual_table="$(psql -h 127.0.0.1 -U merchant -d merchant_runner_crash \
+            -Atc "select to_regclass('public.payment_intents')")"
+          test -z "$residual_table"
+          docker run --rm --network host \
+            -e MIGRATION_DATABASE_URL=postgres://merchant:merchant-ci-only@127.0.0.1:5432/merchant_runner_crash?sslmode=disable \
+            merchant-platform-migrations:schema-ci
+
+          createdb -h 127.0.0.1 -U merchant merchant_runner_concurrent
+          docker run --rm --network host \
+            -e MIGRATION_DATABASE_URL=postgres://merchant:merchant-ci-only@127.0.0.1:5432/merchant_runner_concurrent?sslmode=disable \
+            merchant-platform-migrations:schema-ci >/tmp/migration-a.log 2>&1 &
+          migration_a=$!
+          docker run --rm --network host \
+            -e MIGRATION_DATABASE_URL=postgres://merchant:merchant-ci-only@127.0.0.1:5432/merchant_runner_concurrent?sslmode=disable \
+            merchant-platform-migrations:schema-ci >/tmp/migration-b.log 2>&1 &
+          migration_b=$!
+          wait "$migration_a" || { cat /tmp/migration-a.log; exit 1; }
+          wait "$migration_b" || { cat /tmp/migration-b.log; exit 1; }
+
+          expected="$(find backend/migrations -maxdepth 1 -type f -name '*.up.sql' | wc -l)"
+          actual="$(psql -h 127.0.0.1 -U merchant -d merchant_runner_concurrent -Atc 'select count(*) from schema_migrations')"
+          test "$actual" = "$expected"
+          psql -h 127.0.0.1 -U merchant -d merchant_runner_concurrent -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$ BEGIN
+            IF NOT EXISTS(SELECT 1 FROM schema_migrations WHERE filename='000010_platform_runtime_admission.up.sql')
+               OR NOT EXISTS(SELECT 1 FROM schema_migrations WHERE filename='000011_admin_merchant_membership_projection.up.sql')
+               OR NOT EXISTS(SELECT 1 FROM schema_migrations WHERE filename='000012_invited_oidc_enrollment.up.sql')
+               OR NOT EXISTS(SELECT 1 FROM schema_migrations WHERE filename='000013_deterministic_sandbox.up.sql')
+               OR NOT EXISTS(SELECT 1 FROM schema_migrations WHERE filename='000014_financial_admin_cabinet.up.sql')
+               OR NOT EXISTS(SELECT 1 FROM schema_migrations WHERE filename='000015_retention_archive.up.sql')
+               OR NOT EXISTS(SELECT 1 FROM schema_migrations WHERE filename='000021_shadow_migration_control.up.sql') THEN
+              RAISE EXCEPTION 'a required platform, admin, OIDC, or sandbox migration was omitted by the runner';
+            END IF;
+            IF NOT has_function_privilege('merchant_admin_runtime','list_current_admin_merchant_memberships()','EXECUTE')
+               OR NOT has_function_privilege('merchant_api_runtime','platform_route_runtime_admission(uuid,uuid,text,text)','EXECUTE')
+               OR NOT has_table_privilege('merchant_scanner_worker','scanner_runtime_config_evidence','SELECT,INSERT')
+               OR NOT has_function_privilege('merchant_api_runtime','sandbox_test_credential_admitted(uuid,uuid,text)','EXECUTE')
+               OR NOT has_table_privilege('merchant_api_runtime','sandbox_workspaces','SELECT,INSERT,UPDATE')
+               OR NOT has_table_privilege('merchant_api_runtime','sandbox_scenarios','SELECT,INSERT,UPDATE,DELETE')
+               OR NOT has_table_privilege('merchant_api_runtime','sandbox_idempotency','SELECT,INSERT,DELETE')
+               OR NOT has_function_privilege('retention_archive_worker','retention_claim_archive_batch(text,timestamptz,integer,integer)','EXECUTE')
+               OR NOT has_function_privilege('retention_archive_worker','retention_worker_health(timestamptz,integer)','EXECUTE')
+               OR has_function_privilege('retention_archive_worker','create_retention_policy_version(uuid,uuid,text,bigint,integer,integer,integer,boolean,timestamptz,text,timestamptz)','EXECUTE') THEN
+              RAISE EXCEPTION 'post-runner platform runtime grants are incomplete';
+            END IF;
+          END $$;
+          SQL
+
+  deployment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: 1.26.5
+          cache: false
+      - uses: azure/setup-helm@v5.0.1
+        with:
+          version: v4.2.3
+      - name: Install deployment validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ripgrep
+      - name: Install pinned Kubernetes schema validator
+        run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0
+      - name: Render and validate deployment manifests
+        run: ./deploy/validate.sh full
+      - name: Verify pinned JetStream delivery contract
+        run: |
+          test "$(cd backend && go list -m -f '{{.Version}}' github.com/nats-io/nats.go)" = v1.52.0
+          jq -e '
+            .name == "MERCHANT_EVENTS_V1" and
+            .subjects == ["merchant.events.v1"] and
+            .num_replicas >= 3 and
+            .max_msg_size == 1048576 and
+            .deny_delete == true and .deny_purge == true and
+            .duplicate_window >= 900000000000
+          ' deploy/nats/merchant-events-stream.json >/dev/null
+          jq -e '
+            .durable_name == "MERCHANT_EVENTS_REFERENCE_V1" and
+            .ack_policy == "explicit" and
+            .filter_subject == "merchant.events.v1" and
+            (has("deliver_subject") | not)
+          ' deploy/nats/merchant-events-reference-consumer.json >/dev/null
+          test -z "$(jq -r '.subjects[]' deploy/nats/merchant-events-stream.json | rg -i 'tenant|merchant[_-]?id' || true)"
+      - name: Lint shell, Docker, workflow and YAML assets
+        run: |
+          docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck-alpine:v0.10.0 \
+            shellcheck \
+            /mnt/deploy/validate.sh /mnt/deploy/postgres/run-migrations.sh \
+            /mnt/scripts/release-check.sh /mnt/scripts/verify-release-manifest.sh
+          docker run --rm -i hadolint/hadolint:v2.14.0-alpine hadolint --ignore DL3006 - < deploy/docker/Dockerfile.backend
+          docker run --rm -i hadolint/hadolint:v2.14.0-alpine hadolint --ignore DL3006 - < deploy/docker/Dockerfile.migrations
+          docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint:1.7.7
+          docker run --rm -v "$PWD:/data:ro" --entrypoint /bin/sh cytopia/yamllint:1-0.10 -ec \
+            "find .github infra deploy -type f \( -name '*.yml' -o -name '*.yaml' \) \
+              ! -path 'deploy/helm/merchant-platform/templates/*' \
+              -exec yamllint -d '{extends: default, rules: {line-length: disable, document-start: disable, truthy: disable}}' {} +"
+
+  container-images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        binary: [api, worker, scanner, provider-health-worker, admin-api, management-api, platform-admin-api, platform-outbox-publisher, financial-api, financial-worker, rate-worker, reconciliation-worker, retention-worker, retention-control-scheduler, legacy-gateway, merchant-settings-api, merchant-session-revocation-worker, merchant-invitation-delivery-worker, migration-control, migration-control-worker, migration-traffic-actuator, migrations]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Build isolated runtime image
+        if: matrix.binary != 'migrations'
+        run: >-
+          docker build --file deploy/docker/Dockerfile.backend
+          --build-arg BINARY=${{ matrix.binary }}
+          --build-arg VERSION=ci
+          --build-arg REVISION=${{ github.sha }}
+          --tag merchant-platform-${{ matrix.binary }}:ci .
+      - name: Build migration image
+        if: matrix.binary == 'migrations'
+        run: docker build --file deploy/docker/Dockerfile.migrations --tag merchant-platform-migrations:ci .
+      - name: Scan runtime image
+        run: >-
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
+          aquasec/trivy:0.69.3 image --exit-code 1 --severity HIGH,CRITICAL
+          --ignore-unfixed merchant-platform-${{ matrix.binary }}:ci
+      - name: Generate image SBOM
+        run: |
+          mkdir -p "$RUNNER_TEMP/sbom"
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$RUNNER_TEMP/sbom:/out" \
+            anchore/syft:v1.51.0 merchant-platform-${{ matrix.binary }}:ci \
+            -o cyclonedx-json=/out/${{ matrix.binary }}.cdx.json
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: merchant-platform-${{ matrix.binary }}-sbom
+          path: ${{ runner.temp }}/sbom/${{ matrix.binary }}.cdx.json
+          if-no-files-found: error
+
+  api-contract:
+    runs-on: ubuntu-latest
+    env:
+      APP_ENV: development
+      HTTP_ADDRESS: 127.0.0.1:8080
+      PUBLIC_BASE_URL: http://127.0.0.1:8080
+      BOOTSTRAP_API_KEY_ID: mk_ci_contract
+      BOOTSTRAP_API_KEY_SECRET: ci-contract-secret-at-least-32-characters
+      BOOTSTRAP_TENANT_ID: tenant_ci
+      BOOTSTRAP_MERCHANT_ID: merchant_ci
+      MERCHANT_BASE_URL: http://127.0.0.1:8080
+      MERCHANT_KEY_ID: mk_ci_contract
+      MERCHANT_SECRET: ci-contract-secret-at-least-32-characters
+      REQUIRE_CONTRACT_TARGET: "1"
+      GOFLAGS: -mod=readonly
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
+      - run: python -m pip install --no-deps -r tests/requirements.txt
+      - name: Start deterministic API
+        run: |
+          cd backend
+          go run ./cmd/api > "$RUNNER_TEMP/merchant-api.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/merchant-api.pid"
+          for ((attempt=1; attempt<=60; attempt++)); do
+            if curl --fail --silent http://127.0.0.1:8080/readyz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/merchant-api.log"
+          exit 1
+      - name: Run core black-box contract
+        run: >-
+          python -m pytest -q
+          tests/contract/test_api_contract.py
+          tests/contract/test_release_gate_configuration.py
+      - name: Stop API
+        if: always()
+        run: |
+          if [[ -f "$RUNNER_TEMP/merchant-api.pid" ]]; then
+            kill "$(cat "$RUNNER_TEMP/merchant-api.pid")" || true
+          fi
+
+  sandbox-contract:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: merchant
+          POSTGRES_USER: merchant
+          POSTGRES_PASSWORD: merchant-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U merchant -d merchant"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      APP_ENV: sandbox
+      DATABASE_URL: postgres://merchant_sandbox_contract_login:sandbox-ci-runtime@127.0.0.1:5432/merchant?sslmode=disable
+      SANDBOX_RUNTIME: postgres
+      API_CREDENTIAL_ENVELOPE_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY
+      SANDBOX_RESET_HMAC_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY
+      HTTP_ADDRESS: 127.0.0.1:8082
+      PUBLIC_BASE_URL: http://127.0.0.1:8082
+      SANDBOX_BASE_URL: http://127.0.0.1:8082
+      SANDBOX_KEY_ID: mk_test_ci_contract
+      SANDBOX_SECRET: ci-contract-secret-at-least-32-characters
+      REQUIRE_SANDBOX_CONTRACT: "1"
+      RUN_SANDBOX_CONTRACT: "1"
+      GOFLAGS: -mod=readonly
+      PGPASSWORD: merchant-ci-only
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
+      - run: python -m pip install --no-deps -r tests/requirements.txt
+      - name: Provision isolated PostgreSQL sandbox fixture
+        run: |
+          printf '%s' "$API_CREDENTIAL_ENVELOPE_KEY" > "$RUNNER_TEMP/api-envelope.key"
+          printf '%s' "$SANDBOX_SECRET" > "$RUNNER_TEMP/sandbox.secret"
+          (cd backend && go run ./cmd/bootstrap-envelope \
+            "$RUNNER_TEMP/api-envelope.key" \
+            "$RUNNER_TEMP/sandbox.secret" \
+            "$RUNNER_TEMP/sandbox.envelope")
+          sandbox_envelope="$(tr -d '\r\n' < "$RUNNER_TEMP/sandbox.envelope")"
+          psql -h 127.0.0.1 -U merchant -d merchant -v ON_ERROR_STOP=1 -f deploy/postgres/bootstrap-roles.sql
+          while IFS= read -r migration; do
+            psql -h 127.0.0.1 -U merchant -d merchant -v ON_ERROR_STOP=1 -f "$migration"
+          done < <(find backend/migrations -maxdepth 1 -type f -name '*.up.sql' | sort)
+          psql -h 127.0.0.1 -U merchant -d merchant -v ON_ERROR_STOP=1 -f deploy/postgres/runtime-grants.sql
+          psql -h 127.0.0.1 -U merchant -d merchant -v ON_ERROR_STOP=1 \
+            -v sandbox_envelope="$sandbox_envelope" <<'SQL'
+          CREATE ROLE merchant_sandbox_contract_login LOGIN PASSWORD 'sandbox-ci-runtime'
+            NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          GRANT merchant_api_runtime TO merchant_sandbox_contract_login;
+          INSERT INTO tenants(id,public_id,name,status,created_at,updated_at)
+          VALUES('71000000-0000-7000-8000-000000000001','sandbox-contract','Sandbox contract','active',clock_timestamp(),clock_timestamp());
+          INSERT INTO merchants(id,tenant_id,code,display_name,environment,settlement_currency,status,created_at,updated_at)
+          VALUES('72000000-0000-7000-8000-000000000001','71000000-0000-7000-8000-000000000001','sandbox-contract','Sandbox contract','test','USD','active',clock_timestamp(),clock_timestamp());
+          INSERT INTO api_clients(id,tenant_id,merchant_id,key_id,algorithm,scopes,encrypted_secret,valid_from,created_at,updated_at,version)
+          VALUES(
+            '73000000-0000-7000-8000-000000000001',
+            '71000000-0000-7000-8000-000000000001',
+            '72000000-0000-7000-8000-000000000001',
+            'mk_test_ci_contract','hmac-sha256',ARRAY['payments:read','payments:write'],
+            convert_to(:'sandbox_envelope','UTF8'),
+            clock_timestamp()-interval '1 minute',clock_timestamp(),clock_timestamp(),1
+          );
+          SQL
+          RUN_POSTGRES_CREDENTIAL_CONTRACT=1 \
+            sh -c 'cd backend && go test ./internal/adapters/postgres -run TestPostgresCredentialContract -count=1'
+      - name: Start PostgreSQL-backed sandbox API
+        run: |
+          cd backend
+          go run ./cmd/api > "$RUNNER_TEMP/merchant-sandbox-api.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/merchant-sandbox-api.pid"
+          for ((attempt=1; attempt<=60; attempt++)); do
+            if curl --fail --silent http://127.0.0.1:8082/readyz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/merchant-sandbox-api.log"
+          exit 1
+      - name: Run deterministic sandbox contract
+        run: |
+          if ! python -m pytest -q \
+            tests/contract/test_sandbox_states.py \
+            tests/contract/test_release_gate_configuration.py; then
+            cat "$RUNNER_TEMP/merchant-sandbox-api.log"
+            exit 1
+          fi
+      - name: Stop sandbox API
+        if: always()
+        run: |
+          if [[ -f "$RUNNER_TEMP/merchant-sandbox-api.pid" ]]; then
+            kill "$(cat "$RUNNER_TEMP/merchant-sandbox-api.pid")" || true
+          fi
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: pnpm/action-setup@v6.0.10
+        with:
+          version: 11.16.0
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  sdk:
+    runs-on: ubuntu-latest
+    env:
+      GOFLAGS: -mod=readonly
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: pnpm/action-setup@v6.0.10
+        with:
+          version: 11.16.0
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.9"
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: 1.26.5
+          cache-dependency-path: sdk/go/go.mod
+      - run: pnpm install --frozen-lockfile
+      - name: TypeScript SDK vectors
+        run: pnpm --filter @merchant-platform/sdk test
+      - name: Build Python SDK wheel
+        run: python -m pip wheel --no-deps sdk/python --wheel-dir "$RUNNER_TEMP/python-wheel"
+      - name: Python SDK vectors
+        run: |
+          python -m pip install "pytest==8.4.2"
+          python -m pip install --no-deps --editable sdk/python
+          python -m pytest -q sdk/python/tests
+      - name: Go SDK vectors
+        working-directory: sdk/go
+        run: go test ./...
+      - name: PHP SDK vectors
+        run: >-
+          docker run --rm -v "$PWD:/work" -w /work php:8.4-cli
+          php sdk/php/tests/golden.php
+
+  sdk-java:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-java@v5.7.0
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          cache-dependency-path: sdk/java/pom.xml
+      - name: Java SDK vectors
+        working-directory: sdk/java
+        run: mvn --batch-mode test
+
+  sdk-dotnet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.0.0
+        with:
+          dotnet-version: "8.0.x"
+      - name: .NET SDK vectors
+        run: dotnet run --project sdk/dotnet/tests/Golden/Golden.csproj --configuration Release
+
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Scan the complete source tree for credentials
+        run: >-
+          docker run --rm -v "$PWD:/src:ro"
+          ghcr.io/gitleaks/gitleaks:v8.30.1
+          detect --source=/src --no-git --redact --config=/src/.gitleaks.toml --exit-code=1
+      - name: Generate CycloneDX source SBOM
+        run: |
+          mkdir -p "$RUNNER_TEMP/sbom"
+          docker run --rm -v "$PWD:/src:ro" -v "$RUNNER_TEMP/sbom:/out" \
+            anchore/syft:v1.51.0 dir:/src -o cyclonedx-json=/out/sbom.cdx.json
+      - name: Validate SBOM
+        run: jq --exit-status '.components | length > 0' "$RUNNER_TEMP/sbom/sbom.cdx.json"
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: merchant-platform-source-sbom
+          path: ${{ runner.temp }}/sbom/sbom.cdx.json
+          if-no-files-found: error
+      - name: Scan source, secrets, dependencies and IaC
+        run: >-
+          docker run --rm -v "$PWD:/src:ro" aquasec/trivy:0.69.3
+          fs --exit-code 1 --severity HIGH,CRITICAL --scanners vuln,secret,misconfig
+          --ignore-unfixed /src
+      - name: Prove release placeholders fail closed
+        run: |
+          if ./scripts/verify-release-manifest.sh deploy/release/manifest.example.json; then
+            echo "draft release manifest was unexpectedly admitted" >&2
+            exit 1
+          fi
+
+  qa:
+    runs-on: ubuntu-latest
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: pnpm/action-setup@v6.0.10
+        with:
+          version: 11.16.0
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
+      - run: pnpm install --frozen-lockfile
+      - run: python -m pip install --no-deps -r tests/requirements.txt
+      - run: python -m pytest -q
+      - run: pnpm --filter @merchant/qa typecheck
+      - run: pnpm --filter @merchant/qa test:examples
+
+  browser-e2e:
+    runs-on: ubuntu-latest
+    env:
+      LANDING_E2E_URL: http://127.0.0.1:4173
+      ADMIN_E2E_URL: http://127.0.0.1:4174
+      UNMATCHED_E2E_URL: http://127.0.0.1:4174/#/unmatched
+      ADMIN_MANAGEMENT_E2E_URL: http://127.0.0.1:4176
+      CHECKOUT_E2E_URL: http://127.0.0.1:4175/checkout/fixture
+      REQUIRE_E2E_TARGETS: "1"
+      PLAYWRIGHT_VIDEO: "off"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: pnpm/action-setup@v6.0.10
+        with:
+          version: 11.16.0
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @merchant/qa exec playwright install --with-deps chromium
+      - name: Build browser targets
+        # Keep authenticated/BFF and preview fixtures as separate immutable
+        # artifacts. A preview build must never satisfy production admin tests.
+        run: |
+          pnpm build
+          VITE_ADMIN_PREVIEW_MODE=true pnpm --filter @merchant/admin exec vite build --outDir dist-preview
+          VITE_ADMIN_ALLOW_INSECURE_LOOPBACK_E2E=true pnpm --filter @merchant/admin exec vite build --outDir dist-management
+          VITE_CHECKOUT_FIXTURE_MODE=true pnpm --filter @merchant/checkout build
+      - name: Run required browser gate
+        run: |
+          pnpm --filter @merchant/landing exec vite preview --host 127.0.0.1 --port 4173 --strictPort > "$RUNNER_TEMP/landing.log" 2>&1 &
+          pnpm --filter @merchant/admin exec vite preview --host 127.0.0.1 --port 4174 --strictPort --outDir dist-preview > "$RUNNER_TEMP/admin-preview.log" 2>&1 &
+          pnpm --filter @merchant/admin exec vite preview --host 127.0.0.1 --port 4176 --strictPort --outDir dist-management > "$RUNNER_TEMP/admin-management.log" 2>&1 &
+          pnpm --filter @merchant/checkout exec vite preview --host 127.0.0.1 --port 4175 --strictPort > "$RUNNER_TEMP/checkout.log" 2>&1 &
+          for ((attempt=1; attempt<=30; attempt++)); do
+            if curl --fail --silent http://127.0.0.1:4173/ >/dev/null \
+              && curl --fail --silent http://127.0.0.1:4174/ >/dev/null \
+              && curl --fail --silent http://127.0.0.1:4176/ >/dev/null \
+              && curl --fail --silent http://127.0.0.1:4175/checkout/fixture >/dev/null; then
+              pnpm --filter @merchant/qa test:e2e
+              exit $?
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/landing.log" "$RUNNER_TEMP/admin-preview.log" "$RUNNER_TEMP/admin-management.log" "$RUNNER_TEMP/checkout.log"
+          exit 1

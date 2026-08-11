@@ -1,0 +1,288 @@
+openapi: 3.1.0
+info:
+  title: Merchant Platform Retention Control API
+  version: 1.0.0
+  description: >-
+    Same-origin, tenant-scoped retention and legal-hold control plane. Every
+    mutation requires a server session, CSRF, an exact permission, recent MFA,
+    and durable idempotency. Archived payloads, object locations, versions, and
+    storage credentials are never returned.
+servers: [{url: 'https://admin.example'}]
+security: [{sessionCookie: []}]
+tags: [{name: Retention control}]
+paths:
+  /admin/v1/retention/policies:
+    get:
+      operationId: listEffectiveRetentionPolicies
+      tags: [Retention control]
+      parameters: [{$ref: '#/components/parameters/Tenant'}]
+      responses:
+        '200': {description: Effective immutable policy heads, content: {application/json: {schema: {$ref: '#/components/schemas/PolicyList'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /admin/v1/retention/policy-requests:
+    get:
+      operationId: listRetentionPolicyRequests
+      tags: [Retention control]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Policy requests, content: {application/json: {schema: {$ref: '#/components/schemas/PolicyChangePage'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: requestRetentionPolicy
+      tags: [Retention control]
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PolicyRequest'}}}}
+      responses:
+        '202': {description: Pending independent approval, content: {application/json: {schema: {$ref: '#/components/schemas/PolicyChange'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /admin/v1/retention/policy-requests/{id}/approve:
+    post: {$ref: '#/components/pathItems/PolicyDecision'}
+  /admin/v1/retention/policy-requests/{id}/reject:
+    post: {$ref: '#/components/pathItems/PolicyDecision'}
+  /admin/v1/retention/holds:
+    get:
+      operationId: listRetentionLegalHolds
+      tags: [Retention control]
+      description: Case references are present only for operators holding a legal-hold permission.
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Redacted legal holds, content: {application/json: {schema: {$ref: '#/components/schemas/HoldPage'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createRetentionLegalHold
+      tags: [Retention control]
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HoldRequest'}}}}
+      responses:
+        '201': {description: Immediate legal hold, content: {application/json: {schema: {$ref: '#/components/schemas/Hold'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /admin/v1/retention/holds/{id}/release-requests:
+    post:
+      operationId: requestRetentionLegalHoldRelease
+      tags: [Retention control]
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HoldReleaseRequestInput'}}}}
+      responses:
+        '202': {description: Pending release approval, content: {application/json: {schema: {$ref: '#/components/schemas/HoldRelease'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /admin/v1/retention/hold-release-requests:
+    get:
+      operationId: listRetentionHoldReleaseRequests
+      tags: [Retention control]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Hold release requests, content: {application/json: {schema: {$ref: '#/components/schemas/HoldReleasePage'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /admin/v1/retention/hold-release-requests/{id}/approve:
+    post: {$ref: '#/components/pathItems/HoldReleaseDecision'}
+  /admin/v1/retention/hold-release-requests/{id}/reject:
+    post: {$ref: '#/components/pathItems/HoldReleaseDecision'}
+  /admin/v1/retention/archive-batches:
+    get:
+      operationId: listRetentionArchiveBatchEvidence
+      tags: [Retention control]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Redacted archive batch evidence, content: {application/json: {schema: {$ref: '#/components/schemas/ArchiveBatchPage'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /admin/v1/retention/tombstones:
+    get:
+      operationId: listRetentionTombstoneEvidence
+      tags: [Retention control]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Redacted tombstone evidence, content: {application/json: {schema: {$ref: '#/components/schemas/TombstonePage'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+components:
+  securitySchemes:
+    sessionCookie: {type: apiKey, in: cookie, name: __Host-admin_session}
+    csrfHeader: {type: apiKey, in: header, name: X-CSRF-Token}
+  parameters:
+    ID: {name: id, in: path, required: true, schema: {$ref: '#/components/schemas/UUID'}}
+    Tenant: {name: X-Admin-Tenant-ID, in: header, required: true, schema: {$ref: '#/components/schemas/UUID'}}
+    Cursor: {name: cursor, in: query, schema: {$ref: '#/components/schemas/UUID'}}
+    Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+    IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 255}}
+  pathItems:
+    PolicyDecision:
+      tags: [Retention control]
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Decision'}}}}
+      responses:
+        '200': {description: Decided policy request, content: {application/json: {schema: {$ref: '#/components/schemas/PolicyChange'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+    HoldReleaseDecision:
+      tags: [Retention control]
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Decision'}}}}
+      responses:
+        '200': {description: Decided release request, content: {application/json: {schema: {$ref: '#/components/schemas/HoldRelease'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  responses:
+    Problem: {description: Bounded error without archived content, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+  schemas:
+    UUID: {type: string, format: uuid, pattern: '^[0-9a-f-]{36}$'}
+    Digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+    DataClass: {type: string, enum: [callback_event_body, event_history_payload, published_outbox_payload]}
+    PolicyProposal:
+      type: object
+      additionalProperties: false
+      required: [archive_after_days, prune_grace_days, object_lock_days, prune_enabled]
+      properties:
+        archive_after_days: {type: integer, minimum: 1, maximum: 3650}
+        prune_grace_days: {type: integer, minimum: 1, maximum: 90}
+        object_lock_days: {type: integer, minimum: 30, maximum: 3650}
+        prune_enabled: {type: boolean, description: Must be false unless data_class is published_outbox_payload.}
+    PolicyRequest:
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/PolicyProposal'
+        - type: object
+          required: [data_class, expected_policy_version, expected_head_fence, scheduled_for, reason]
+          properties:
+            data_class: {$ref: '#/components/schemas/DataClass'}
+            expected_policy_version: {type: integer, format: int64, minimum: 0}
+            expected_head_fence: {type: integer, format: int64, minimum: 0}
+            scheduled_for: {type: string, format: date-time}
+            reason: {type: string, minLength: 8, maxLength: 2048}
+    Policy:
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/PolicyProposal'
+        - type: object
+          required: [id, tenant_id, data_class, version, effective_at, policy_digest, head_fence]
+          properties:
+            id: {$ref: '#/components/schemas/UUID'}
+            tenant_id: {$ref: '#/components/schemas/UUID'}
+            data_class: {$ref: '#/components/schemas/DataClass'}
+            version: {type: integer, format: int64, minimum: 1}
+            effective_at: {type: string, format: date-time}
+            policy_digest: {$ref: '#/components/schemas/Digest'}
+            head_fence: {type: integer, format: int64, minimum: 1}
+            last_activated_at: {type: string, format: date-time}
+    PolicyChange:
+      type: object
+      additionalProperties: false
+      required: [id, tenant_id, data_class, expected_effective_version, expected_head_fence, proposal, status, reason, requested_by, scheduled_for, expires_at, created_at, updated_at, row_version]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        tenant_id: {$ref: '#/components/schemas/UUID'}
+        data_class: {$ref: '#/components/schemas/DataClass'}
+        expected_effective_version: {type: integer, format: int64, minimum: 0}
+        expected_head_fence: {type: integer, format: int64, minimum: 0}
+        proposal: {$ref: '#/components/schemas/PolicyProposal'}
+        status: {type: string, enum: [pending_approval, scheduled, active, rejected, conflict, expired]}
+        reason: {type: string, maxLength: 2048}
+        requested_by: {$ref: '#/components/schemas/UUID'}
+        approved_by: {$ref: '#/components/schemas/UUID'}
+        rejected_by: {$ref: '#/components/schemas/UUID'}
+        decision_reason: {type: string, maxLength: 2048}
+        scheduled_for: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        approved_at: {type: string, format: date-time}
+        decided_at: {type: string, format: date-time}
+        activated_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        row_version: {type: integer, format: int64, minimum: 1}
+    HoldRequest:
+      oneOf:
+        - $ref: '#/components/schemas/TenantHoldRequest'
+        - $ref: '#/components/schemas/MerchantHoldRequest'
+        - $ref: '#/components/schemas/RecordHoldRequest'
+    HoldRequestBase:
+      type: object
+      required: [data_class, scope_type, case_reference, reason]
+      properties:
+        data_class: {$ref: '#/components/schemas/DataClass'}
+        scope_type: {type: string, enum: [tenant, merchant, record]}
+        case_reference: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$'}
+        reason: {type: string, minLength: 8, maxLength: 2048}
+        expires_at: {type: string, format: date-time}
+    TenantHoldRequest: {unevaluatedProperties: false, allOf: [{$ref: '#/components/schemas/HoldRequestBase'}, {type: object, properties: {scope_type: {const: tenant}}}]}
+    MerchantHoldRequest: {unevaluatedProperties: false, allOf: [{$ref: '#/components/schemas/HoldRequestBase'}, {type: object, required: [merchant_id], properties: {scope_type: {const: merchant}, merchant_id: {$ref: '#/components/schemas/UUID'}}}]}
+    RecordHoldRequest: {unevaluatedProperties: false, allOf: [{$ref: '#/components/schemas/HoldRequestBase'}, {type: object, required: [merchant_id, source_table, source_record_id], properties: {scope_type: {const: record}, merchant_id: {$ref: '#/components/schemas/UUID'}, source_table: {type: string, enum: [callback_events, event_history, outbox_events]}, source_record_id: {$ref: '#/components/schemas/UUID'}}}]}
+    Hold:
+      type: object
+      additionalProperties: false
+      required: [id, tenant_id, data_class, scope_type, reason, created_by, created_at, version]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        tenant_id: {$ref: '#/components/schemas/UUID'}
+        data_class: {$ref: '#/components/schemas/DataClass'}
+        scope_type: {type: string, enum: [tenant, merchant, record]}
+        merchant_id: {$ref: '#/components/schemas/UUID'}
+        source_table: {type: string, enum: [callback_events, event_history, outbox_events]}
+        source_record_id: {$ref: '#/components/schemas/UUID'}
+        case_reference: {type: string, maxLength: 128, description: 'Omitted without retention:hold_create or retention:hold_release.'}
+        reason: {type: string, maxLength: 2048}
+        created_by: {$ref: '#/components/schemas/UUID'}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        released_at: {type: string, format: date-time}
+        released_by: {$ref: '#/components/schemas/UUID'}
+        expired_at: {type: string, format: date-time}
+        version: {type: integer, format: int64, minimum: 1}
+    HoldReleaseRequestInput: {type: object, additionalProperties: false, required: [expected_hold_version, reason], properties: {expected_hold_version: {type: integer, format: int64, minimum: 1}, reason: {type: string, minLength: 8, maxLength: 2048}}}
+    Decision: {type: object, additionalProperties: false, required: [expected_row_version, reason], properties: {expected_row_version: {type: integer, format: int64, minimum: 1}, reason: {type: string, minLength: 8, maxLength: 2048}}}
+    HoldRelease:
+      type: object
+      additionalProperties: false
+      required: [id, tenant_id, hold_id, expected_hold_version, status, reason, requested_by, created_at, expires_at, row_version]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        tenant_id: {$ref: '#/components/schemas/UUID'}
+        hold_id: {$ref: '#/components/schemas/UUID'}
+        expected_hold_version: {type: integer, format: int64, minimum: 1}
+        status: {type: string, enum: [pending_approval, completed, rejected, conflict, expired]}
+        reason: {type: string, maxLength: 2048}
+        requested_by: {$ref: '#/components/schemas/UUID'}
+        approved_by: {$ref: '#/components/schemas/UUID'}
+        rejected_by: {$ref: '#/components/schemas/UUID'}
+        decision_reason: {type: string, maxLength: 2048}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        decided_at: {type: string, format: date-time}
+        row_version: {type: integer, format: int64, minimum: 1}
+    ArchiveBatch:
+      type: object
+      additionalProperties: false
+      description: Redacted evidence; object location, object version and credentials are intentionally absent.
+      required: [id, data_class, policy_version, status, item_count, created_at]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        data_class: {$ref: '#/components/schemas/DataClass'}
+        policy_version: {type: integer, format: int64, minimum: 1}
+        status: {type: string}
+        item_count: {type: integer, format: int64, minimum: 0}
+        object_sha256: {$ref: '#/components/schemas/Digest'}
+        manifest_sha256: {$ref: '#/components/schemas/Digest'}
+        signing_key_id: {type: string, maxLength: 128}
+        object_retention_until: {type: string, format: date-time}
+        verified_at: {type: string, format: date-time}
+        pruned_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+    Tombstone:
+      type: object
+      additionalProperties: false
+      required: [data_class, source_table, source_record_id, merchant_id, original_sha256, batch_id, archived_at]
+      properties:
+        data_class: {$ref: '#/components/schemas/DataClass'}
+        source_table: {type: string, enum: [callback_events, event_history, outbox_events]}
+        source_record_id: {$ref: '#/components/schemas/UUID'}
+        merchant_id: {$ref: '#/components/schemas/UUID'}
+        original_sha256: {$ref: '#/components/schemas/Digest'}
+        batch_id: {$ref: '#/components/schemas/UUID'}
+        archived_at: {type: string, format: date-time}
+    PolicyList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Policy'}}}}
+    PolicyChangePage: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/PolicyChange'}}, next_cursor: {$ref: '#/components/schemas/UUID'}}}
+    HoldPage: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Hold'}}, next_cursor: {$ref: '#/components/schemas/UUID'}}}
+    HoldReleasePage: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/HoldRelease'}}, next_cursor: {$ref: '#/components/schemas/UUID'}}}
+    ArchiveBatchPage: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/ArchiveBatch'}}, next_cursor: {$ref: '#/components/schemas/UUID'}}}
+    TombstonePage: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Tombstone'}}, next_cursor: {$ref: '#/components/schemas/UUID'}}}
+    Problem: {type: object, additionalProperties: false, required: [type, title, status, code, detail], properties: {type: {type: string, format: uri}, title: {type: string}, status: {type: integer}, code: {type: string}, detail: {type: string}}}

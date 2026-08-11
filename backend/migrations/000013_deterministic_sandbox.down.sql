@@ -1,0 +1,10 @@
+BEGIN;
+DROP TABLE IF EXISTS sandbox_idempotency;
+DROP TABLE IF EXISTS sandbox_callback_attempts;
+DROP TABLE IF EXISTS sandbox_callbacks;
+DROP TABLE IF EXISTS sandbox_events;
+DROP TABLE IF EXISTS sandbox_scenarios;
+DROP TABLE IF EXISTS sandbox_workspaces;
+DROP FUNCTION IF EXISTS enforce_sandbox_test_merchant();
+DROP FUNCTION IF EXISTS sandbox_test_credential_admitted(uuid,uuid,text);
+COMMIT;

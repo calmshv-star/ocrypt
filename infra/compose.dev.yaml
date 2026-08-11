@@ -1,0 +1,23 @@
+# Explicit developer-only host exposure. Never apply this override in production.
+services:
+  postgres:
+    ports:
+      - 127.0.0.1:${POSTGRES_PORT:-55432}:5432
+  gateway:
+    ports:
+      - 127.0.0.1:${GATEWAY_PORT:-8088}:8080
+  prometheus:
+    ports:
+      - 127.0.0.1:${PROMETHEUS_PORT:-9091}:9090
+  scanner:
+    environment:
+      ENVIRONMENT: development
+      SCANNER_UNSAFE_DEVELOPMENT_STATIC_CONFIG: "true"
+      SCANNER_CHAIN_ID: ${SCANNER_CHAIN_ID:-}
+      SCANNER_GENESIS_HASH: ${SCANNER_GENESIS_HASH:-}
+      SCANNER_PROVIDER_KIND: ${SCANNER_PROVIDER_KIND:-normalized-gateway}
+      SCANNER_PROVIDER_URLS: ${SCANNER_PROVIDER_URLS:-}
+      SCANNER_PROVIDER_TOKEN: ${SCANNER_PROVIDER_TOKEN:-}
+      SCANNER_QUORUM: ${SCANNER_QUORUM:-2}
+      SCANNER_OVERLAP: ${SCANNER_OVERLAP:-12}
+      SCANNER_RANGE_SIZE: ${SCANNER_RANGE_SIZE:-100}

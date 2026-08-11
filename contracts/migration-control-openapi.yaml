@@ -1,0 +1,182 @@
+openapi: 3.1.0
+info:
+  title: Shadow Migration Control API
+  version: 1.0.0
+  description: >-
+    Internal fail-closed control plane. Mutation requests default to dry-run;
+    signed manifests never contain secrets. PostgreSQL facts remain authoritative
+    until an independently authenticated traffic actuator acknowledges cutover.
+servers:
+  - url: https://platform-admin.internal
+security:
+  - mutualTLS: []
+    platformAssertion: []
+tags:
+  - name: Migration control
+  - name: Traffic actuator
+paths:
+  /internal/platform-admin/v1/migrations:
+    get:
+      tags: [Migration control]
+      operationId: listMigrationRuns
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses: {'200': {description: Secret-free migration run page}, default: {$ref: '#/components/responses/Problem'}}
+    post:
+      tags: [Migration control]
+      operationId: createMigrationRun
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CreateRun'}}}}
+      responses: {'200': {$ref: '#/components/responses/DryRun'}, '201': {description: Created migration run, content: {application/json: {schema: {$ref: '#/components/schemas/Run'}}}}, default: {$ref: '#/components/responses/Problem'}}
+  /internal/platform-admin/v1/migrations/{id}:
+    get:
+      tags: [Migration control]
+      operationId: getMigrationRun
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}]
+      responses: {'200': {description: Migration run, content: {application/json: {schema: {$ref: '#/components/schemas/Run'}}}}, default: {$ref: '#/components/responses/Problem'}}
+  /internal/platform-admin/v1/migrations/{id}/manifests:
+    post:
+      tags: [Migration control]
+      operationId: attachSignedMigrationManifest
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AttachManifest'}}}}
+      responses: {'200': {$ref: '#/components/responses/DryRun'}, '201': {description: Immutable manifest evidence}, default: {$ref: '#/components/responses/Problem'}}
+  /internal/platform-admin/v1/migrations/{id}/transition-requests:
+    post:
+      tags: [Migration control]
+      operationId: requestMigrationTransition
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TransitionInput'}}}}
+      responses: {'200': {$ref: '#/components/responses/DryRun'}, '202': {description: Pending independent approval}, default: {$ref: '#/components/responses/Problem'}}
+  /internal/platform-admin/v1/migration-transition-requests/{id}/approve:
+    post: {$ref: '#/components/pathItems/Decision'}
+  /internal/platform-admin/v1/migration-transition-requests/{id}/reject:
+    post: {$ref: '#/components/pathItems/Decision'}
+  /internal/platform-admin/v1/migration-transition-requests/{id}/execute:
+    post:
+      tags: [Migration control]
+      operationId: executeApprovedMigrationTransition
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ExecuteInput'}}}}
+      responses: {'200': {$ref: '#/components/responses/DryRun'}, '202': {description: Executed transition or pending actuator action, content: {application/json: {schema: {$ref: '#/components/schemas/Run'}}}}, default: {$ref: '#/components/responses/Problem'}}
+  /internal/migration-actuator/v1/migrations/{id}/ack:
+    post:
+      tags: [Traffic actuator]
+      operationId: acknowledgeMigrationTrafficAction
+      security: [{mutualTLS: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ActuatorAck'}}}}
+      responses: {'200': {description: Exact fenced action acknowledged, content: {application/json: {schema: {$ref: '#/components/schemas/Run'}}}}, default: {$ref: '#/components/responses/Problem'}}
+components:
+  securitySchemes:
+    mutualTLS: {type: mutualTLS}
+    platformAssertion: {type: apiKey, in: header, name: X-Platform-Admin-Assertion}
+  parameters:
+    ID: {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    Tenant: {name: tenant_id, in: query, required: true, schema: {type: string, format: uuid}}
+    Cursor: {name: cursor, in: query, schema: {type: string, format: uuid}}
+    Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+    IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 255}}
+  pathItems:
+    Decision:
+      tags: [Migration control]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DecisionInput'}}}}
+      responses: {'200': {description: Dry-run report or versioned decision}, default: {$ref: '#/components/responses/Problem'}}
+  responses:
+    DryRun: {description: Non-mutating admission report, content: {application/json: {schema: {$ref: '#/components/schemas/DryRunReport'}}}}
+    Problem: {description: Uniform internal problem response, content: {application/problem+json: {schema: {type: object, additionalProperties: false, required: [code, message], properties: {code: {type: string}, message: {type: string}}}}}}
+  schemas:
+    State: {type: string, enum: [inventory, validated, two_person_approved, importing, shadow, canary, cutover_ready, cutover, rollback_window, rollback_pending, rolled_back, decommissioned]}
+    Profile: {type: string, enum: [generic, wallet_ledger, json_md5, form_md5]}
+    DryRunFlag: {type: boolean, default: true, description: Must be explicitly false before any mutation.}
+    CreateRun:
+      type: object
+      additionalProperties: false
+      required: [source_system_id, profile, reason]
+      properties:
+        tenant_id: {type: string, format: uuid}
+        source_system_id: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$'}
+        profile: {$ref: '#/components/schemas/Profile'}
+        reason: {type: string, minLength: 12, maxLength: 1000}
+        dry_run: {$ref: '#/components/schemas/DryRunFlag'}
+    AttachManifest:
+      type: object
+      additionalProperties: false
+      required: [expected_row_version, document, reason]
+      properties:
+        expected_row_version: {type: integer, minimum: 1}
+        document: {$ref: './migration-manifest-v1.schema.json'}
+        reason: {type: string, minLength: 12, maxLength: 1000}
+        dry_run: {$ref: '#/components/schemas/DryRunFlag'}
+    TransitionInput:
+      type: object
+      additionalProperties: false
+      required: [target_state, expected_row_version, expected_fence_token, manifest_id, reason]
+      properties:
+        target_state: {$ref: '#/components/schemas/State'}
+        expected_row_version: {type: integer, minimum: 1}
+        expected_fence_token: {type: integer, minimum: 1}
+        manifest_id: {type: string, format: uuid}
+        reason: {type: string, minLength: 12, maxLength: 1000}
+        dry_run: {$ref: '#/components/schemas/DryRunFlag'}
+    DecisionInput:
+      type: object
+      additionalProperties: false
+      required: [expected_request_version, reason]
+      properties:
+        expected_request_version: {type: integer, minimum: 1}
+        reason: {type: string, minLength: 12, maxLength: 1000}
+        dry_run: {$ref: '#/components/schemas/DryRunFlag'}
+    ExecuteInput:
+      type: object
+      additionalProperties: false
+      required: [expected_request_version, expected_row_version, expected_fence_token, reason]
+      properties:
+        expected_request_version: {type: integer, minimum: 1}
+        expected_row_version: {type: integer, minimum: 1}
+        expected_fence_token: {type: integer, minimum: 1}
+        reason: {type: string, minLength: 12, maxLength: 1000}
+        dry_run: {$ref: '#/components/schemas/DryRunFlag'}
+    ActuatorAck:
+      type: object
+      additionalProperties: false
+      required: [action_version, fence_token, action, evidence_hash, key_id, signature]
+      properties:
+        action_version: {type: integer, minimum: 1}
+        fence_token: {type: integer, minimum: 1}
+        action: {type: string, enum: [activate_platform, restore_legacy]}
+        evidence_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        key_id: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,254}$'}
+        signature: {type: string, pattern: '^[A-Za-z0-9_-]{86}$'}
+    DryRunReport:
+      type: object
+      additionalProperties: false
+      required: [dry_run, admissible, checks, blockers]
+      properties:
+        dry_run: {type: boolean, const: true}
+        admissible: {type: boolean}
+        checks: {type: array, items: {type: string}}
+        blockers: {type: array, items: {type: string}}
+        payload_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        target_state: {$ref: '#/components/schemas/State'}
+    Run:
+      type: object
+      additionalProperties: false
+      required: [id, tenant_id, source_system_id, profile, state, create_traffic_owner, callback_owner, desired_action_version, actuator_ack_version, fence_token, row_version, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        tenant_id: {type: string, format: uuid}
+        source_system_id: {type: string}
+        profile: {$ref: '#/components/schemas/Profile'}
+        state: {$ref: '#/components/schemas/State'}
+        create_traffic_owner: {type: string, enum: [legacy, shadow, canary, platform]}
+        callback_owner: {type: string, enum: [legacy, shadow, canary, platform]}
+        desired_action_version: {type: integer, minimum: 0}
+        actuator_ack_version: {type: integer, minimum: 0}
+        fence_token: {type: integer, minimum: 1}
+        row_version: {type: integer, minimum: 1}
+        rollback_deadline: {type: string, format: date-time}
+        pending_action: {type: string, enum: [activate_platform, restore_legacy]}
+        pending_target_state: {type: string, enum: [cutover, rolled_back]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}

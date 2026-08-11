@@ -1,0 +1,24 @@
+{
+  "name": "merchant-platform",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Universal multi-tenant cryptocurrency payment platform",
+  "packageManager": "pnpm@11.16.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r --if-present build",
+    "dev:admin": "pnpm --filter @merchant/admin dev",
+    "dev:checkout": "pnpm --filter @merchant/checkout dev",
+    "dev:landing": "pnpm --filter @merchant/landing dev",
+    "lint": "pnpm -r --if-present lint",
+    "test": "pnpm -r --if-present test",
+    "test:backend": "cd backend && go test ./...",
+    "test:e2e": "pnpm --filter @merchant/qa test:e2e",
+    "test:python": "python -m pytest -q",
+    "verify": "./scripts/release-check.sh",
+    "typecheck": "pnpm -r --if-present typecheck"
+  }
+}

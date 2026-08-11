@@ -1,0 +1,239 @@
+openapi: 3.1.0
+info:
+  title: Merchant Cabinet Team and Project Settings API
+  version: 1.0.0
+  description: Private mTLS API. The admin BFF derives scope and identity from its validated OIDC session; browsers never call this API directly.
+servers:
+  - url: https://merchant-settings-api:8447
+security:
+  - MerchantSettingsAdmin: []
+paths:
+  /v1/merchant-cabinet/roles:
+    get:
+      operationId: listMerchantCabinetRoles
+      responses:
+        '200': {description: Closed system role catalogue, content: {application/json: {schema: {$ref: '#/components/schemas/RolePage'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/merchant-cabinet/members:
+    get:
+      operationId: listMerchantMembers
+      parameters: [{$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Members, content: {application/json: {schema: {$ref: '#/components/schemas/MemberPage'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/merchant-cabinet/members/{id}/roles:
+    post:
+      operationId: replaceOrdinaryMerchantMemberRoles
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RoleChange'}}}}
+      responses:
+        '200': {description: Updated member, headers: {Idempotency-Replayed: {$ref: '#/components/headers/Replayed'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
+        '409': {description: High-risk changes require a security action, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/merchant-cabinet/members/{id}/disable:
+    post: {$ref: '#/components/pathItems/MemberMutation'}
+  /v1/merchant-cabinet/members/{id}/remove:
+    post: {$ref: '#/components/pathItems/MemberMutation'}
+  /v1/merchant-cabinet/invitations:
+    get:
+      operationId: listMerchantInvitations
+      parameters: [{$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Invitations without token material, content: {application/json: {schema: {$ref: '#/components/schemas/InvitationPage'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createMerchantInvitation
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CreateInvitation'}}}}
+      responses:
+        '201': {description: Token appears only on the first non-replayed response. Email mode remains pending_delivery until provider acknowledgement., headers: {Idempotency-Replayed: {$ref: '#/components/headers/Replayed'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Invitation'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/merchant-cabinet/invitations/{id}/revoke:
+    post:
+      operationId: revokeMerchantInvitation
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/VersionReason'}}}}
+      responses:
+        '200': {description: Revoked invitation, content: {application/json: {schema: {$ref: '#/components/schemas/Invitation'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/merchant-cabinet/invitations/accept:
+    post:
+      operationId: acceptMerchantInvitation
+      description: The BFF resolves the opaque token with lookup_merchant_invitation(hash), then mints a request-bound assertion from a verified OIDC email and subject.
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [token], properties: {token: {type: string, minLength: 43, maxLength: 43}}}}}}
+      responses:
+        '200': {description: Created member, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/merchant-cabinet/security-actions:
+    get:
+      operationId: listMerchantSecurityActions
+      parameters: [{$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Security action requests, content: {application/json: {schema: {$ref: '#/components/schemas/SecurityActionPage'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createMerchantSecurityAction
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CreateSecurityAction'}}}}
+      responses:
+        '201': {description: Pending distinct-actor approval, content: {application/json: {schema: {$ref: '#/components/schemas/SecurityAction'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /v1/merchant-cabinet/security-actions/{id}/approve:
+    post: {$ref: '#/components/pathItems/SecurityDecision'}
+  /v1/merchant-cabinet/security-actions/{id}/reject:
+    post: {$ref: '#/components/pathItems/SecurityDecision'}
+  /v1/merchant-cabinet/settings:
+    get:
+      operationId: getMerchantProjectSettings
+      responses:
+        '200': {description: Non-financial project settings, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectSettings'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: updateMerchantProjectSettings
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/UpdateProjectSettings'}}}}
+      responses:
+        '200': {description: Updated settings, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectSettings'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+components:
+  securitySchemes:
+    MerchantSettingsAdmin:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: 'Exact value: MerchantSettingsAdmin <payload.signature>. The assertion binds method, canonical target, body hash, tenant, merchant, OIDC identity, session, JTI and MFA time.'
+  parameters:
+    ID: {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    Cursor: {name: cursor, in: query, schema: {type: string, format: uuid}}
+    Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+    IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 255}}
+  headers:
+    Replayed: {schema: {type: string, enum: ['true']}, description: Present only for a replay. One-time invitation tokens are omitted on replay.}
+  pathItems:
+    MemberMutation:
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/VersionReason'}}}}
+      responses:
+        '200': {description: Mutated ordinary member and emitted a session-revocation signal, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
+        '409': {description: Owner/security_admin changes require a security action, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+    SecurityDecision:
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/VersionReason'}}}}
+      responses:
+        '200': {description: Decision by a distinct active MFA actor/session, content: {application/json: {schema: {$ref: '#/components/schemas/SecurityAction'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  responses:
+    Problem: {description: RFC 9457-style bounded problem, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+  schemas:
+    UUID: {type: string, format: uuid}
+    RoleKey: {type: string, enum: [owner, security_admin, admin, developer, support, viewer]}
+    OrdinaryRoleKey: {type: string, enum: [admin, developer, support, viewer]}
+    Role:
+      type: object
+      additionalProperties: false
+      required: [key, high_risk, permissions]
+      properties: {key: {$ref: '#/components/schemas/RoleKey'}, high_risk: {type: boolean}, permissions: {type: array, uniqueItems: true, items: {type: string}}}
+    RolePage: {type: object, additionalProperties: false, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/Role'}}}}
+    Member:
+      type: object
+      additionalProperties: false
+      required: [id,email,display_name,status,role_keys,joined_at,updated_at,version]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        email: {type: string, format: email}
+        display_name: {type: string, minLength: 1, maxLength: 255}
+        status: {type: string, enum: [active, disabled, removed]}
+        role_keys: {type: array, uniqueItems: true, minItems: 1, items: {$ref: '#/components/schemas/RoleKey'}}
+        joined_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        version: {type: integer, minimum: 1}
+    MemberPage: {$ref: '#/components/schemas/PagedMembers'}
+    PagedMembers: {type: object, additionalProperties: false, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/Member'}}, next_cursor: {$ref: '#/components/schemas/UUID'}}}
+    Invitation:
+      type: object
+      additionalProperties: false
+      required: [id,email,role_keys,delivery_mode,status,token_key_id,created_at,expires_at,version]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        email: {type: string, format: email}
+        role_keys: {type: array, uniqueItems: true, items: {$ref: '#/components/schemas/OrdinaryRoleKey'}}
+        delivery_mode: {type: string, enum: [copy_once, email]}
+        status: {type: string, enum: [pending_delivery, active, accepted, revoked, expired]}
+        invite_token: {type: string, minLength: 43, maxLength: 43, readOnly: true, description: First response only; never persisted or replayed.}
+        token_key_id: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        version: {type: integer, minimum: 1}
+    InvitationPage: {type: object, additionalProperties: false, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/Invitation'}}, next_cursor: {$ref: '#/components/schemas/UUID'}}}
+    CreateInvitation:
+      type: object
+      additionalProperties: false
+      required: [email,role_keys,delivery_mode,ttl_seconds,reason]
+      properties:
+        email: {type: string, format: email, maxLength: 320}
+        role_keys: {type: array, minItems: 1, maxItems: 4, uniqueItems: true, items: {$ref: '#/components/schemas/OrdinaryRoleKey'}}
+        delivery_mode: {type: string, enum: [copy_once,email]}
+        ttl_seconds: {type: integer, minimum: 300, maximum: 2592000}
+        reason: {type: string, minLength: 8, maxLength: 1000}
+    VersionReason: {type: object, additionalProperties: false, required: [version,reason], properties: {version: {type: integer, minimum: 1}, reason: {type: string, minLength: 8, maxLength: 1000}}}
+    RoleChange: {type: object, additionalProperties: false, required: [version,role_keys,reason], properties: {version: {type: integer, minimum: 1}, role_keys: {type: array, minItems: 1, maxItems: 6, uniqueItems: true, items: {$ref: '#/components/schemas/RoleKey'}}, reason: {type: string, minLength: 8, maxLength: 1000}}}
+    CreateSecurityAction:
+      type: object
+      additionalProperties: false
+      required: [operation,target_member_id,target_version,desired_role_keys,reason]
+      properties:
+        operation: {type: string, enum: [member.roles.replace, member.disable, member.remove]}
+        target_member_id: {$ref: '#/components/schemas/UUID'}
+        target_version: {type: integer, minimum: 1}
+        desired_role_keys: {type: array, maxItems: 6, uniqueItems: true, items: {$ref: '#/components/schemas/RoleKey'}}
+        reason: {type: string, minLength: 8, maxLength: 1000}
+    SecurityAction:
+      type: object
+      additionalProperties: false
+      required: [id,operation,target_member_id,target_version,desired_role_keys,status,requested_by,request_reason,created_at,expires_at,updated_at,version]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        operation: {type: string, enum: [member.roles.replace, member.disable, member.remove]}
+        target_member_id: {$ref: '#/components/schemas/UUID'}
+        target_version: {type: integer, minimum: 1}
+        desired_role_keys: {type: array, items: {$ref: '#/components/schemas/RoleKey'}}
+        status: {type: string, enum: [pending_approval, completed, rejected, expired, failed]}
+        requested_by: {$ref: '#/components/schemas/UUID'}
+        approved_by: {$ref: '#/components/schemas/UUID'}
+        request_reason: {type: string}
+        approval_reason: {type: string}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        version: {type: integer, minimum: 1}
+    SecurityActionPage: {type: object, additionalProperties: false, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/SecurityAction'}}, next_cursor: {$ref: '#/components/schemas/UUID'}}}
+    NotificationPreferences: {type: object, additionalProperties: false, required: [payment_succeeded,payment_failed,weekly_summary], properties: {payment_succeeded: {type: boolean}, payment_failed: {type: boolean}, weekly_summary: {type: boolean}}}
+    ProjectSettings:
+      type: object
+      additionalProperties: false
+      required: [display_name,locale,timezone,notifications,allowed_embed_origins,updated_at,version]
+      properties:
+        display_name: {type: string, minLength: 1, maxLength: 120}
+        locale: {type: string, enum: [en, zh-CN, es, fr, de, ru]}
+        timezone: {type: string, minLength: 1, maxLength: 100}
+        support_email: {type: string, format: email, maxLength: 320}
+        notifications: {$ref: '#/components/schemas/NotificationPreferences'}
+        allowed_embed_origins: {type: array, maxItems: 100, uniqueItems: true, items: {type: string, pattern: '^https://[^/?#]+$'}}
+        updated_at: {type: string, format: date-time}
+        version: {type: integer, minimum: 1}
+    UpdateProjectSettings:
+      type: object
+      additionalProperties: false
+      required: [version,display_name,locale,timezone,notifications,allowed_embed_origins,reason]
+      properties:
+        version: {type: integer, minimum: 1}
+        display_name: {type: string, minLength: 1, maxLength: 120}
+        locale: {type: string, enum: [en, zh-CN, es, fr, de, ru]}
+        timezone: {type: string, minLength: 1, maxLength: 100}
+        support_email: {type: string, format: email, maxLength: 320}
+        notifications: {$ref: '#/components/schemas/NotificationPreferences'}
+        allowed_embed_origins: {type: array, maxItems: 100, uniqueItems: true, items: {type: string, pattern: '^https://[^/?#]+$'}}
+        reason: {type: string, minLength: 8, maxLength: 1000}
+    Problem: {type: object, additionalProperties: true, required: [type,title,status,code], properties: {type: {type: string}, title: {type: string}, status: {type: integer}, code: {type: string, enum: [authentication_required,mfa_or_permission_required,not_found,idempotency_conflict,security_approval_required,state_conflict,invalid_request,dependency_unavailable,internal_error]}}}

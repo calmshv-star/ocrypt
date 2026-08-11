@@ -1,0 +1,301 @@
+{
+  "status": "DRAFT_REPLACE_BEFORE_RELEASE",
+  "revision": "REPLACE_WITH_40_HEX_GIT_SHA",
+  "images": [
+    {
+      "name": "api",
+      "digest": "REPLACE_WITH_SHA256_DIGEST",
+      "sbom": "REPLACE_WITH_IMMUTABLE_SBOM_REFERENCE",
+      "provenance": "REPLACE_WITH_SIGNED_PROVENANCE_REFERENCE"
+    }
+  ],
+  "migrations": ["REPLACE_WITH_ORDERED_MIGRATION_FILENAMES"],
+  "route_owners": {
+    "/v1/public/payment-links": "management-api",
+    "/v1/payment-links": "management-api",
+    "/v1/checkout-sessions": "management-api",
+    "/v1/reconciliation-reports": "api",
+    "/admin/v1": "admin-api"
+  },
+  "merchant_api_scopes": {
+    "reconciliation_reports": {
+      "required_scope": "reconciliation:read",
+      "evidence": "REPLACE_WITH_IMMUTABLE_CONTRACT_TEST_EVIDENCE"
+    }
+  },
+  "public_capability_rate_limit": {
+    "enabled": false,
+    "per_source_rps": 0,
+    "burst": 0,
+    "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+  },
+  "live_admission_tests": {
+    "helm_server_side_dry_run": {
+      "required": true,
+      "passed": false,
+      "skipped": true,
+      "tested_at": "REPLACE_WITH_UTC_TIMESTAMP",
+      "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+    },
+    "container_runtime_smoke": {
+      "required": true,
+      "passed": false,
+      "skipped": true,
+      "tested_at": "REPLACE_WITH_UTC_TIMESTAMP",
+      "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+    },
+    "postgres_migration_up_down": {
+      "required": true,
+      "passed": false,
+      "skipped": true,
+      "tested_at": "REPLACE_WITH_UTC_TIMESTAMP",
+      "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+    },
+    "platform_outbox_destination_mtls": {
+      "required": true,
+      "passed": false,
+      "skipped": true,
+      "tested_at": "REPLACE_WITH_UTC_TIMESTAMP",
+      "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+    },
+    "s3_object_lock_and_overwrite_denial": {
+      "required": true,
+      "passed": false,
+      "skipped": true,
+      "tested_at": "REPLACE_WITH_UTC_TIMESTAMP",
+      "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+    },
+    "retention_s3_object_lock_put_head": {
+      "required": true,
+      "passed": false,
+      "skipped": true,
+      "tested_at": "REPLACE_WITH_UTC_TIMESTAMP",
+      "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+    },
+    "retention_worker_database_boundary": {
+      "required": true,
+      "passed": false,
+      "skipped": true,
+      "tested_at": "REPLACE_WITH_UTC_TIMESTAMP",
+      "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+    },
+    "jetstream_mtls_stream_policy": {
+      "required": true,
+      "passed": false,
+      "skipped": true,
+      "tested_at": "REPLACE_WITH_UTC_TIMESTAMP",
+      "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+    },
+    "jetstream_lost_ack_deduplication": {
+      "required": true,
+      "passed": false,
+      "skipped": true,
+      "tested_at": "REPLACE_WITH_UTC_TIMESTAMP",
+      "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+    },
+    "jetstream_outage_backpressure_recovery": {
+      "required": true,
+      "passed": false,
+      "skipped": true,
+      "tested_at": "REPLACE_WITH_UTC_TIMESTAMP",
+      "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+    },
+    "jetstream_reference_inbox_redelivery": {
+      "required": true,
+      "passed": false,
+      "skipped": true,
+      "tested_at": "REPLACE_WITH_UTC_TIMESTAMP",
+      "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+    },
+    "legacy_postgres_migration_and_grant_boundary": {
+      "required": true,
+      "passed": false,
+      "skipped": true,
+      "tested_at": "REPLACE_WITH_UTC_TIMESTAMP",
+      "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+    },
+    "legacy_callback_tls_ssrf_and_retry_fencing": {
+      "required": true,
+      "passed": false,
+      "skipped": true,
+      "tested_at": "REPLACE_WITH_UTC_TIMESTAMP",
+      "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+    },
+    "legacy_source_preserving_edge_and_rate_limit": {
+      "required": true,
+      "passed": false,
+      "skipped": true,
+      "tested_at": "REPLACE_WITH_UTC_TIMESTAMP",
+      "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+    },
+    "migration_postgres_role_and_ownership_fences": {
+      "required": true,
+      "passed": false,
+      "skipped": true,
+      "tested_at": "REPLACE_WITH_UTC_TIMESTAMP",
+      "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+    },
+    "migration_provider_quorum_mtls_verification": {
+      "required": true,
+      "passed": false,
+      "skipped": true,
+      "tested_at": "REPLACE_WITH_UTC_TIMESTAMP",
+      "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+    },
+    "migration_actuator_ack_and_rollback": {
+      "required": true,
+      "passed": false,
+      "skipped": true,
+      "tested_at": "REPLACE_WITH_UTC_TIMESTAMP",
+      "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+    }
+  },
+  "scanner_runtime_admission": {
+    "source": "platform_snapshots",
+    "unsafe_static_config": true,
+    "external_credential_secret_directory": false,
+    "evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+  },
+  "platform_outbox_external_publication": {
+    "enabled": false,
+    "database_role": "platform_outbox_publisher",
+    "service_identity_id": "REPLACE_WITH_UUID",
+    "replicas": 0,
+    "destination_url": "REPLACE_WITH_EXACT_HTTPS_DESTINATION",
+    "tls_min_version": "REPLACE_WITH_TLS_VERSION",
+    "mutual_tls": false,
+    "bearer_file": false,
+    "service_exposed": true,
+    "ingress_exposed": true,
+    "network_policy_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE",
+    "database_grant_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+  },
+  "jetstream_delivery": {
+    "enabled": false,
+    "postgres_source_of_truth": true,
+    "merchant_recovery_route": "/v1/events",
+    "stream": "MERCHANT_EVENTS_V1",
+    "subject": "merchant.events.v1",
+    "replicas": 0,
+    "tls_min_version": "1.3",
+    "mutual_tls": false,
+    "credential_file": false,
+    "public_port_exposed": false,
+    "publisher_delete_or_purge": false,
+    "max_age_seconds": 0,
+    "max_bytes": 0,
+    "max_messages": 0,
+    "max_message_bytes": 0,
+    "duplicate_window_seconds": 0,
+    "max_retry_delay_seconds": 0,
+    "stream_configuration_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE",
+    "publisher_permissions_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE",
+    "network_policy_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+  },
+  "reconciliation_object_store": {
+    "provider": "REPLACE_WITH_PROVIDER",
+    "endpoint_origin": "REPLACE_WITH_HTTPS_ORIGIN",
+    "bucket": "replace-with-bucket",
+    "prefix": "reconciliation/",
+    "versioning": "REPLACE_WITH_ENABLED",
+    "object_lock": {
+      "enabled": false,
+      "mode": "REPLACE_WITH_COMPLIANCE_OR_GOVERNANCE",
+      "retention_days": 0
+    },
+    "overwrite_denied": false,
+    "api_identity": {
+      "allowed_actions": ["s3:GetObject"],
+      "denied_actions": ["s3:DeleteObject", "s3:ListBucket", "s3:PutObject"]
+    },
+    "worker_identity": {
+      "allowed_actions": ["s3:GetObject", "s3:PutObject"],
+      "denied_actions": ["s3:DeleteObject", "s3:ListBucket"]
+    },
+    "bucket_configuration_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE",
+    "api_policy_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE",
+    "worker_policy_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE",
+    "immutability_test_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+  },
+  "retention_archive": {
+    "enabled": false,
+    "database_role": "retention_archive_worker",
+    "login_role": "retention_archive_worker_login",
+    "replicas": 0,
+    "health_address": ":9099",
+    "service_exposed": false,
+    "ingress_exposed": false,
+    "app_env": "production",
+    "signing_private_key_file": false,
+    "s3_credential_files": false,
+    "object_store": {
+      "endpoint_origin": "REPLACE_WITH_HTTPS_ORIGIN",
+      "bucket": "replace-with-bucket",
+      "prefix": "retention/v1/",
+      "versioning": "REPLACE_WITH_ENABLED",
+      "object_lock": {
+        "enabled": false,
+        "mode": "REPLACE_WITH_COMPLIANCE",
+        "retention_days": 0
+      }
+    },
+    "worker_identity": {
+      "allowed_actions": ["s3:GetBucketVersioning", "s3:GetObject", "s3:GetObjectLockConfiguration", "s3:PutObject"],
+      "denied_actions": ["s3:DeleteObject", "s3:DeleteObjectVersion", "s3:ListBucket"]
+    },
+    "control_plane": {
+      "policy_mutation_available": false,
+      "legal_hold_mutation_available": false
+    },
+    "network_policy_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE",
+    "database_grant_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE",
+    "bucket_configuration_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE",
+    "worker_policy_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE",
+    "immutability_test_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+  },
+  "legacy_compatibility": {
+    "enabled": false,
+    "sunset_at": "REPLACE_WITH_UNEXPIRED_UTC_TIMESTAMP",
+    "database_role": "legacy_compat_runtime",
+    "requester_role": "legacy_compat_admission_requester",
+    "approver_role": "legacy_compat_admission_approver",
+    "migration": "000018_legacy_compatibility.up.sql",
+    "approved_config_manifest_sha256": "REPLACE_WITH_64_HEX_SHA256",
+    "requester_identity": "REPLACE_WITH_DISTINCT_LOGIN_IDENTITY",
+    "approver_identity": "REPLACE_WITH_DISTINCT_LOGIN_IDENTITY",
+    "admission_expires_at": "REPLACE_WITH_UTC_TIMESTAMP",
+    "legacy_md5_confined": true,
+    "core_hmac_secret_file": false,
+    "legacy_secret_files": false,
+    "core_mutual_tls": false,
+    "callback_https_port": 443,
+    "service_exposed": false,
+    "shared_ingress_exposed": false,
+    "source_preserving_listener_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE",
+    "database_grant_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE",
+    "admission_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE",
+    "callback_network_policy_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE",
+    "sunset_communications_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+  },
+  "shadow_migration_control": {
+    "enabled": false,
+    "migration": "000021_shadow_migration_control.up.sql",
+    "control_role": "platform_admin_runtime",
+    "worker_role": "migration_control_worker",
+    "actuator_role": "migration_traffic_actuator",
+    "offline_cli_default": "dry-run",
+    "worker_execute_enabled": false,
+    "service_exposed": false,
+    "provider_tls_min_version": "1.3",
+    "provider_mutual_tls": false,
+    "manifest_two_distinct_signers": false,
+    "live_source_inventory_run": false,
+    "live_chain_verification_run": false,
+    "live_postgres_cutover_run": false,
+    "database_grant_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE",
+    "manifest_signature_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE",
+    "provider_quorum_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE",
+    "actuator_and_rollback_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE",
+    "archive_restore_and_key_revoke_evidence": "REPLACE_WITH_IMMUTABLE_EVIDENCE_REFERENCE"
+  }
+}

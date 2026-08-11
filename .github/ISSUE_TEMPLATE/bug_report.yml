@@ -1,0 +1,59 @@
+name: Bug report
+description: Report reproducible incorrect behavior in the source or deterministic sandbox.
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not disclose vulnerabilities, credentials, personal data, or live wallet details here. Use private vulnerability reporting for security issues. ocrypt is pre-release and is not approved for real funds.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: Commit SHA, tag, or branch
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - API or contracts
+        - Settlement or ledger
+        - Chain provider or scanner
+        - Admin or checkout UI
+        - SDK or example
+        - Deployment or observability
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Use synthetic identifiers and redact all secrets and personal data.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I used only systems and data that I own or am explicitly authorized to test.
+          required: true
+        - label: This report contains no live secrets, wallet material, or personal data.
+          required: true

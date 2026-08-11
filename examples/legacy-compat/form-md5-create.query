@@ -1,0 +1,1 @@
+money=499.00&name=VIP&notify_url=https%3A%2F%2Fmerchant.example%2Fcallback&out_trade_no=order-001&pid=1000&return_url=https%3A%2F%2Fmerchant.example%2Freturn&sign=cbf124d040b95db76fd7b16849087aa6&sign_type=MD5&type=usdt.tron

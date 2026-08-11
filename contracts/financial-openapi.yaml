@@ -1,0 +1,327 @@
+openapi: 3.1.0
+info:
+  title: Merchant Platform Financial Operations API
+  version: '2026-08-11'
+  description: |
+    Internal operator API for treasury sweep requests, verified-origin refunds,
+    and deterministic reconciliation. Amounts are unsigned atomic-unit strings.
+    The operator API cannot build, sign, or broadcast transactions; isolated
+    workload services perform those transitions after policy and four-eyes approval.
+servers:
+  - url: https://financial.internal.example
+security:
+  - FinancialProxyAssertion: []
+    FinancialMTLS: []
+paths:
+  /healthz:
+    get:
+      security: []
+      operationId: financialHealth
+      responses:
+        '200': {description: Healthy}
+  /readyz:
+    get:
+      security: []
+      operationId: financialReady
+      responses:
+        '200': {description: Ready}
+        '503': {$ref: '#/components/responses/Error'}
+  /v1/financial/sweeps:
+    post:
+      operationId: requestSweep
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SweepRequestInput'}
+      responses:
+        '201': {$ref: '#/components/responses/Sweep'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+    get:
+      operationId: listSweeps
+      parameters: [{$ref: '#/components/parameters/After'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200':
+          description: Tenant-scoped sweep page
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SweepPageEnvelope'}
+  /v1/financial/sweeps/{id}:
+    parameters: [{$ref: '#/components/parameters/ResourceID'}]
+    get:
+      operationId: getSweep
+      responses:
+        '200': {$ref: '#/components/responses/Sweep'}
+        '404': {$ref: '#/components/responses/Error'}
+  /v1/financial/sweeps/{id}/approve:
+    parameters: [{$ref: '#/components/parameters/ResourceID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+    post:
+      operationId: approveSweep
+      description: Requires step-up and a different actor than the creator.
+      requestBody: {$ref: '#/components/requestBodies/Decision'}
+      responses:
+        '200': {$ref: '#/components/responses/Sweep'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /v1/financial/sweeps/{id}/cancel:
+    parameters: [{$ref: '#/components/parameters/ResourceID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+    post:
+      operationId: cancelSweep
+      requestBody: {$ref: '#/components/requestBodies/Decision'}
+      responses:
+        '200': {$ref: '#/components/responses/Sweep'}
+        '409': {$ref: '#/components/responses/Error'}
+  /v1/financial/refunds:
+    post:
+      operationId: requestRefund
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RefundRequestInput'}
+      responses:
+        '201': {$ref: '#/components/responses/Refund'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+    get:
+      operationId: listRefunds
+      parameters: [{$ref: '#/components/parameters/After'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200':
+          description: Tenant-scoped refund page
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RefundPageEnvelope'}
+  /v1/financial/refunds/{id}:
+    parameters: [{$ref: '#/components/parameters/ResourceID'}]
+    get:
+      operationId: getRefund
+      responses:
+        '200': {$ref: '#/components/responses/Refund'}
+        '404': {$ref: '#/components/responses/Error'}
+  /v1/financial/refunds/{id}/approve:
+    parameters: [{$ref: '#/components/parameters/ResourceID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+    post:
+      operationId: approveRefund
+      description: Requires step-up and a different actor than the creator.
+      requestBody: {$ref: '#/components/requestBodies/Decision'}
+      responses:
+        '200': {$ref: '#/components/responses/Refund'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /v1/financial/refunds/{id}/cancel:
+    parameters: [{$ref: '#/components/parameters/ResourceID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+    post:
+      operationId: cancelRefund
+      requestBody: {$ref: '#/components/requestBodies/Decision'}
+      responses:
+        '200': {$ref: '#/components/responses/Refund'}
+        '409': {$ref: '#/components/responses/Error'}
+  /v1/financial/reconciliation-runs:
+    post:
+      operationId: requestReconciliationRun
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [asset_ids]
+              properties:
+                asset_ids: {type: array, minItems: 1, uniqueItems: true, items: {type: string}}
+      responses:
+        '201': {$ref: '#/components/responses/Reconciliation'}
+    get:
+      operationId: listReconciliationRuns
+      parameters: [{$ref: '#/components/parameters/After'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200':
+          description: Reconciliation run page
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReconciliationPageEnvelope'}
+  /v1/financial/reconciliation-runs/{id}:
+    parameters: [{$ref: '#/components/parameters/ResourceID'}]
+    get:
+      operationId: getReconciliationRun
+      responses:
+        '200': {$ref: '#/components/responses/Reconciliation'}
+        '404': {$ref: '#/components/responses/Error'}
+  /v1/financial/reconciliation-runs/{id}/execute:
+    parameters: [{$ref: '#/components/parameters/ResourceID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+    post:
+      operationId: executeReconciliationRun
+      description: Executes evidence-only comparison; never posts ledger entries.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_version, cutoff_at, reason]
+              properties:
+                expected_version: {type: integer, minimum: 1}
+                cutoff_at: {type: string, format: date-time}
+                reason: {type: string, minLength: 1, maxLength: 2048}
+      responses:
+        '200': {$ref: '#/components/responses/Reconciliation'}
+        '409': {$ref: '#/components/responses/Error'}
+  /v1/financial/reconciliation-runs/{id}/report:
+    parameters: [{$ref: '#/components/parameters/ResourceID'}]
+    get:
+      operationId: getReconciliationReport
+      responses:
+        '200': {$ref: '#/components/responses/Reconciliation'}
+        '400': {$ref: '#/components/responses/Error'}
+components:
+  securitySchemes:
+    FinancialMTLS:
+      type: mutualTLS
+      description: Client certificate issued by the pinned financial operator client CA.
+    FinancialProxyAssertion:
+      type: apiKey
+      in: header
+      name: Financial-Signature
+      description: HMAC assertion from IAM proxy; also requires tenant, actor, sorted permissions, timestamp, nonce, and bounded step-up headers.
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, minLength: 8, maxLength: 255}
+    ResourceID:
+      name: id
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/UUID'}
+    After:
+      name: after
+      in: query
+      schema: {$ref: '#/components/schemas/UUID'}
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+  requestBodies:
+    Decision:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [expected_version, reason]
+            properties:
+              expected_version: {type: integer, minimum: 1}
+              reason: {type: string, minLength: 1, maxLength: 2048}
+  responses:
+    Sweep:
+      description: Sweep aggregate
+      content: {application/json: {schema: {$ref: '#/components/schemas/SweepEnvelope'}}}
+    Refund:
+      description: Refund aggregate
+      content: {application/json: {schema: {$ref: '#/components/schemas/RefundEnvelope'}}}
+    Reconciliation:
+      description: Deterministic reconciliation aggregate/report
+      content: {application/json: {schema: {$ref: '#/components/schemas/ReconciliationEnvelope'}}}
+    Error:
+      description: Stable error envelope
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}
+  schemas:
+    UUID: {type: string, format: uuid}
+    Amount:
+      type: string
+      pattern: '^(0|[1-9][0-9]{0,77})$'
+      description: Exact uint256 atomic units; server additionally enforces <= 2^256-1.
+    Address:
+      type: object
+      additionalProperties: false
+      required: [chain, value]
+      properties: {chain: {type: string}, value: {type: string, minLength: 1, maxLength: 512}}
+    Source:
+      type: object
+      additionalProperties: false
+      required: [address, available, nonce_ref]
+      properties:
+        address: {$ref: '#/components/schemas/Address'}
+        available: {$ref: '#/components/schemas/Amount'}
+        nonce_ref: {type: string, minLength: 1}
+    SweepRequestInput:
+      type: object
+      additionalProperties: false
+      required: [asset_id, destination, sources, fee_quote]
+      properties:
+        asset_id: {type: string}
+        destination: {$ref: '#/components/schemas/Address'}
+        sources: {type: array, minItems: 1, items: {$ref: '#/components/schemas/Source'}}
+        fee_quote: {$ref: '#/components/schemas/Amount'}
+    RefundRequestInput:
+      type: object
+      additionalProperties: false
+      required: [settlement_id, destination_verification_id, refund_amount, network_fee]
+      properties:
+        settlement_id: {$ref: '#/components/schemas/UUID'}
+        destination_verification_id: {$ref: '#/components/schemas/UUID'}
+        refund_amount: {$ref: '#/components/schemas/Amount'}
+        network_fee: {$ref: '#/components/schemas/Amount'}
+    Sweep:
+      type: object
+      required: [id, tenant_id, amount, status, version]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        tenant_id: {$ref: '#/components/schemas/UUID'}
+        amount: {$ref: '#/components/schemas/Amount'}
+        status: {type: string, enum: [approval_required, approved, awaiting_signature, signed, broadcast, confirmed, finalized, rejected, cancelled, failed, reorged]}
+        version: {type: integer, minimum: 1}
+      additionalProperties: true
+    Refund:
+      type: object
+      required: [id, tenant_id, refund_amount, gross_amount, status, version]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        tenant_id: {$ref: '#/components/schemas/UUID'}
+        refund_amount: {$ref: '#/components/schemas/Amount'}
+        gross_amount: {$ref: '#/components/schemas/Amount'}
+        status: {type: string, enum: [approval_required, approved, awaiting_signature, signed, broadcast, confirmed, finalized, rejected, cancelled, failed, reorged]}
+        version: {type: integer, minimum: 1}
+      additionalProperties: true
+    Reconciliation:
+      type: object
+      required: [id, tenant_id, asset_ids, status, version, items, integrity_items]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        tenant_id: {$ref: '#/components/schemas/UUID'}
+        asset_ids: {type: array, items: {type: string}}
+        status: {type: string, enum: [requested, running, completed, failed]}
+        version: {type: integer, minimum: 1}
+        report_digest: {type: string}
+        items: {type: array, items: {type: object}}
+        integrity_items: {type: array, items: {type: object}}
+      additionalProperties: true
+    SweepEnvelope: {type: object, required: [data, request_id], properties: {data: {$ref: '#/components/schemas/Sweep'}, request_id: {$ref: '#/components/schemas/UUID'}}}
+    RefundEnvelope: {type: object, required: [data, request_id], properties: {data: {$ref: '#/components/schemas/Refund'}, request_id: {$ref: '#/components/schemas/UUID'}}}
+    ReconciliationEnvelope: {type: object, required: [data, request_id], properties: {data: {$ref: '#/components/schemas/Reconciliation'}, request_id: {$ref: '#/components/schemas/UUID'}}}
+    SweepPageEnvelope: {type: object, properties: {data: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/Sweep'}}, next_cursor: {type: string}}}, request_id: {$ref: '#/components/schemas/UUID'}}}
+    RefundPageEnvelope: {type: object, properties: {data: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/Refund'}}, next_cursor: {type: string}}}, request_id: {$ref: '#/components/schemas/UUID'}}}
+    ReconciliationPageEnvelope: {type: object, properties: {data: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/Reconciliation'}}, next_cursor: {type: string}}}, request_id: {$ref: '#/components/schemas/UUID'}}}
+    ErrorEnvelope:
+      type: object
+      required: [error, request_id]
+      properties:
+        request_id: {$ref: '#/components/schemas/UUID'}
+        error:
+          type: object
+          required: [code, message]
+          properties: {code: {type: string}, message: {type: string}}

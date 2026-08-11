@@ -1,0 +1,31 @@
+{
+  "intent": {
+    "created": ["awaiting_route_selection", "pending", "cancelled"],
+    "awaiting_route_selection": ["pending", "cancelled", "expired"],
+    "pending": ["observed", "expired", "cancelled", "needs_review"],
+    "observed": ["partially_paid", "confirmed", "needs_review"],
+    "partially_paid": ["observed", "confirmed", "needs_review", "expired"],
+    "confirmed": ["settled", "needs_review", "reorg_review"],
+    "expired": ["needs_review"],
+    "needs_review": ["settled", "reversed"],
+    "settled": ["overpaid", "reorg_review"],
+    "overpaid": ["reorg_review"],
+    "reorg_review": ["settled", "reversed"],
+    "reversed": [],
+    "cancelled": []
+  },
+  "unmatched": {
+    "new": ["candidates_ready", "ignored", "invalid", "reorged"],
+    "candidates_ready": ["bound", "conflict", "ignored", "invalid", "reorged"],
+    "bound": ["candidates_ready", "approval_required", "verification_requested", "reorged"],
+    "approval_required": ["bound", "verification_requested", "conflict", "reorged"],
+    "verification_requested": ["verification_retry", "verified", "conflict", "reorged"],
+    "verification_retry": ["verification_requested", "conflict", "reorged"],
+    "verified": ["resolved", "conflict", "reorged"],
+    "resolved": ["reorged"],
+    "ignored": ["candidates_ready", "reorged"],
+    "invalid": ["candidates_ready"],
+    "conflict": ["candidates_ready", "reorged"],
+    "reorged": []
+  }
+}

@@ -1,0 +1,27 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic credentials used only by isolated tests and CI fixtures"
+rules = ["generic-api-key"]
+paths = [
+  '''(?:^|/)backend/internal/application/proof_worker_test\.go$''',
+  '''(?:^|/)backend/internal/hostedproviders/runtime_test\.go$''',
+  '''(?:^|/)backend/internal/httpapi/server_test\.go$''',
+  '''(?:^|/)backend/internal/migrationcontrol/service_test\.go$''',
+  '''(?:^|/)backend/internal/retentionadmin/memory_test\.go$''',
+  '''(?:^|/)\.github/workflows/ci\.yml$''',
+  '''(?:^|/)deploy/standalone/bootstrap\.sql$''',
+]
+
+[[allowlists]]
+description = "Immutable container references are content identifiers, not credentials"
+rules = ["generic-api-key"]
+paths = ['''(?:^|/)deploy/standalone/compose\.shadow\.yaml$''']
+
+[[allowlists]]
+description = "SQL upsert column named lease_token is not a credential literal"
+rules = ["generic-api-key"]
+paths = ['''(?:^|/)backend/migrations/000021_shadow_migration_control\.up\.sql$''']
+regexTarget = "line"
+regexes = ['''lease_token\s*=\s*excluded\.lease_token''']

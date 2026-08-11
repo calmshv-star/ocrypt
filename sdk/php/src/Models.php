@@ -1,0 +1,33 @@
+<?php
+declare(strict_types=1);
+
+namespace MerchantPlatform;
+
+final class CreatePaymentIntentRequest {
+    public function __construct(public readonly string $merchantOrderId, public readonly string $amountMinor, public readonly string $currency, public readonly int $currencyScale, public readonly ?string $description = null, public readonly ?string $customerReference = null, public readonly ?int $expiresIn = null, public readonly ?string $expiresAt = null, public readonly ?array $allowedRoutes = null, public readonly ?array $metadata = null) { self::assertAmount($amountMinor, true); }
+    public function toArray(): array { return array_filter(['merchant_order_id'=>$this->merchantOrderId,'amount_minor'=>$this->amountMinor,'currency'=>$this->currency,'currency_scale'=>$this->currencyScale,'description'=>$this->description,'customer_reference'=>$this->customerReference,'expires_in'=>$this->expiresIn,'expires_at'=>$this->expiresAt,'allowed_routes'=>$this->allowedRoutes,'metadata'=>$this->metadata], static fn($v) => $v !== null); }
+    public static function assertAmount(string $value, bool $positive = false): void { if (!preg_match($positive ? '/^[1-9][0-9]{0,77}$/' : '/^(0|[1-9][0-9]{0,77})$/', $value)) throw new \InvalidArgumentException('amount must be a canonical integer string'); }
+}
+final class RouteSelector { public static function onChain(string $chainId,string $assetId): array{return ['provider'=>'on_chain','chain_id'=>$chainId,'asset_id'=>$assetId];} public static function hostedGateway(string $providerId,string $assetId): array{return ['provider'=>'hosted_gateway','provider_id'=>$providerId,'asset_id'=>$assetId];} }
+final class CreatePaymentRouteRequest {
+    private function __construct(public readonly string $provider,public readonly ?array $onChain,public readonly ?array $hostedGateway,public readonly ?int $expiresIn=null) {}
+    public static function onChain(string $chainId,string $assetId,?int $expiresIn=null): self{return new self('on_chain',['chain_id'=>$chainId,'asset_id'=>$assetId],null,$expiresIn);}
+    public static function hostedGateway(string $providerId,string $assetId,?int $expiresIn=null): self{return new self('hosted_gateway',null,['provider_id'=>$providerId,'asset_id'=>$assetId],$expiresIn);}
+    public function toArray(): array{return array_filter(['provider'=>$this->provider,'on_chain'=>$this->onChain,'hosted_gateway'=>$this->hostedGateway,'expires_in'=>$this->expiresIn],static fn($v)=>$v!==null);}
+}
+final class CancelPaymentIntentRequest { public function __construct(public readonly string $reason, public readonly ?int $expectedVersion = null) {} public function toArray(): array { return array_filter(['reason'=>$this->reason,'expected_version'=>$this->expectedVersion], static fn($v) => $v !== null); } }
+final class ExpirePaymentIntentRequest { public function __construct(public readonly string $reason, public readonly int $expectedVersion) {} public function toArray(): array { return ['reason'=>$this->reason,'expected_version'=>$this->expectedVersion]; } }
+final class UpdatePaymentIntentMetadataRequest { public function __construct(public readonly int $expectedVersion, public readonly array $metadata) {} public function toArray(): array { return ['expected_version'=>$this->expectedVersion,'metadata'=>$this->metadata]; } }
+final class CreateReconciliationReportRequest { public function __construct(public readonly string $periodStart, public readonly string $periodEnd, public readonly string $format='jsonl_v1') {} public function toArray(): array { return ['period_start'=>$this->periodStart,'period_end'=>$this->periodEnd,'format'=>$this->format]; } }
+final class SubmitPaymentProofRequest { public function __construct(public readonly string $paymentIntentId, public readonly string $chainId, public readonly string $transactionId) {} public function toArray(): array { return ['payment_intent_id'=>$this->paymentIntentId,'chain_id'=>$this->chainId,'transaction_id'=>$this->transactionId]; } }
+final class PaymentRoute { public function __construct(public readonly array $data) {} public static function fromArray(array $data): self { return new self($data); } public function amountAtomic(): string { return (string)$this->data['expected_amount_atomic']; } }
+final class PaymentIntent { public function __construct(public readonly array $data, public readonly array $routes) {} public static function fromArray(array $data): self { return new self($data, array_map([PaymentRoute::class,'fromArray'], $data['routes'] ?? [])); } public function id(): string { return (string)$this->data['id']; } public function amountMinor(): string { return (string)$this->data['amount_minor']; } public function checkoutToken(): ?string { return isset($this->data['checkout_token']) ? (string)$this->data['checkout_token'] : null; } }
+final class PaymentProof { public function __construct(public readonly array $data) {} public static function fromArray(array $data): self { return new self($data); } }
+final class Asset { public function __construct(public readonly array $data) {} public static function fromArray(array $data): self { return new self($data); } }
+final class WebhookEvent { public function __construct(public readonly array $data) {} public static function fromArray(array $data): self { return new self($data); } public function id(): string { return (string)$this->data['event_id']; } }
+final class CheckoutRoute { public function __construct(public readonly string $id,public readonly string $provider,public readonly string $asset,public readonly string $amount,public readonly ?string $network=null,public readonly ?string $address=null,public readonly ?string $providerId=null,public readonly ?string $paymentUrl=null,public readonly ?string $transactionHash=null,public readonly ?string $explorerUrl=null) {} }
+final class CheckoutSession { public function __construct(public readonly string $intentId, public readonly string $orderId, public readonly string $status, public readonly string $expiresAt, public readonly string $selectedRouteId, public readonly array $routes) {} }
+final class Envelope { public function __construct(public readonly mixed $data, public readonly string $requestId, public readonly string $apiVersion) {} }
+final class CursorPage { public function __construct(public readonly array $items, public readonly string $nextCursor = '') {} }
+final class EventPage { public function __construct(public readonly array $items, public readonly string $nextCursor, public readonly string $nextSequence) {} }
+final class ReportDownload { public function __construct(public readonly string $bytes, public readonly string $sha256, public readonly string $signature, public readonly string $signingKeyId) {} }

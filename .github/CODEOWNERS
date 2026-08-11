@@ -1,0 +1,13 @@
+* @calmshv-star
+
+# Financial, security, deployment, and public-contract changes require owner review.
+/backend/migrations/ @calmshv-star
+/backend/internal/adapters/postgres/ @calmshv-star
+/contracts/ @calmshv-star
+/deploy/ @calmshv-star
+/infra/ @calmshv-star
+/.github/workflows/ @calmshv-star
+/SECURITY.md @calmshv-star
+/LICENSE @calmshv-star
+/NOTICE @calmshv-star
+/THIRD_PARTY_NOTICES.md @calmshv-star

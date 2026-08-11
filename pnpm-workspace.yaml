@@ -1,0 +1,10 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "sdk/typescript"
+  - "tests"
+
+allowBuilds:
+  esbuild: true
+
+verifyDepsBeforeRun: false

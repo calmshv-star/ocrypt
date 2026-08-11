@@ -1,0 +1,10 @@
+BEGIN;
+DROP TRIGGER IF EXISTS manual_resolution_webhook ON manual_resolutions;
+DROP FUNCTION IF EXISTS emit_manual_resolution_webhook();
+DROP TABLE IF EXISTS manual_resolution_events;
+ALTER TABLE manual_resolutions DROP CONSTRAINT IF EXISTS manual_resolutions_id_tenant_unique;
+DROP TABLE IF EXISTS payment_observation_events;
+DROP TRIGGER IF EXISTS payment_observation_immutable ON payment_observations;
+DROP FUNCTION IF EXISTS payment_observation_immutable_guard();
+DROP TABLE IF EXISTS payment_observations;
+COMMIT;

@@ -1,0 +1,32 @@
+{
+  "canonical_query": {
+    "input": {
+      "z": ["2"],
+      "a": ["hello world", "first"],
+      "symbols": ["*!~"]
+    },
+    "output": "a=hello+world&a=first&symbols=%2A%21~&z=2"
+  },
+  "request": {
+    "key_id": "mk_test_123",
+    "secret": "merchant_test_secret_7fL9wQ2",
+    "method": "POST",
+    "path_and_query": "/v1/payment-intents?after=018f&limit=50&status=pending",
+    "timestamp": 1786377600,
+    "nonce": "00112233445566778899aabbccddeeff",
+    "body": "{\"merchant_order_id\":\"order-2026-001\",\"amount_minor\":\"3813\",\"currency\":\"USD\",\"currency_scale\":2,\"allowed_routes\":[{\"provider\":\"on_chain\",\"chain_id\":\"tron:mainnet\",\"asset_id\":\"usdt-tron\"}]}",
+    "body_sha256_hex": "d031bb0774a84468d5ef7cb46c8fef25e589dffccf9f5d67a5b7b1ba3c8a3114",
+    "content_digest": "sha-256=:0DG7B3SoRGjV73y0bI/vJeWJ3/zPn11npbexujyKMRQ=:",
+    "canonical": "POST\n/v1/payment-intents?after=018f&limit=50&status=pending\n1786377600\n00112233445566778899aabbccddeeff\nd031bb0774a84468d5ef7cb46c8fef25e589dffccf9f5d67a5b7b1ba3c8a3114",
+    "signature": "qZvMs2VgeWT0YC3zumnzNrqLhyK4sB-ib7ymMl4Z0U0"
+  },
+  "webhook": {
+    "secret": "merchant_test_secret_7fL9wQ2",
+    "key_id": "whk_test",
+    "event_id": "evt_01JQ8H6G2PE3",
+    "timestamp": 1786377615,
+    "body": "{\"event_id\":\"evt_01JQ8H6G2PE3\",\"event_type\":\"payment.settled\",\"schema_version\":\"1\",\"sequence\":42,\"occurred_at\":\"2026-08-10T16:00:15Z\",\"merchant_id\":\"mrc_123\",\"livemode\":false,\"payment_intent\":{\"id\":\"pi_123\",\"merchant_order_id\":\"order-2026-001\",\"status\":\"settled\",\"amount_minor\":\"3813\",\"currency\":\"USD\"}}",
+    "content_digest": "sha-256=:LJcHryqjT9HCAM0k48+TJ6YQTpUC+0FIQ4ENSd+WEdQ=:",
+    "signature_header": "t=1786377615,key=whk_test,event=evt_01JQ8H6G2PE3,v1=AEkLZXbYOjiPjg0uz3yyBqdxolfRUr-fmPZZYK-8pH4"
+  }
+}

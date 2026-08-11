@@ -1,0 +1,177 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "type": "object",
+  "required": ["global", "migration", "migrationVerifier", "migrationActuator", "workloads", "ingress", "networkPolicy", "platformOutbox"],
+  "additionalProperties": false,
+  "properties": {
+    "nameOverride": {"type": "string"},
+    "fullnameOverride": {"type": "string"},
+    "global": {
+      "type": "object",
+      "required": ["imagePullSecrets", "podAnnotations", "priorityClassName", "requireImageDigest"],
+      "additionalProperties": false,
+      "properties": {
+        "imagePullSecrets": {"type": "array"},
+        "podAnnotations": {"type": "object"},
+        "priorityClassName": {"type": "string"},
+        "requireImageDigest": {"type": "boolean"}
+      }
+    },
+    "migration": {
+      "type": "object",
+      "required": ["enabled", "image", "databaseSecretRef", "activeDeadlineSeconds", "resources"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "image": {"$ref": "#/definitions/image"},
+        "databaseSecretRef": {"$ref": "#/definitions/secretRef"},
+        "activeDeadlineSeconds": {"type": "integer", "minimum": 60, "maximum": 3600},
+        "resources": {"type": "object"}
+      }
+    },
+    "migrationVerifier": {
+      "type": "object",
+      "required": ["enabled", "execute", "image", "databaseSecretRef", "migrationID", "sourceID", "workerID", "activeDeadlineSeconds", "env", "secretFiles", "httpsEgressPeers", "resources"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "execute": {"type": "boolean"},
+        "image": {"$ref": "#/definitions/image"},
+        "databaseSecretRef": {"$ref": "#/definitions/secretRef"},
+        "migrationID": {"type": "string"},
+        "sourceID": {"type": "string"},
+        "workerID": {"type": "string"},
+        "activeDeadlineSeconds": {"type": "integer", "minimum": 30, "maximum": 300},
+        "env": {"type": "object"},
+        "secretFiles": {"type": "array", "minItems": 5, "maxItems": 5, "items": {"$ref": "#/definitions/secretFile"}},
+        "httpsEgressPeers": {"type": "array"},
+        "resources": {"type": "object"}
+      }
+    },
+    "migrationActuator": {
+      "type": "object",
+      "required": ["enabled", "image", "databaseSecretRef", "migrationID", "switchURL", "serverName", "requestKeyID", "timeoutSeconds", "activeDeadlineSeconds", "secretFiles", "httpsEgressPeers", "resources"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "image": {"$ref": "#/definitions/image"},
+        "databaseSecretRef": {"$ref": "#/definitions/secretRef"},
+        "migrationID": {"type": "string"},
+        "switchURL": {"type": "string"},
+        "serverName": {"type": "string"},
+        "requestKeyID": {"type": "string"},
+        "timeoutSeconds": {"type": "integer", "minimum": 2, "maximum": 60},
+        "activeDeadlineSeconds": {"type": "integer", "minimum": 30, "maximum": 300},
+        "secretFiles": {"type": "array", "minItems": 5, "maxItems": 5, "items": {"$ref": "#/definitions/secretFile"}},
+        "httpsEgressPeers": {"type": "array"},
+        "resources": {"type": "object"}
+      }
+    },
+    "workloads": {
+      "type": "object",
+      "minProperties": 21,
+      "additionalProperties": {"$ref": "#/definitions/workload"}
+    },
+    "ingress": {
+      "type": "object",
+      "required": ["enabled", "className", "annotations", "managementAnnotations", "managementTLSVerified", "publicCapabilityRateLimitAnnotations", "publicCapabilityRateLimitVerified", "publicHost", "adminHost", "tls", "coreAPIPaths"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "className": {"type": "string"},
+        "annotations": {"type": "object"},
+        "managementAnnotations": {"type": "object"},
+        "managementTLSVerified": {"type": "boolean"},
+        "publicCapabilityRateLimitAnnotations": {"type": "object"},
+        "publicCapabilityRateLimitVerified": {"type": "boolean"},
+        "publicHost": {"type": "string", "minLength": 1},
+        "adminHost": {"type": "string", "minLength": 1},
+        "tls": {"type": "array"},
+        "coreAPIPaths": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^/v1/"}}
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "required": ["enabled", "dns", "healthIngressFrom", "edgeIngressFrom", "databasePeers", "databasePorts"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"const": true},
+        "dns": {"type": "object"},
+        "healthIngressFrom": {"type": "array"},
+        "edgeIngressFrom": {"type": "array"},
+        "databasePeers": {"type": "array"},
+        "databasePorts": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1, "maximum": 65535}}
+      }
+    },
+    "platformOutbox": {
+      "type": "object",
+      "required": ["claimExternalPublication"],
+      "additionalProperties": false,
+      "properties": {"claimExternalPublication": {"type": "boolean"}}
+    },
+    "observability": {"type": "object"}
+  },
+  "definitions": {
+    "digest": {"type": "string", "pattern": "^$|^sha256:[a-f0-9]{64}$"},
+    "image": {
+      "type": "object",
+      "required": ["repository", "tag", "digest", "pullPolicy"],
+      "additionalProperties": false,
+      "properties": {
+        "repository": {"type": "string", "minLength": 1},
+        "tag": {"type": "string", "minLength": 1},
+        "digest": {"$ref": "#/definitions/digest"},
+        "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]}
+      }
+    },
+    "secretRef": {
+      "type": "object",
+      "required": ["name", "key"],
+      "additionalProperties": false,
+      "properties": {"name": {"type": "string", "minLength": 1}, "key": {"type": "string", "minLength": 1}}
+    },
+    "secretItem": {
+      "type": "object",
+      "required": ["name", "secretRef"],
+      "additionalProperties": false,
+      "properties": {"name": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"}, "secretRef": {"$ref": "#/definitions/secretRef"}}
+    },
+    "secretFile": {
+      "type": "object",
+      "required": ["path", "secretRef"],
+      "additionalProperties": false,
+      "properties": {"path": {"type": "string", "pattern": "^/run/"}, "secretRef": {"$ref": "#/definitions/secretRef"}}
+    },
+    "secretDirectory": {
+      "type": "object",
+      "required": ["path", "secretRef"],
+      "additionalProperties": false,
+      "properties": {"path": {"type": "string", "pattern": "^/run/"}, "secretRef": {"type": "object", "required": ["name"], "additionalProperties": false, "properties": {"name": {"type": "string", "minLength": 1}}}}
+    },
+    "workload": {
+      "type": "object",
+      "required": ["enabled", "replicas", "image", "port", "probeScheme", "workerIDEnv", "databaseAccess", "env", "secretEnv", "secretFiles", "secretDirectories", "service", "serviceAccount", "network", "resources", "pdb", "autoscaling"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "replicas": {"type": "integer", "minimum": 1},
+        "image": {"$ref": "#/definitions/image"},
+        "port": {"type": "integer", "minimum": 1024, "maximum": 65535},
+        "extraPorts": {"type": "array", "items": {"type": "object", "required": ["name", "containerPort"], "additionalProperties": false, "properties": {"name": {"type": "string", "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"}, "containerPort": {"type": "integer", "minimum": 1024, "maximum": 65535}, "protocol": {"enum": ["TCP", "UDP"]}}}},
+        "probeScheme": {"enum": ["HTTP", "HTTPS"]},
+        "workerIDEnv": {"type": "string"},
+        "databaseAccess": {"type": "boolean"},
+        "env": {"type": "object", "additionalProperties": {"type": ["string", "number", "boolean"]}},
+        "secretEnv": {"type": "array", "items": {"$ref": "#/definitions/secretItem"}},
+        "secretFiles": {"type": "array", "items": {"$ref": "#/definitions/secretFile"}},
+        "secretDirectories": {"type": "array", "items": {"$ref": "#/definitions/secretDirectory"}},
+        "service": {"type": "object", "required": ["enabled", "port", "portName"], "additionalProperties": false, "properties": {"enabled": {"type": "boolean"}, "port": {"type": "integer"}, "portName": {"type": "string"}, "targetPortName": {"type": "string"}, "appProtocol": {"type": "string"}}},
+        "serviceAccount": {"type": "object"},
+        "network": {"type": "object", "required": ["ingressFrom", "internalEgress", "httpsEgressPeers"], "properties": {"ingressFrom": {"type": "array"}, "internalEgress": {"type": "array"}, "httpsEgressPeers": {"type": "array"}}},
+        "resources": {"type": "object"},
+        "pdb": {"type": "object", "required": ["enabled", "minAvailable"], "properties": {"enabled": {"type": "boolean"}, "minAvailable": {"type": "integer", "minimum": 1}}},
+        "autoscaling": {"type": "object", "required": ["enabled", "minReplicas", "maxReplicas", "targetCPUUtilizationPercentage"], "properties": {"enabled": {"type": "boolean"}, "minReplicas": {"type": "integer", "minimum": 1}, "maxReplicas": {"type": "integer", "minimum": 1}, "targetCPUUtilizationPercentage": {"type": "integer", "minimum": 1, "maximum": 100}}}
+      }
+    }
+  }
+}

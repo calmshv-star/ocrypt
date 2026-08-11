@@ -1,0 +1,17 @@
+{
+  "name": "@merchant-platform/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "repository": "https://github.com/calmshv-star/ocrypt",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --test test/golden.test.mjs"
+  },
+  "engines": { "node": ">=20" },
+  "devDependencies": { "typescript": "^5.9.2" }
+}

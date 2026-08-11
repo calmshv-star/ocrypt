@@ -1,0 +1,19 @@
+{
+  "name": "@merchant/qa",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test node/*.test.mjs",
+    "test:examples": "node --test node/*.test.mjs",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "@playwright/test": "^1.54.1",
+    "@types/node": "^24.1.0",
+    "typescript": "^5.9.2"
+  }
+}

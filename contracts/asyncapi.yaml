@@ -1,0 +1,136 @@
+asyncapi: 3.0.0
+info:
+  title: Merchant Platform Webhooks
+  version: 1.0.0
+  description: |
+    Versioned outbound payment events. Merchant `sequence` is monotonic, but
+    at-least-once HTTP deliveries may arrive out of order; consumers use the
+    sequence to detect gaps and recover. Events are signed over the exact body
+    bytes and acknowledged only by a 2xx JSON response containing the matching
+    `acknowledged_event_id`.
+servers:
+  merchantEndpoint:
+    host: merchant-configured.example
+    protocol: https
+    description: Per-merchant HTTPS endpoint; private or unsafe targets are rejected.
+channels:
+  merchantPaymentEvents:
+    address: '{$request.body#/endpoint_url}'
+    messages:
+      paymentEventV1:
+        $ref: '#/components/messages/PaymentEventV1'
+operations:
+  deliverPaymentEvent:
+    action: send
+    channel:
+      $ref: '#/channels/merchantPaymentEvents'
+    messages:
+      - $ref: '#/channels/merchantPaymentEvents/messages/paymentEventV1'
+components:
+  messages:
+    PaymentEventV1:
+      name: paymentEventV1
+      title: Merchant payment lifecycle event
+      contentType: application/json
+      headers:
+        type: object
+        required: [Merchant-Webhook-Signature, Merchant-Delivery-Id, Content-Digest]
+        properties:
+          Merchant-Webhook-Signature:
+            type: string
+            description: 't=<unix>,key=<key-id>,event=<event-id>,v1=<base64url HMAC-SHA256 without padding>'
+          Merchant-Delivery-Id: { type: string }
+          Content-Digest:
+            type: string
+            description: 'sha-256=:<standard-base64 SHA-256 of exact body bytes>:'
+      payload:
+        $ref: './events/payment-event-v1.schema.json'
+      examples:
+        - name: paymentSettled
+          payload:
+            event_id: 018f6b50-7d65-7c2d-8a4f-1b5f25f643a0
+            event_type: payment.settled
+            schema_version: '1'
+            sequence: 42
+            occurred_at: '2026-08-10T12:34:56Z'
+            merchant_id: 018f6b4e-192e-7412-b529-2453cc1eab11
+            livemode: true
+            payment_intent:
+              id: 018f6b4f-7f1e-71b4-99f8-17a3774dc015
+              merchant_order_id: order-2026-001
+              status: settled
+              amount_minor: '3813'
+              currency: USD
+            settlement:
+              settlement_id: 018f6b50-2a59-769f-97db-81e58793c305
+              asset_id: usdt-tron
+              network: tron:mainnet
+              expected_raw: '38130000'
+              received_raw: '38130000'
+              credited_raw: '38130000'
+              transaction_hash: 470bbdb37908db929903697bafa8839e9a458299ba33063bc22787666763425c
+              event_index: transfer:0
+              block_height: '75400123'
+              block_time: '2026-08-10T12:34:50Z'
+              finality: finalized
+              manual_resolution: false
+        - name: hostedPaymentSettled
+          payload:
+            event_id: 018f6b50-7d65-7c2d-8a4f-1b5f25f643a1
+            event_type: payment.settled
+            schema_version: '1'
+            sequence: 43
+            occurred_at: '2026-08-10T12:35:56Z'
+            merchant_id: 018f6b4e-192e-7412-b529-2453cc1eab11
+            livemode: true
+            payment_intent:
+              id: 018f6b4f-7f1e-71b4-99f8-17a3774dc015
+              merchant_order_id: order-2026-001
+              status: settled
+              amount_minor: '3813'
+              currency: USD
+            settlement:
+              settlement_id: 018f6b50-2a59-769f-97db-81e58793c306
+              asset_id: usdt-tron
+              expected_raw: '38130000'
+              received_raw: '38130000'
+              credited_raw: '38130000'
+              provider_id: acquirer-eu-live
+              provider_reference: pay_2026_001
+              provider_event_id: evt_2026_001
+              provider_evidence_sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+              finality: provider_verified
+              manual_resolution: false
+        - name: paymentConfirming
+          payload:
+            event_id: 018f6b50-7d65-7c2d-8a4f-1b5f25f643a2
+            event_type: payment.confirming
+            schema_version: '1'
+            sequence: 44
+            occurred_at: '2026-08-10T12:36:56Z'
+            merchant_id: 018f6b4e-192e-7412-b529-2453cc1eab11
+            livemode: true
+            payment_intent:
+              id: 018f6b4f-7f1e-71b4-99f8-17a3774dc015
+              merchant_order_id: order-2026-001
+              status: confirmed
+              amount_minor: '3813'
+              currency: USD
+            observation:
+              observation_id: 018f6b50-2a59-769f-97db-81e58793c307
+              payment_route_id: 018f6b50-2a59-769f-97db-81e58793c308
+              network: tron:mainnet
+              asset_id: usdt-tron
+              transaction_hash: 470bbdb37908db929903697bafa8839e9a458299ba33063bc22787666763425c
+              event_index: transfer:0
+              from_address: TMZhX6fcFaBD4wASuvbaY5EC9STnZgrbf8
+              to_address: TSW3ZVUt5jjuyiVgppBduZCtQeCKzR5Dv4
+              amount_raw: '38130000'
+              asset_decimals: 6
+              block_height: '75400123'
+              block_hash: '00000000047e8abb'
+              block_time: '2026-08-10T12:34:50Z'
+              confirmations: 2
+              required_confirmations: 19
+              finality: confirmed
+              evidence_sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef

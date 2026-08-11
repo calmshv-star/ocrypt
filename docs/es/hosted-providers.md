@@ -1,0 +1,13 @@
+# Proveedores de pago alojados
+
+Los gateways alojados usan la misma API de intentos que las rutas on-chain. La selección es explícita: `{"provider":"hosted_gateway","hosted_gateway":{"provider_id":"provider-account-1","asset_id":"usdt-tron"}}`. Una ruta on-chain usa `provider=on_chain` y el objeto `on_chain`. Se rechazan cuerpos mixtos, antiguos o ambiguos.
+
+La ruta alojada devuelve `provider_id`, `provider_reference`, el activo, el importe entero exacto y una `payment_url` HTTPS validada por el servidor. No inventa dirección, red, confirmaciones ni hash de transacción. La cotización fiat-activo, su redondeo hacia arriba, hora y digest de la respuesta quedan inmutables y nunca usan coma flotante.
+
+Los callbacks entran en un inbox append-only únicamente después del límite de tamaño y la verificación HMAC. Una repetición idéntica es idempotente; el mismo ID con hechos distintos produce conflicto; un evento antiguo no revierte el estado. Si llega antes de enlazar la ruta, se conserva en un inbox pre-bind acotado y se reprocesa al existir la orden duradera.
+
+La primera ruta hermana verificada que liquida gana bajo el bloqueo del intento. Las demás pasan a superseded, pero su evidencia tardía se conserva. Un callback recibido con el proveedor pausado queda en cuarentena y abre un incidente sin asiento contable. Status/reconcile y refunds posteriores al settlement sólo generan evidencia/incidentes; la ejecución automática del refund sigue desactivada.
+
+Un enlace público con proveedor alojado se canjea sin llamar al proveedor dentro de la transacción del enlace. La transacción reserva un uso y crea el intento, la capacidad checkout, el intento create inmutable y el job de preparación. Checkout devuelve `preparing_payment_route` sin dirección ni URL hasta que el worker cercado enlaza una ruta validada. El replay devuelve la misma capacidad; expiry o recuperación agotada termina en `payment_route_failed` con incidente duradero y nunca repone capacidad de forma silenciosa.
+
+Producción exige migraciones `000016`, `000017`, `000019` y `000020`, permisos exactos, secretos HMAC externos, política de operaciones y readiness de API y workers. El gabinete platform-admin del mismo origen es la única superficie admitida para aprovisionar y rotar: manifiestos inmutables sin secretos, referencias externas de solo escritura, aprobación de otra persona con MFA reciente y sondeo TLS privado con resúmenes de respuesta y certificado vinculados. La activación mantiene el proveedor pausado; aún exige una política nueva de seis operaciones y una reanudación separada con cuatro ojos. Las filas heredadas pasan a `legacy_unadmitted` sin evidencia de sondeo inventada. No se debe usar API merchant ni SQL ad-hoc del dueño.

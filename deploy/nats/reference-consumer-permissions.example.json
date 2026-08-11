@@ -1,0 +1,22 @@
+{
+  "role": "merchant-events-reference-consumer",
+  "publish": {
+    "allow": [
+      "$JS.API.STREAM.INFO.MERCHANT_EVENTS_V1",
+      "$JS.API.CONSUMER.INFO.MERCHANT_EVENTS_V1.MERCHANT_EVENTS_REFERENCE_V1",
+      "$JS.API.CONSUMER.MSG.NEXT.MERCHANT_EVENTS_V1.MERCHANT_EVENTS_REFERENCE_V1",
+      "$JS.ACK.MERCHANT_EVENTS_V1.MERCHANT_EVENTS_REFERENCE_V1.>"
+    ],
+    "deny": [
+      "$JS.API.STREAM.DELETE.>",
+      "$JS.API.STREAM.PURGE.>",
+      "$JS.API.STREAM.MSG.DELETE.>",
+      "$JS.API.CONSUMER.DELETE.>",
+      "$JS.API.CONSUMER.CREATE.>",
+      "$JS.API.CONSUMER.DURABLE.CREATE.>"
+    ]
+  },
+  "subscribe": {
+    "allow": ["_INBOX.>"]
+  }
+}

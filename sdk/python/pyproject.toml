@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "merchant-platform-sdk"
+version = "0.1.0"
+description = "Official Merchant Platform API SDK"
+license = "Apache-2.0"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/calmshv-star/ocrypt"
+Issues = "https://github.com/calmshv-star/ocrypt/issues"
+
+[project.optional-dependencies]
+reports = ["cryptography>=44,<46"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

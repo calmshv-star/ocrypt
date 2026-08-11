@@ -1,0 +1,13 @@
+The chart creates private ClusterIP services and fail-closed NetworkPolicies.
+Ingress is disabled unless route ownership, management backend TLS verification,
+edge peers, and database peers are explicitly admitted.
+
+Provision every Secret and database login out of band. Apply bootstrap-roles.sql
+once as a database security administrator; the migration Job must use a separate
+non-superuser schema-owner URL. Runtime URLs must not be shared.
+
+WARNING: tag-only images are mutable. Set global.requireImageDigest=true and
+provide an admitted digest, SBOM, and provenance for every enabled image.
+
+WARNING: external platform-config outbox publication is not assembled. The chart
+rejects claimExternalPublication=true; do not claim delivery in an SLO or release.

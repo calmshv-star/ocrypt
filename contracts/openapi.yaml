@@ -1,0 +1,2214 @@
+openapi: 3.1.0
+info:
+  title: Merchant Platform API
+  version: 2026-08-01
+  summary: Provider-neutral cryptocurrency payment intents with exact on-chain and hosted-gateway routes.
+  description: |
+    A multi-tenant API for accepting cryptocurrency payments. Monetary values are
+    canonical integer strings. A payment is fulfilled only after the signed
+    `payment.settled` event; an observed transaction is not a settlement.
+servers:
+  - url: https://api.example.com
+    description: Live environment
+  - url: https://sandbox-api.example.com
+    description: Sandbox environment
+tags:
+  - name: Payment intents
+  - name: Checkout
+  - name: Assets
+  - name: Operations
+security:
+  - MerchantHMAC: []
+paths:
+  /healthz:
+    get:
+      tags: [Operations]
+      operationId: health
+      security: []
+      responses:
+        '200':
+          description: The process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /readyz:
+    get:
+      tags: [Operations]
+      operationId: readiness
+      security: []
+      responses:
+        '200':
+          description: Required dependencies are available.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          description: A required dependency is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /v1/merchant/orders:
+    post:
+      tags: [Payment intents]
+      operationId: createMerchantOrder
+      summary: Create an order and its exact on-chain payment route in one API call.
+      description: |
+        Simplified server-to-server surface for one-call order integrations. `amount`
+        is an exact decimal string in the fiat currency. The response contains the wallet, exact crypto
+        amount, hosted checkout URL, and receipt-upload URL. A stable idempotency key
+        replays the same order and route.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+        - $ref: '#/components/parameters/RequestID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MerchantOrderRequest' }
+      responses:
+        '201': { description: Order and immutable payment route., content: { application/json: { schema: { $ref: '#/components/schemas/MerchantOrderEnvelope' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+  /v1/merchant/orders/{id}:
+    get:
+      tags: [Payment intents]
+      operationId: getMerchantOrder
+      summary: Get payment status, received total, and exact remaining top-up.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+        - $ref: '#/components/parameters/RequestID'
+      responses:
+        '200': { description: Current payment state., content: { application/json: { schema: { $ref: '#/components/schemas/MerchantOrderEnvelope' } } } }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+  /v1/payment-intents:
+    get:
+      tags: [Payment intents]
+      operationId: listPaymentIntents
+      summary: List payment intents with a stable UUIDv7 cursor.
+      parameters:
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/PaymentIntentStatus' } }
+        - { name: after, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        '200':
+          description: Tenant-isolated payment intent page.
+          content: { application/json: { schema: { $ref: '#/components/schemas/PaymentIntentListEnvelope' } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+    post:
+      tags: [Payment intents]
+      operationId: createPaymentIntent
+      summary: Create an immutable requirement to pay.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+        - $ref: '#/components/parameters/RequestID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentIntentRequest'
+            examples:
+              sixMonthPlan:
+                value:
+                  merchant_order_id: order-2026-001
+                  amount_minor: '3813'
+                  currency: USD
+                  currency_scale: 2
+                  description: Six-month subscription
+                  customer_reference: customer-opaque-42
+                  expires_in: 3600
+                  allowed_routes:
+                    - provider: on_chain
+                      chain_id: tron:mainnet
+                      asset_id: usdt-tron
+      responses:
+        '201':
+          description: Created, or replayed with the original representation.
+          headers:
+            Idempotency-Replayed:
+              description: Present and true when the stored response was replayed.
+              schema: { type: string, const: 'true' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentIntentEnvelope'
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+  /v1/payment-intents/{payment_intent_id}:
+    parameters:
+      - $ref: '#/components/parameters/PaymentIntentID'
+    get:
+      tags: [Payment intents]
+      operationId: getPaymentIntent
+      summary: Return merchant-visible state, totals, and issued routes.
+      parameters:
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+        - $ref: '#/components/parameters/RequestID'
+      responses:
+        '200':
+          description: Payment intent state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentIntentEnvelope'
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+  /v1/payment-intents/{payment_intent_id}/routes:
+    parameters:
+      - $ref: '#/components/parameters/PaymentIntentID'
+    post:
+      tags: [Payment intents]
+      operationId: createPaymentRoute
+      summary: Issue an immutable on-chain route or an admitted hosted-provider order.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+        - $ref: '#/components/parameters/RequestID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentRouteRequest'
+      responses:
+        '201':
+          description: A newly issued or idempotently replayed route.
+          headers:
+            Idempotency-Replayed:
+              schema: { type: string, const: 'true' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentRouteEnvelope'
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+    get:
+      tags: [Payment intents]
+      operationId: listPaymentRoutes
+      summary: List immutable routes issued for a payment intent.
+      parameters:
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      responses:
+        '200':
+          description: Issued routes in creation order.
+          content: { application/json: { schema: { $ref: '#/components/schemas/PaymentRouteListEnvelope' } } }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+  /v1/hosted-providers/{provider_id}/callbacks:
+    post:
+      tags: [Payment intents]
+      operationId: receiveHostedProviderCallback
+      summary: Receive a bounded signed callback from one globally admitted provider account.
+      security: []
+      parameters:
+        - { name: provider_id, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' } }
+        - { name: Hosted-Timestamp, in: header, required: true, schema: { type: string, pattern: '^[0-9]{10}$' } }
+        - { name: Hosted-Key-Id, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: Hosted-Signature, in: header, required: true, schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HostedProviderCallback' }
+      responses:
+        '200':
+          description: Callback evidence was accepted, idempotently replayed, or retained as out of order.
+          content: { application/json: { schema: { $ref: '#/components/schemas/HostedProviderCallbackEnvelope' } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+  /v1/payment-intents/{payment_intent_id}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/PaymentIntentID'
+    post:
+      tags: [Payment intents]
+      operationId: cancelPaymentIntent
+      summary: Stop awaiting payment without suppressing later chain observations.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+        - $ref: '#/components/parameters/RequestID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelPaymentIntentRequest'
+      responses:
+        '200':
+          description: Cancelled payment intent, or an idempotent replay.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentIntentEnvelope'
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+  /v1/payment-intents/{payment_intent_id}/expire:
+    parameters:
+      - $ref: '#/components/parameters/PaymentIntentID'
+    post:
+      tags: [Payment intents]
+      operationId: expirePaymentIntent
+      summary: Explicitly expire an unpaid intent while retaining late-payment matching through route grace.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+        - $ref: '#/components/parameters/RequestID'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ExpirePaymentIntentRequest' } } }
+      responses:
+        '200': { description: Expired payment intent or exact idempotent replay., content: { application/json: { schema: { $ref: '#/components/schemas/PaymentIntentEnvelope' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+  /v1/payment-intents/{payment_intent_id}/metadata:
+    parameters:
+      - $ref: '#/components/parameters/PaymentIntentID'
+    post:
+      tags: [Payment intents]
+      operationId: updatePaymentIntentMetadata
+      summary: Replace the strictly allowlisted non-financial metadata at an expected intent version.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+        - $ref: '#/components/parameters/RequestID'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdatePaymentIntentMetadataRequest' } } }
+      responses:
+        '200': { description: Updated payment intent or exact idempotent replay., content: { application/json: { schema: { $ref: '#/components/schemas/PaymentIntentEnvelope' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+  /v1/assets:
+    get:
+      tags: [Assets]
+      operationId: listAssets
+      summary: List enabled chain and asset capabilities.
+      parameters:
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+        - $ref: '#/components/parameters/RequestID'
+      responses:
+        '200':
+          description: Enabled assets.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetListEnvelope'
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+  /v1/payment-proofs:
+    post:
+      tags: [Payment intents]
+      operationId: submitPaymentProof
+      summary: Submit a transaction identifier as a lookup hint; this never marks an intent paid.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmitPaymentProofRequest' }
+      responses:
+        '202':
+          description: Proof accepted for independent chain verification.
+          content: { application/json: { schema: { $ref: '#/components/schemas/PaymentProofEnvelope' } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+  /v1/payment-proofs/{payment_proof_id}:
+    get:
+      tags: [Payment intents]
+      operationId: getPaymentProof
+      summary: Read independent verification progress for a submitted proof.
+      parameters:
+        - { name: payment_proof_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      responses:
+        '200':
+          description: Proof verification state.
+          content: { application/json: { schema: { $ref: '#/components/schemas/PaymentProofEnvelope' } } }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+  /v1/events:
+    get:
+      tags: [Operations]
+      operationId: listEvents
+      summary: Pull the merchant's durable public event history.
+      description: Delivery can be out of order; use sequence and event_id for gap detection and deduplication.
+      parameters:
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+        - $ref: '#/components/parameters/AfterSequence'
+        - $ref: '#/components/parameters/PageLimit'
+      responses:
+        '200': { description: Durable event page., content: { application/json: { schema: { $ref: '#/components/schemas/EventListEnvelope' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+  /v1/events/{event_id}:
+    get:
+      tags: [Operations]
+      operationId: getEvent
+      summary: Return the exact canonical body stored for one tenant-visible webhook event.
+      parameters:
+        - $ref: '#/components/parameters/EventID'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      responses:
+        '200': { description: Exact stored canonical event and body digest., content: { application/json: { schema: { $ref: '#/components/schemas/WebhookEventEnvelope' } } } }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+  /v1/transfers:
+    get:
+      tags: [Operations]
+      operationId: listTransfers
+      summary: List independently normalized on-chain transfers linked to this merchant.
+      parameters:
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+        - $ref: '#/components/parameters/AfterCursor'
+        - $ref: '#/components/parameters/PageLimit'
+      responses:
+        '200': { description: Transfer page., content: { application/json: { schema: { $ref: '#/components/schemas/TransferListEnvelope' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+  /v1/transfers/{network}/{tx}:
+    get:
+      tags: [Operations]
+      operationId: getTransferEvents
+      summary: Return every tenant-visible normalized event for a network transaction.
+      parameters:
+        - { name: network, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: tx, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 256 } }
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      responses:
+        '200': { description: All normalized transaction events visible to this merchant., content: { application/json: { schema: { $ref: '#/components/schemas/TransferEventsEnvelope' } } } }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+  /v1/quotes:
+    get:
+      tags: [Operations]
+      operationId: listQuotes
+      summary: List immutable quotes issued to the merchant.
+      parameters:
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+        - $ref: '#/components/parameters/AfterCursor'
+        - $ref: '#/components/parameters/PageLimit'
+      responses:
+        '200': { description: Quote page., content: { application/json: { schema: { $ref: '#/components/schemas/QuoteListEnvelope' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+  /v1/quotes/{quote_id}:
+    get:
+      tags: [Operations]
+      operationId: getQuote
+      summary: Return one immutable quote and its exact provider provenance records.
+      parameters:
+        - { name: quote_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      responses:
+        '200': { description: Immutable quote provenance., content: { application/json: { schema: { $ref: '#/components/schemas/QuoteDetailEnvelope' } } } }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+  /v1/balances:
+    get:
+      tags: [Operations]
+      operationId: listBalances
+      summary: Return exact debit and credit ledger totals by account and asset.
+      parameters:
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      responses:
+        '200': { description: Ledger balance totals., content: { application/json: { schema: { $ref: '#/components/schemas/BalanceListEnvelope' } } } }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+  /v1/reconciliation:
+    get:
+      tags: [Operations]
+      operationId: getReconciliation
+      summary: Return a current operational reconciliation summary.
+      parameters:
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      responses:
+        '200': { description: Reconciliation summary., content: { application/json: { schema: { $ref: '#/components/schemas/ReconciliationEnvelope' } } } }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+  /v1/reconciliation-reports:
+    post:
+      tags: [Operations]
+      operationId: createReconciliationReport
+      summary: Queue an immutable, signed ledger export at a database sequence fence.
+      description: Requires the dedicated least-privilege `reconciliation:read` scope; payment and event read scopes are insufficient.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+        - $ref: '#/components/parameters/RequestID'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateReconciliationReportRequest' } } }
+      responses:
+        '202':
+          description: Durable queued report or exact idempotent replay.
+          headers: { Idempotency-Replayed: { schema: { type: string, const: 'true' } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReconciliationReportEnvelope' } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+        '503': { $ref: '#/components/responses/DependencyError' }
+  /v1/reconciliation-reports/{report_id}:
+    get:
+      tags: [Operations]
+      operationId: getReconciliationReport
+      summary: Read durable generation, retry, ready, or dead-letter state.
+      description: Requires the dedicated least-privilege `reconciliation:read` scope.
+      parameters:
+        - $ref: '#/components/parameters/ReconciliationReportID'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      responses:
+        '200': { description: Durable report state., content: { application/json: { schema: { $ref: '#/components/schemas/ReconciliationReportEnvelope' } } } }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+  /v1/reconciliation-reports/{report_id}/download:
+    get:
+      tags: [Operations]
+      operationId: downloadReconciliationReport
+      summary: Stream a locally verified immutable JSONL object with digest and Ed25519 signature headers.
+      description: Requires `reconciliation:read`. The API verifies the exact signing-key ID, signature, byte length and SHA-256 into a bounded private spool before streaming it once. Unknown historical keys, oversize objects and storage failures fail closed.
+      parameters:
+        - $ref: '#/components/parameters/ReconciliationReportID'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      responses:
+        '200':
+          description: Verified immutable report bytes.
+          headers:
+            X-Reconciliation-SHA256: { schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+            X-Reconciliation-Signature: { schema: { type: string } }
+            X-Reconciliation-Signing-Key-Id: { schema: { type: string } }
+          content: { application/x-ndjson: { schema: { type: string, format: binary } } }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+        '503': { $ref: '#/components/responses/DependencyError' }
+  /v1/operator/unmatched-payments:
+    get:
+      tags: [Operations]
+      operationId: listUnmatchedPayments
+      summary: List tenant-isolated unmatched transfers visible to this merchant.
+      parameters:
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+        - $ref: '#/components/parameters/AfterCursor'
+        - $ref: '#/components/parameters/PageLimit'
+      responses:
+        '200': { description: Unmatched payment page., content: { application/json: { schema: { $ref: '#/components/schemas/UnmatchedListEnvelope' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+  /v1/operator/unmatched-payments/{unmatched_id}/candidates:
+    get:
+      tags: [Operations]
+      operationId: listMatchCandidates
+      summary: Return deterministic, explainable candidates for one unmatched transfer.
+      parameters:
+        - $ref: '#/components/parameters/UnmatchedID'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      responses:
+        '200': { description: Deterministic candidates., content: { application/json: { schema: { $ref: '#/components/schemas/CandidateListEnvelope' } } } }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+  /v1/operator/unmatched-payments/{unmatched_id}/resolutions:
+    post:
+      tags: [Operations]
+      operationId: requestManualResolution
+      summary: Request a human-reviewed candidate binding and independent chain verification.
+      description: Shortfall or cross-asset acceptance requires approval by a different credential actor before verification. This request never settles immediately.
+      parameters:
+        - $ref: '#/components/parameters/UnmatchedID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ManualResolutionRequest' } } }
+      responses:
+        '201': { description: Resolution workflow created or replayed., content: { application/json: { schema: { $ref: '#/components/schemas/ManualResolutionEnvelope' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+  /v1/operator/manual-resolutions/{resolution_id}/approve:
+    post:
+      tags: [Operations]
+      operationId: approveManualResolution
+      summary: Approve a four-eyes resolution using a different credential actor.
+      parameters:
+        - $ref: '#/components/parameters/ResolutionID'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_version]
+              properties: { expected_version: { type: integer, format: int64, minimum: 1 } }
+      responses:
+        '200': { description: Approved and queued for independent verification., content: { application/json: { schema: { $ref: '#/components/schemas/ManualResolutionEnvelope' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+  /v1/operator/unmatched-payments/{unmatched_id}/ai-rank:
+    post:
+      tags: [Operations]
+      operationId: rankUnmatchedCandidates
+      summary: Ask a configured OpenAI-compatible model to rank only the stored candidate set.
+      description: Optional deployment feature. The result always requires human review, is persisted as advisory evidence, and cannot approve or settle a payment.
+      parameters:
+        - $ref: '#/components/parameters/UnmatchedID'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        '200': { description: Advisory ranking persisted for audit., content: { application/json: { schema: { $ref: '#/components/schemas/AIRankEnvelope' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+  /v1/sandbox/workspace:
+    get:
+      tags: [Operations]
+      operationId: getSandboxWorkspace
+      summary: Read the isolated test workspace, deterministic clock, redacted credential metadata, and test addresses.
+      description: Registered only by an explicitly configured PostgreSQL sandbox/test runtime. Production returns 404.
+      parameters:
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      responses:
+        '200': { description: Tenant- and merchant-scoped sandbox workspace., content: { application/json: { schema: { $ref: '#/components/schemas/SandboxWorkspaceEnvelope' } } } }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+  /v1/sandbox/scenarios:
+    get:
+      tags: [Operations]
+      operationId: listSandboxScenarios
+      parameters:
+        - { name: after, in: query, schema: { type: string }, description: Opaque cursor from the preceding page. }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      responses:
+        '200': { description: Cursor page., content: { application/json: { schema: { $ref: '#/components/schemas/SandboxScenarioPageEnvelope' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+    post:
+      tags: [Operations]
+      operationId: createSandboxScenario
+      summary: Create a deterministic scenario with its own sandbox-only payment intent and route.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SandboxCreateScenario' } } }
+      responses:
+        '201': { description: Created scenario or exact replay., content: { application/json: { schema: { $ref: '#/components/schemas/SandboxScenarioEnvelope' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+  /v1/sandbox/scenarios/{id}:
+    get:
+      tags: [Operations]
+      operationId: getSandboxScenario
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      responses:
+        '200': { description: Scenario state and ordered evidence., content: { application/json: { schema: { $ref: '#/components/schemas/SandboxScenarioEnvelope' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+  /v1/sandbox/scenarios/{id}/actions:
+    post:
+      tags: [Operations]
+      operationId: applySandboxAction
+      summary: Progress observation, confirmations, finality, callback delivery, reorg, or recovery explicitly.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SandboxAction' } } }
+      responses:
+        '200': { description: Versioned scenario state., content: { application/json: { schema: { $ref: '#/components/schemas/SandboxScenarioEnvelope' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+  /v1/sandbox/scenarios/{id}/run:
+    post:
+      tags: [Operations]
+      operationId: runSandboxScenario
+      summary: Atomically run the selected deterministic scenario template.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false } } }
+      responses:
+        '200': { description: Final template state or exact replay., content: { application/json: { schema: { $ref: '#/components/schemas/SandboxScenarioEnvelope' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+  /v1/sandbox/callbacks:
+    get:
+      tags: [Operations]
+      operationId: listSandboxCallbacks
+      summary: Inspect canonical callback bodies, digests, bounded attempts, and delivery status without secrets.
+      parameters:
+        - { name: scenario_id, in: query, schema: { type: string, format: uuid } }
+        - { name: after, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      responses:
+        '200': { description: Cursor page of redacted callback records., content: { application/json: { schema: { $ref: '#/components/schemas/SandboxCallbackPageEnvelope' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+  /v1/sandbox/clock/advance:
+    post:
+      tags: [Operations]
+      operationId: advanceSandboxClock
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [seconds, expected_version]
+              properties:
+                seconds: { type: integer, format: int64, minimum: 1, maximum: 2592000 }
+                expected_version: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '200': { description: Advanced workspace or exact replay., content: { application/json: { schema: { $ref: '#/components/schemas/SandboxWorkspaceEnvelope' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+  /v1/sandbox/reset:
+    post:
+      tags: [Operations]
+      operationId: resetSandboxWorkspace
+      summary: Reset only sandbox-owned recoverable rows for this test merchant.
+      description: Requires the current workspace version and HMAC confirmation token returned by GET /v1/sandbox/workspace.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_version, confirmation_token]
+              properties:
+                expected_version: { type: integer, format: int64, minimum: 1 }
+                confirmation_token: { type: string, minLength: 43, maxLength: 43 }
+      responses:
+        '200': { description: Scoped reset result or exact replay., content: { application/json: { schema: { $ref: '#/components/schemas/SandboxResetEnvelope' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+  /v1/sandbox/simulations:
+    post:
+      tags: [Operations]
+      operationId: simulateSandboxPayment
+      summary: Deterministically exercise payment exception and reorg states.
+      description: Compatibility runner for a payment_intent_id created by POST /v1/sandbox/scenarios. Production IDs return 404; production never registers this route.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/MerchantKeyId'
+        - $ref: '#/components/parameters/MerchantTimestamp'
+        - $ref: '#/components/parameters/MerchantNonce'
+        - $ref: '#/components/parameters/ContentDigest'
+        - $ref: '#/components/parameters/MerchantSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [scenario, payment_intent_id]
+              properties:
+                scenario:
+                  $ref: '#/components/schemas/SandboxScenarioKind'
+                payment_intent_id: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Deterministic simulation result or idempotent replay.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SandboxScenarioEnvelope' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+components:
+  securitySchemes:
+    MerchantHMAC:
+      type: apiKey
+      in: header
+      name: Merchant-Signature
+      description: |
+        HMAC-SHA256 request authentication. The signature is base64url without
+        padding over `METHOD + "\n" + CANONICAL_PATH_AND_QUERY + "\n" +
+        TIMESTAMP + "\n" + NONCE + "\n" + LOWERCASE_HEX_SHA256_BODY`.
+        Send all Merchant-* headers and Content-Digest. Nonces are single-use.
+  parameters:
+    PaymentIntentID:
+      name: payment_intent_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Scoped to merchant and operation. Reuse with a different body returns 409.
+      schema: { type: string, minLength: 8, maxLength: 255 }
+    MerchantKeyId:
+      name: Merchant-Key-Id
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+    MerchantTimestamp:
+      name: Merchant-Timestamp
+      in: header
+      required: true
+      schema: { type: integer, format: int64 }
+    MerchantNonce:
+      name: Merchant-Nonce
+      in: header
+      required: true
+      schema: { type: string, minLength: 16, maxLength: 128 }
+    ContentDigest:
+      name: Content-Digest
+      in: header
+      required: true
+      description: "sha-256=:<standard-base64-digest>:. GET requests hash an empty body."
+      schema: { type: string }
+    MerchantSignature:
+      name: Merchant-Signature
+      in: header
+      required: true
+      schema: { type: string }
+    RequestID:
+      name: Request-Id
+      in: header
+      required: false
+      schema: { type: string, maxLength: 128 }
+    AfterCursor:
+      name: after
+      in: query
+      required: false
+      schema: { type: string, format: uuid }
+    AfterSequence:
+      name: after_sequence
+      in: query
+      required: false
+      description: Return events with a strictly greater merchant-local sequence, in ascending order.
+      schema: { type: integer, format: int64, minimum: 0, default: 0 }
+    EventID:
+      name: event_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ReconciliationReportID:
+      name: report_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PageLimit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    UnmatchedID:
+      name: unmatched_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ResolutionID:
+      name: resolution_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    ValidationError:
+      description: The request is syntactically invalid or violates a domain validation rule.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    AuthenticationError:
+      description: The key, digest, timestamp, nonce, or signature is invalid.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    ForbiddenError:
+      description: The credential lacks a required scope.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    ConflictError:
+      description: Idempotency, object version, state, or exact reservation conflict.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    NotFoundError:
+      description: The resource does not exist in the authenticated tenant.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    DependencyError:
+      description: Required immutable object storage or signing verification is unavailable.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+  schemas:
+    MerchantOrderRequest:
+      type: object
+      additionalProperties: false
+      required: [order_id, amount, currency, network, asset]
+      properties:
+        order_id: { type: string, minLength: 1, maxLength: 128 }
+        customer_id: { type: string, maxLength: 256 }
+        amount: { type: string, pattern: '^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$', maxLength: 89 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        currency_scale: { type: integer, minimum: 0, maximum: 9, default: 2 }
+        network: { type: string, description: Canonical chain ID or admitted alias such as tron, ethereum, solana, or ton. }
+        asset: { type: string, description: Active asset ID or unambiguous symbol on the selected network. }
+        description: { type: string, maxLength: 2048 }
+        expires_in: { type: integer, minimum: 60, maximum: 86400, default: 1800 }
+        metadata: { type: object, additionalProperties: true }
+    MerchantPayment:
+      type: object
+      additionalProperties: false
+      required: [route_id, network, asset, address, amount, expected_amount_atomic, required_finality, top_up_allowed]
+      properties:
+        route_id: { type: string, format: uuid }
+        network: { type: string }
+        asset: { type: string }
+        address: { type: string }
+        memo: { type: string }
+        amount: { type: string, pattern: '^[0-9]+(?:\.[0-9]+)?$' }
+        expected_amount_atomic: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        received_amount: { type: string, pattern: '^[0-9]+(?:\.[0-9]+)?$' }
+        remaining_amount: { type: string, pattern: '^[0-9]+(?:\.[0-9]+)?$' }
+        excess_amount: { type: string, pattern: '^[0-9]+(?:\.[0-9]+)?$' }
+        payment_count: { type: integer, format: int64, minimum: 0 }
+        required_finality: { type: integer, format: int64, minimum: 1 }
+        top_up_allowed: { type: boolean }
+    MerchantOrder:
+      type: object
+      additionalProperties: false
+      required: [payment_id, order_id, status, amount, currency, expires_at, updated_at, version]
+      properties:
+        payment_id: { type: string, format: uuid }
+        order_id: { type: string }
+        customer_id: { type: string }
+        status: { $ref: '#/components/schemas/PaymentIntentStatus' }
+        status_reason: { type: string }
+        amount: { type: string }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        payment: { $ref: '#/components/schemas/MerchantPayment' }
+        checkout_url: { type: string, format: uri, pattern: '^https://' }
+        receipt_url: { type: string, format: uri, pattern: '^https://' }
+        expires_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        version: { type: integer, format: int64, minimum: 1 }
+    MerchantOrderEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, request_id, api_version]
+      properties:
+        data: { $ref: '#/components/schemas/MerchantOrder' }
+        request_id: { type: string }
+        api_version: { type: string }
+    AtomicAmount:
+      type: string
+      pattern: '^(0|[1-9][0-9]*)$'
+      maxLength: 78
+      x-maximum-decimal: '115792089237316195423570985008687907853269984665640564039457584007913129639935'
+      description: Exact non-negative integer atomic units; never a JSON number.
+    PositiveAtomicAmount:
+      type: string
+      pattern: '^[1-9][0-9]*$'
+      maxLength: 78
+      x-maximum-decimal: '115792089237316195423570985008687907853269984665640564039457584007913129639935'
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok, ready, not_ready] }
+    RouteSelector:
+      oneOf:
+        - $ref: '#/components/schemas/OnChainRouteSelector'
+        - $ref: '#/components/schemas/HostedGatewayRouteSelector'
+      discriminator:
+        propertyName: provider
+        mapping:
+          on_chain: '#/components/schemas/OnChainRouteSelector'
+          hosted_gateway: '#/components/schemas/HostedGatewayRouteSelector'
+    OnChainRouteSelector:
+      type: object
+      additionalProperties: false
+      required: [provider, chain_id, asset_id]
+      properties:
+        provider: { type: string, const: on_chain }
+        chain_id: { type: string, minLength: 1, maxLength: 128 }
+        asset_id: { type: string, minLength: 1, maxLength: 128 }
+    HostedGatewayRouteSelector:
+      type: object
+      additionalProperties: false
+      required: [provider, provider_id, asset_id]
+      properties:
+        provider: { type: string, const: hosted_gateway }
+        provider_id: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' }
+        asset_id: { type: string, minLength: 1, maxLength: 128 }
+    CreatePaymentIntentRequest:
+      type: object
+      additionalProperties: false
+      required: [merchant_order_id, amount_minor, currency, currency_scale]
+      properties:
+        merchant_order_id: { type: string, minLength: 1, maxLength: 128 }
+        amount_minor: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        currency_scale: { type: integer, minimum: 0, maximum: 9 }
+        description: { type: string, maxLength: 2048 }
+        customer_reference: { type: string, maxLength: 256 }
+        expires_in: { type: integer, minimum: 60, maximum: 604800 }
+        expires_at: { type: string, format: date-time }
+        allowed_routes:
+          type: array
+          maxItems: 64
+          items: { $ref: '#/components/schemas/RouteSelector' }
+        metadata:
+          type: object
+          maxProperties: 64
+          additionalProperties: true
+    CreatePaymentRouteRequest:
+      oneOf:
+        - $ref: '#/components/schemas/CreateOnChainPaymentRouteRequest'
+        - $ref: '#/components/schemas/CreateHostedGatewayPaymentRouteRequest'
+      discriminator:
+        propertyName: provider
+        mapping:
+          on_chain: '#/components/schemas/CreateOnChainPaymentRouteRequest'
+          hosted_gateway: '#/components/schemas/CreateHostedGatewayPaymentRouteRequest'
+    CreateOnChainPaymentRouteRequest:
+      type: object
+      additionalProperties: false
+      required: [provider, on_chain]
+      properties:
+        provider: { type: string, const: on_chain }
+        on_chain:
+          type: object
+          additionalProperties: false
+          required: [chain_id, asset_id]
+          properties:
+            chain_id: { type: string, minLength: 1, maxLength: 128 }
+            asset_id: { type: string, minLength: 1, maxLength: 128 }
+        expires_in: { type: integer, minimum: 60, maximum: 86400 }
+    CreateHostedGatewayPaymentRouteRequest:
+      type: object
+      additionalProperties: false
+      required: [provider, hosted_gateway]
+      properties:
+        provider: { type: string, const: hosted_gateway }
+        hosted_gateway:
+          type: object
+          additionalProperties: false
+          required: [provider_id, asset_id]
+          properties:
+            provider_id: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' }
+            asset_id: { type: string, minLength: 1, maxLength: 128 }
+        expires_in: { type: integer, minimum: 60, maximum: 86400 }
+    CancelPaymentIntentRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 512 }
+        expected_version: { type: integer, format: int64, minimum: 1 }
+    ExpirePaymentIntentRequest:
+      type: object
+      additionalProperties: false
+      required: [reason, expected_version]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 512 }
+        expected_version: { type: integer, format: int64, minimum: 1 }
+    MutableCustomData:
+      type: object
+      maxProperties: 32
+      additionalProperties:
+        oneOf: [ { type: string, maxLength: 1024 }, { type: boolean }, { type: 'null' } ]
+    UpdatePaymentIntentMetadataRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version, metadata]
+      properties:
+        expected_version: { type: integer, format: int64, minimum: 1 }
+        metadata:
+          type: object
+          additionalProperties: false
+          maxProperties: 4
+          properties:
+            display_note: { type: string, maxLength: 1024 }
+            locale: { type: string, minLength: 2, maxLength: 35, pattern: '^[A-Za-z0-9]{2,8}(?:-[A-Za-z0-9]{2,8})*$' }
+            return_reference: { type: string, maxLength: 512 }
+            custom_data: { $ref: '#/components/schemas/MutableCustomData' }
+    CreateReconciliationReportRequest:
+      type: object
+      additionalProperties: false
+      required: [period_start, period_end]
+      properties:
+        format: { type: string, const: jsonl_v1, default: jsonl_v1 }
+        period_start: { type: string, format: date-time }
+        period_end: { type: string, format: date-time, description: Must not be later than the database snapshot cutoff captured by this request. }
+    SubmitPaymentProofRequest:
+      type: object
+      additionalProperties: false
+      required: [payment_intent_id, chain_id, transaction_id]
+      properties:
+        payment_intent_id: { type: string, format: uuid }
+        chain_id: { type: string, minLength: 1, maxLength: 128 }
+        transaction_id: { type: string, minLength: 1, maxLength: 256 }
+    PaymentProof:
+      type: object
+      additionalProperties: false
+      required: [id, merchant_id, payment_intent_id, chain_id, transaction_id, status, transfer_event_ids, created_at, updated_at, version]
+      properties:
+        id: { type: string, format: uuid }
+        merchant_id: { type: string }
+        payment_intent_id: { type: string, format: uuid }
+        chain_id: { type: string }
+        transaction_id: { type: string }
+        status: { type: string, enum: [queued, verifying, linked, not_found, invalid] }
+        transfer_event_ids: { type: array, items: { type: string } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        version: { type: integer, format: int64, minimum: 1 }
+    PaymentIntentStatus:
+      type: string
+      enum:
+        - created
+        - awaiting_route_selection
+        - pending
+        - observed
+        - partially_paid
+        - confirmed
+        - settled
+        - expired
+        - needs_review
+        - overpaid
+        - reorg_review
+        - reversed
+        - cancelled
+    PaymentIntent:
+      type: object
+      additionalProperties: false
+      required: [id, merchant_id, merchant_order_id, amount_minor, currency, currency_scale, allowed_routes, status, version, created_at, updated_at, expires_at, routes]
+      properties:
+        id: { type: string, format: uuid }
+        checkout_token:
+          type: string
+          pattern: '^cs_[A-Za-z0-9_-]{43}$'
+          description: Returned only by create/replay; store it as a bearer secret for the hosted checkout page.
+        merchant_id: { type: string }
+        merchant_order_id: { type: string }
+        customer_reference: { type: string }
+        amount_minor: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        currency_scale: { type: integer, minimum: 0, maximum: 9 }
+        description: { type: string }
+        status: { $ref: '#/components/schemas/PaymentIntentStatus' }
+        status_reason: { type: string }
+        metadata: { type: object, additionalProperties: true }
+        allowed_routes:
+          type: array
+          items: { $ref: '#/components/schemas/RouteSelector' }
+        version: { type: integer, format: int64, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        settled_at: { type: string, format: date-time }
+        cancelled_at: { type: string, format: date-time }
+        routes:
+          type: array
+          items: { $ref: '#/components/schemas/PaymentRoute' }
+    CheckoutSession:
+      type: object
+      additionalProperties: false
+      required: [intent_id, order_id, status, expires_at, selected_route_id, routes]
+      oneOf:
+        - properties:
+            status: { enum: [pending, detected, confirming, settled, expired] }
+            routes: { minItems: 1 }
+        - properties:
+            status: { const: preparing_payment_route }
+            selected_route_id: { const: '' }
+            routes: { maxItems: 0 }
+        - properties:
+            status: { const: payment_route_failed }
+            selected_route_id: { const: '' }
+            routes: { maxItems: 0 }
+      properties:
+        intent_id: { type: string, format: uuid }
+        order_id: { type: string, minLength: 1, maxLength: 128 }
+        status: { type: string, enum: [pending, detected, confirming, settled, expired, preparing_payment_route, payment_route_failed] }
+        expires_at: { type: string, format: date-time }
+        selected_route_id:
+          oneOf:
+            - { type: string, format: uuid }
+            - { type: string, const: '' }
+        routes:
+          type: array
+          maxItems: 64
+          items: { $ref: '#/components/schemas/CheckoutRoute' }
+    CheckoutRoute:
+      type: object
+      additionalProperties: false
+      required: [id, provider, asset, amount]
+      oneOf:
+        - required: [network, address]
+          properties: { provider: { const: on_chain } }
+          not:
+            anyOf:
+              - required: [provider_id]
+              - required: [payment_url]
+        - required: [provider_id, payment_url]
+          properties: { provider: { const: hosted_gateway } }
+          not:
+            anyOf:
+              - required: [network]
+              - required: [address]
+              - required: [transaction_hash]
+              - required: [explorer_url]
+      properties:
+        id: { type: string, format: uuid }
+        provider: { type: string, enum: [on_chain, hosted_gateway] }
+        provider_id: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' }
+        network: { type: string, minLength: 1, description: Canonical chain ID. }
+        asset: { type: string, minLength: 1, description: Canonical asset ID. }
+        amount: { type: string, minLength: 1, description: Display amount issued with the immutable route. }
+        address: { type: string, minLength: 1 }
+        payment_url: { type: string, format: uri, pattern: '^https://' }
+        transaction_hash: { type: string, minLength: 1 }
+        explorer_url: { type: string, format: uri, pattern: '^https://' }
+    SandboxScenarioKind:
+      type: string
+      enum: [exact_payment, partial_payment, underpayment, overpayment, late_payment, wrong_asset, duplicate_callback, out_of_order_callback, timeout, dead_letter, reorg, reorg_recovery]
+    SandboxCreateScenario:
+      type: object
+      additionalProperties: false
+      required: [scenario, merchant_order_id, amount_minor, currency, currency_scale]
+      properties:
+        scenario: { $ref: '#/components/schemas/SandboxScenarioKind' }
+        merchant_order_id: { type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' }
+        amount_minor: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        currency_scale: { type: integer, minimum: 0, maximum: 9 }
+        chain_id: { type: string }
+        asset_id: { type: string }
+        expected_amount_atomic: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        asset_decimals: { type: integer, minimum: 0, maximum: 77 }
+        required_confirmations: { type: integer, format: int64, minimum: 1, maximum: 1000000 }
+    SandboxAction:
+      type: object
+      additionalProperties: false
+      required: [type, expected_version]
+      properties:
+        type: { type: string, enum: [observe, confirm, finalize, callback_deliver, callback_deliver_out_of_order, callback_fail, callback_timeout, dead_letter, reorg, recover] }
+        amount_atomic: { $ref: '#/components/schemas/AtomicAmount' }
+        asset_id: { type: string }
+        confirmations: { type: integer, format: int64, minimum: 0, maximum: 1000000, description: Zero uses the route's deterministic required-confirmations fixture. }
+        callback_id: { type: string, format: uuid }
+        http_status:
+          anyOf:
+            - { type: integer, const: 0, description: Use the deterministic default for this callback action. }
+            - { type: integer, minimum: 100, maximum: 599 }
+        response_body: { type: string, maxLength: 4096, description: Never persisted; only its bounded byte count is retained. }
+        error: { type: string, maxLength: 1024, description: Never persisted; mapped to a closed error category. }
+        reorg_depth: { type: integer, format: int64, minimum: 1, maximum: 1000000 }
+        expected_version: { type: integer, format: int64, minimum: 1 }
+    SandboxWorkspace:
+      type: object
+      additionalProperties: false
+      required: [mode, merchant_id, clock, version, credential, addresses, reset_confirmation_token]
+      properties:
+        mode: { type: string, const: sandbox }
+        merchant_id: { type: string }
+        clock: { type: string, format: date-time }
+        version: { type: integer, format: int64, minimum: 1 }
+        credential:
+          type: object
+          additionalProperties: false
+          required: [key_id, environment, scopes, secret, secret_status]
+          properties:
+            key_id: { type: string, pattern: '^mk_test_' }
+            environment: { type: string, const: test }
+            scopes: { type: array, items: { type: string } }
+            secret: { type: string, const: '[REDACTED]' }
+            secret_status: { type: string, const: configured }
+        addresses:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, chain_id, asset_id, address]
+            properties:
+              id: { type: string, format: uuid }
+              chain_id: { type: string }
+              asset_id: { type: string }
+              address: { type: string }
+              memo: { type: string }
+        reset_confirmation_token: { type: string, minLength: 43, maxLength: 43, description: HMAC challenge bound to tenant, merchant, and workspace version. }
+    SandboxPaymentIntent:
+      type: object
+      additionalProperties: false
+      required: [id, amount_minor, currency, currency_scale, status, expires_at, version]
+      properties:
+        id: { type: string, format: uuid, description: Sandbox-only identifier; production payment endpoints return 404. }
+        amount_minor: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        currency_scale: { type: integer, minimum: 0, maximum: 9 }
+        status: { type: string, enum: [pending, observed, partially_paid, confirmed, settled, needs_review, overpaid, reorg_review] }
+        status_reason: { type: string }
+        expires_at: { type: string, format: date-time }
+        settled_at: { type: string, format: date-time }
+        version: { type: integer, format: int64, minimum: 1 }
+    SandboxPaymentRoute:
+      type: object
+      additionalProperties: false
+      required: [id, intent_id, chain_id, asset_id, expected_amount_atomic, asset_decimals, address, required_confirmations, status, expires_at, version]
+      properties:
+        id: { type: string, format: uuid }
+        intent_id: { type: string, format: uuid }
+        chain_id: { type: string }
+        asset_id: { type: string }
+        expected_amount_atomic: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        asset_decimals: { type: integer, minimum: 0, maximum: 77 }
+        address: { type: string }
+        memo: { type: string }
+        required_confirmations: { type: integer, format: int64, minimum: 1 }
+        status: { type: string, enum: [active, settled] }
+        expires_at: { type: string, format: date-time }
+        version: { type: integer, format: int64, minimum: 1 }
+    SandboxEvent:
+      type: object
+      additionalProperties: false
+      required: [id, sequence, type, occurred_at, payload]
+      properties:
+        id: { type: string, format: uuid }
+        sequence: { type: integer, format: int64, minimum: 1 }
+        type: { type: string }
+        occurred_at: { type: string, format: date-time }
+        payload: { type: object, additionalProperties: true }
+    SandboxScenario:
+      type: object
+      additionalProperties: false
+      required: [id, scenario, merchant_order_id, payment_intent, route, observed_amount_atomic, confirmations, finalized, last_event_sequence, version, created_at, updated_at, events]
+      properties:
+        id: { type: string, format: uuid }
+        scenario: { $ref: '#/components/schemas/SandboxScenarioKind' }
+        merchant_order_id: { type: string }
+        payment_intent: { $ref: '#/components/schemas/SandboxPaymentIntent' }
+        route: { $ref: '#/components/schemas/SandboxPaymentRoute' }
+        observed_amount_atomic: { $ref: '#/components/schemas/AtomicAmount' }
+        observed_asset_id: { type: string }
+        confirmations: { type: integer, format: int64, minimum: 0 }
+        finalized: { type: boolean }
+        last_event_sequence: { type: integer, format: int64, minimum: 0 }
+        version: { type: integer, format: int64, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        events: { type: array, items: { $ref: '#/components/schemas/SandboxEvent' } }
+    SandboxCallbackAttempt:
+      type: object
+      additionalProperties: false
+      required: [number, outcome, response_bytes, attempted_at]
+      properties:
+        number: { type: integer, minimum: 1, maximum: 100 }
+        outcome: { type: string, enum: [delivered, failed, timeout] }
+        http_status: { type: integer, minimum: 100, maximum: 599 }
+        error_category: { type: string, enum: [timeout, http_3xx, http_4xx, http_5xx, http_error] }
+        response_bytes: { type: integer, minimum: 0, maximum: 4096 }
+        attempted_at: { type: string, format: date-time }
+    SandboxCallback:
+      type: object
+      additionalProperties: false
+      required: [id, scenario_id, event_id, event_sequence, status, canonical_body, body_sha256, attempt_count, attempts, created_at, updated_at, version]
+      properties:
+        id: { type: string, format: uuid }
+        scenario_id: { type: string, format: uuid }
+        event_id: { type: string, format: uuid }
+        event_sequence: { type: integer, format: int64, minimum: 1 }
+        status: { type: string, enum: [pending, retry, acknowledged, dead_letter] }
+        canonical_body: { type: object, additionalProperties: true, description: Exact stored bytes decoded as JSON; byte-for-byte digest is body_sha256. }
+        body_sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        attempt_count: { type: integer, minimum: 0, maximum: 100 }
+        attempts: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/SandboxCallbackAttempt' } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        version: { type: integer, format: int64, minimum: 1 }
+    SandboxScenarioEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, request_id, api_version]
+      properties:
+        data: { $ref: '#/components/schemas/SandboxScenario' }
+        request_id: { type: string }
+        api_version: { type: string, const: 2026-08-01 }
+    SandboxWorkspaceEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, request_id, api_version]
+      properties: { data: { $ref: '#/components/schemas/SandboxWorkspace' }, request_id: { type: string }, api_version: { type: string, const: 2026-08-01 } }
+    SandboxScenarioPageEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, request_id, api_version]
+      properties:
+        data:
+          type: object
+          additionalProperties: false
+          required: [items, next_cursor]
+          properties: { items: { type: array, items: { $ref: '#/components/schemas/SandboxScenario' } }, next_cursor: { type: string } }
+        request_id: { type: string }
+        api_version: { type: string, const: 2026-08-01 }
+    SandboxCallbackPageEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, request_id, api_version]
+      properties:
+        data:
+          type: object
+          additionalProperties: false
+          required: [items, next_cursor]
+          properties: { items: { type: array, items: { $ref: '#/components/schemas/SandboxCallback' } }, next_cursor: { type: string } }
+        request_id: { type: string }
+        api_version: { type: string, const: 2026-08-01 }
+    SandboxResetEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, request_id, api_version]
+      properties:
+        data:
+          type: object
+          additionalProperties: false
+          required: [deleted_scenarios, deleted_callbacks, workspace_version, clock]
+          properties:
+            deleted_scenarios: { type: integer, format: int64, minimum: 0 }
+            deleted_callbacks: { type: integer, format: int64, minimum: 0 }
+            workspace_version: { type: integer, format: int64, minimum: 1 }
+            clock: { type: string, format: date-time }
+        request_id: { type: string }
+        api_version: { type: string, const: 2026-08-01 }
+    PaymentRoute:
+      type: object
+      additionalProperties: false
+      required: [id, intent_id, asset_id, provider, expected_amount_atomic, asset_decimals, display_amount, required_finality, status, version, starts_at, expires_at, grace_ends_at]
+      oneOf:
+        - required: [chain_id, address]
+          properties: { provider: { const: on_chain } }
+          not:
+            anyOf:
+              - required: [provider_id]
+              - required: [provider_order_id]
+              - required: [provider_reference]
+              - required: [payment_url]
+        - required: [provider_id, provider_order_id, provider_reference, payment_url]
+          properties: { provider: { const: hosted_gateway }, required_finality: { const: 0 } }
+          not:
+            anyOf:
+              - required: [chain_id]
+              - required: [address]
+      properties:
+        id: { type: string, format: uuid }
+        intent_id: { type: string, format: uuid }
+        chain_id: { type: string }
+        asset_id: { type: string }
+        provider: { type: string, enum: [on_chain, hosted_gateway] }
+        provider_id: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' }
+        provider_order_id: { type: string, format: uuid }
+        provider_reference: { type: string, minLength: 1, maxLength: 255 }
+        payment_url: { type: string, format: uri, pattern: '^https://' }
+        expected_amount_atomic: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        asset_decimals: { type: integer, minimum: 0, maximum: 77 }
+        display_amount: { type: string }
+        address: { type: string }
+        memo: { type: string }
+        required_finality: { type: integer, format: int64, minimum: 0 }
+        status: { type: string, enum: [active, expired, superseded, settled, cancelled] }
+        version: { type: integer, format: int64, minimum: 1 }
+        starts_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        grace_ends_at: { type: string, format: date-time }
+    Asset:
+      type: object
+      additionalProperties: false
+      required: [id, chain_id, symbol, name, kind, decimals, status, minimum_deposit_atomic]
+      properties:
+        id: { type: string }
+        chain_id: { type: string }
+        symbol: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [native, fungible_token] }
+        contract: { type: string }
+        decimals: { type: integer, minimum: 0, maximum: 77 }
+        status: { type: string, enum: [active, deposit_disabled, deprecated] }
+        minimum_deposit_atomic: { $ref: '#/components/schemas/AtomicAmount' }
+    PaymentIntentEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, request_id, api_version]
+      properties:
+        data: { $ref: '#/components/schemas/PaymentIntent' }
+        request_id: { type: string }
+        api_version: { type: string, const: 2026-08-01 }
+    PaymentRouteEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, request_id, api_version]
+      properties:
+        data: { $ref: '#/components/schemas/PaymentRoute' }
+        request_id: { type: string }
+        api_version: { type: string, const: 2026-08-01 }
+    PaymentProofEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, request_id, api_version]
+      properties:
+        data: { $ref: '#/components/schemas/PaymentProof' }
+        request_id: { type: string }
+        api_version: { type: string, const: 2026-08-01 }
+    PaymentIntentListEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, request_id, api_version]
+      properties:
+        data:
+          type: object
+          additionalProperties: false
+          required: [items, next_cursor]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/PaymentIntent' } }
+            next_cursor: { type: string }
+        request_id: { type: string }
+        api_version: { type: string, const: 2026-08-01 }
+    PaymentRouteListEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, request_id, api_version]
+      properties:
+        data:
+          type: object
+          additionalProperties: false
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/PaymentRoute' } }
+        request_id: { type: string }
+        api_version: { type: string, const: 2026-08-01 }
+    AssetListEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, request_id, api_version]
+      properties:
+        data:
+          type: object
+          additionalProperties: false
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/Asset' } }
+        request_id: { type: string }
+        api_version: { type: string, const: 2026-08-01 }
+    PublicEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, event_type, schema_version, aggregate_id, aggregate_type, aggregate_version, sequence, payload, occurred_at]
+      properties:
+        event_id: { type: string, format: uuid }
+        event_type: { type: string, minLength: 1 }
+        schema_version: { type: string, minLength: 1 }
+        aggregate_id: { type: string, minLength: 1 }
+        aggregate_type: { type: string, minLength: 1 }
+        aggregate_version: { type: integer, format: int64, minimum: 1 }
+        sequence: { type: integer, format: int64, minimum: 1 }
+        payload: {}
+        occurred_at: { type: string, format: date-time }
+    MerchantTransfer:
+      type: object
+      additionalProperties: false
+      required: [transfer_event_id, payment_intent_id, payment_route_id, chain_id, asset_id, transaction_id, event_index, from_address, to_address, amount_atomic, block_height, block_hash, confirmations, status, match_state, on_chain_time]
+      properties:
+        transfer_event_id: { type: string, format: uuid }
+        payment_intent_id: { type: string, format: uuid }
+        payment_route_id: { type: string, format: uuid }
+        chain_id: { type: string }
+        asset_id: { type: string }
+        transaction_id: { type: string }
+        event_index: { type: string }
+        from_address: { type: string }
+        to_address: { type: string }
+        amount_atomic: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        block_height: { $ref: '#/components/schemas/AtomicAmount' }
+        block_hash: { type: string }
+        confirmations: { type: integer, format: int64, minimum: 0 }
+        status: { type: string, enum: [observed, confirmed, finalized, reorged, invalidated] }
+        match_state: { type: string }
+        on_chain_time: { type: string, format: date-time }
+    QuoteView:
+      type: object
+      additionalProperties: false
+      required: [id, payment_intent_id, fiat_amount_minor, fiat_currency, fiat_scale, asset_id, crypto_amount_atomic, reference_price, spread_bps, policy_version, issued_at, expires_at]
+      properties:
+        id: { type: string, format: uuid }
+        payment_intent_id: { type: string, format: uuid }
+        fiat_amount_minor: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        fiat_currency: { type: string, pattern: '^[A-Z]{3}$' }
+        fiat_scale: { type: integer, minimum: 0, maximum: 9 }
+        asset_id: { type: string }
+        crypto_amount_atomic: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        reference_price: { type: string }
+        spread_bps: { type: integer, minimum: 0, maximum: 10000 }
+        policy_version: { type: integer, format: int64, minimum: 1 }
+        issued_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+    QuoteSource:
+      type: object
+      additionalProperties: false
+      required: [id, source, price_numerator, price_denominator, spread_bps, policy_version, observed_at, max_age_seconds, provenance_sha256]
+      properties:
+        id: { type: string, format: uuid }
+        source: { type: string }
+        price_numerator: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        price_denominator: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        spread_bps: { type: integer, minimum: 0, maximum: 10000 }
+        policy_version: { type: integer, format: int64, minimum: 1 }
+        observed_at: { type: string, format: date-time }
+        max_age_seconds: { type: integer, minimum: 0 }
+        provenance_sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+    QuoteDetail:
+      type: object
+      additionalProperties: false
+      required: [id, payment_intent_id, fiat_amount_minor, fiat_currency, fiat_scale, asset_id, crypto_amount_atomic, reference_price, spread_bps, policy_version, issued_at, expires_at, source_tick_ids, sources, raw_provenance_sha256]
+      properties:
+        id: { type: string, format: uuid }
+        payment_intent_id: { type: string, format: uuid }
+        fiat_amount_minor: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        fiat_currency: { type: string, pattern: '^[A-Z]{3}$' }
+        fiat_scale: { type: integer, minimum: 0, maximum: 9 }
+        asset_id: { type: string }
+        crypto_amount_atomic: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        reference_price: { type: string }
+        spread_bps: { type: integer, minimum: 0, maximum: 10000 }
+        policy_version: { type: integer, format: int64, minimum: 1 }
+        issued_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        source_tick_ids: { type: array, items: { type: string, format: uuid } }
+        sources: { type: array, items: { $ref: '#/components/schemas/QuoteSource' } }
+        raw_provenance_sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+    StoredWebhookEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, event_type, schema_version, sequence, canonical_body, canonical_body_base64, body_sha256, occurred_at]
+      properties:
+        event_id: { type: string, format: uuid }
+        event_type: { type: string }
+        schema_version: { type: string }
+        sequence: { type: integer, format: int64, minimum: 1 }
+        payment_intent_id: { type: string, format: uuid }
+        canonical_body: { $ref: '#/components/schemas/WebhookEvent' }
+        canonical_body_base64: { type: string, description: Standard base64 of the exact stored HTTP body bytes. }
+        body_sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        occurred_at: { type: string, format: date-time }
+    BalanceView:
+      type: object
+      additionalProperties: false
+      required: [account_code, asset_id, debit_atomic, credit_atomic]
+      properties:
+        account_code: { type: string }
+        asset_id: { type: string }
+        debit_atomic: { $ref: '#/components/schemas/AtomicAmount' }
+        credit_atomic: { $ref: '#/components/schemas/AtomicAmount' }
+    ReconciliationSummary:
+      type: object
+      additionalProperties: false
+      required: [intent_counts, unmatched_open, pending_outbox, dead_letter_callbacks, generated_at]
+      properties:
+        intent_counts: { type: object, additionalProperties: { type: integer, format: int64, minimum: 0 } }
+        unmatched_open: { type: integer, format: int64, minimum: 0 }
+        pending_outbox: { type: integer, format: int64, minimum: 0 }
+        dead_letter_callbacks: { type: integer, format: int64, minimum: 0 }
+        generated_at: { type: string, format: date-time }
+    ReconciliationReport:
+      type: object
+      additionalProperties: false
+      required: [id, status, format, period_start, period_end, snapshot_ledger_sequence, snapshot_cutoff, attempt_count, created_at, updated_at, version]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, processing, retry, ready, dead_letter] }
+        format: { type: string, const: jsonl_v1 }
+        period_start: { type: string, format: date-time }
+        period_end: { type: string, format: date-time }
+        snapshot_ledger_sequence: { type: string, pattern: '^(0|[1-9][0-9]*)$', description: Actual immutable global ledger sequence fence; every exported entry is at or below it. }
+        snapshot_cutoff: { type: string, format: date-time, description: Database clock captured atomically with the sequence fence. }
+        attempt_count: { type: integer, minimum: 0 }
+        last_error_code: { type: string }
+        object_size_bytes: { type: string, pattern: '^(0|[1-9][0-9]*)$' }
+        object_sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        signature: { type: string }
+        signing_key_id: { type: string }
+        download_path: { type: string, pattern: '^/v1/reconciliation-reports/[0-9a-f-]{36}/download$' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        version: { type: integer, format: int64, minimum: 1 }
+    UnmatchedPayment:
+      type: object
+      additionalProperties: false
+      required: [id, transfer_event_id, classification, status, accepted_shortfall, accepted_late_payment, accepted_cross_asset, workflow_version, version, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        transfer_event_id: { type: string, format: uuid }
+        classification: { type: string }
+        status: { $ref: '#/components/schemas/UnmatchedStatus' }
+        selected_route_id: { type: string, format: uuid }
+        accepted_shortfall: { type: boolean }
+        accepted_late_payment: { type: boolean }
+        accepted_cross_asset: { type: boolean }
+        workflow_version: { type: integer, format: int64, minimum: 1 }
+        assigned_operator_id: { type: string, format: uuid }
+        version: { type: integer, format: int64, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    UnmatchedStatus:
+      type: string
+      enum: [new, candidates_ready, bound, approval_required, verification_requested, verification_retry, verified, resolved, ignored, invalid, conflict, reorged]
+    MatchCandidate:
+      type: object
+      additionalProperties: false
+      required: [id, unmatched_payment_id, route_id, rank, score, evidence, disqualifiers, candidate_set_version]
+      properties:
+        id: { type: string, format: uuid }
+        unmatched_payment_id: { type: string, format: uuid }
+        route_id: { type: string, format: uuid }
+        rank: { type: integer, minimum: 1 }
+        score: { type: integer }
+        evidence: { type: object, additionalProperties: true }
+        disqualifiers: { type: array, items: { type: string } }
+        candidate_set_version: { type: integer, format: int64, minimum: 1 }
+    ManualResolutionRequest:
+      type: object
+      additionalProperties: false
+      required: [target_route_id, reason]
+      properties:
+        target_route_id: { type: string, format: uuid }
+        accept_shortfall: { type: boolean, default: false }
+        accept_late_payment: { type: boolean, default: false }
+        accept_cross_asset: { type: boolean, default: false }
+        reason: { type: string, minLength: 1, maxLength: 2048 }
+    ManualResolution:
+      type: object
+      additionalProperties: false
+      required: [id, unmatched_payment_id, transfer_event_id, target_route_id, candidate_set_version, idempotency_key, requested_by, accept_shortfall, accept_late_payment, accept_cross_asset, reason, status, created_at, version]
+      properties:
+        id: { type: string, format: uuid }
+        unmatched_payment_id: { type: string, format: uuid }
+        transfer_event_id: { type: string, format: uuid }
+        target_route_id: { type: string, format: uuid }
+        candidate_set_version: { type: integer, format: int64, minimum: 1 }
+        idempotency_key: { type: string }
+        requested_by: { type: string, format: uuid }
+        approved_by: { type: string, format: uuid }
+        accept_shortfall: { type: boolean }
+        accept_late_payment: { type: boolean }
+        accept_cross_asset: { type: boolean }
+        reason: { type: string }
+        status: { $ref: '#/components/schemas/UnmatchedStatus' }
+        verifier_evidence_hash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        created_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        version: { type: integer, format: int64, minimum: 1 }
+    AIRankResult:
+      type: object
+      additionalProperties: false
+      required: [recommended_route_id, confidence, reason_codes, review_required]
+      properties:
+        recommended_route_id: { type: string, format: uuid }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        reason_codes: { type: array, items: { type: string } }
+        review_required: { type: boolean, const: true }
+    EventListEnvelope:
+      $ref: '#/components/schemas/PagedPublicEvents'
+    TransferListEnvelope:
+      $ref: '#/components/schemas/PagedMerchantTransfers'
+    QuoteListEnvelope:
+      $ref: '#/components/schemas/PagedQuotes'
+    UnmatchedListEnvelope:
+      $ref: '#/components/schemas/PagedUnmatchedPayments'
+    PagedPublicEvents:
+      $ref: '#/components/schemas/PagedPublicEventEnvelope'
+    PagedMerchantTransfers:
+      $ref: '#/components/schemas/PagedMerchantTransferEnvelope'
+    PagedQuotes:
+      $ref: '#/components/schemas/PagedQuoteEnvelope'
+    PagedUnmatchedPayments:
+      $ref: '#/components/schemas/PagedUnmatchedEnvelope'
+    PagedPublicEventEnvelope:
+      type: object
+      required: [data, request_id, api_version]
+      properties: { data: { $ref: '#/components/schemas/PublicEventPage' }, request_id: { type: string }, api_version: { type: string, const: 2026-08-01 } }
+    PagedMerchantTransferEnvelope:
+      type: object
+      required: [data, request_id, api_version]
+      properties: { data: { $ref: '#/components/schemas/MerchantTransferPage' }, request_id: { type: string }, api_version: { type: string, const: 2026-08-01 } }
+    PagedQuoteEnvelope:
+      type: object
+      required: [data, request_id, api_version]
+      properties: { data: { $ref: '#/components/schemas/QuotePage' }, request_id: { type: string }, api_version: { type: string, const: 2026-08-01 } }
+    PagedUnmatchedEnvelope:
+      type: object
+      required: [data, request_id, api_version]
+      properties: { data: { $ref: '#/components/schemas/UnmatchedPage' }, request_id: { type: string }, api_version: { type: string, const: 2026-08-01 } }
+    PublicEventPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor, next_sequence]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/PublicEvent' } }
+        next_cursor: { type: string, pattern: '^(0|[1-9][0-9]*)$' }
+        next_sequence: { type: string, pattern: '^(0|[1-9][0-9]*)$' }
+    MerchantTransferPage:
+      type: object
+      required: [items, next_cursor]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/MerchantTransfer' } }, next_cursor: { type: string } }
+    QuotePage:
+      type: object
+      required: [items, next_cursor]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/QuoteView' } }, next_cursor: { type: string } }
+    UnmatchedPage:
+      type: object
+      required: [items, next_cursor]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/UnmatchedPayment' } }, next_cursor: { type: string } }
+    BalanceListEnvelope:
+      type: object
+      required: [data, request_id, api_version]
+      properties: { data: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/BalanceView' } } } }, request_id: { type: string }, api_version: { type: string, const: 2026-08-01 } }
+    ReconciliationEnvelope:
+      type: object
+      required: [data, request_id, api_version]
+      properties: { data: { $ref: '#/components/schemas/ReconciliationSummary' }, request_id: { type: string }, api_version: { type: string, const: 2026-08-01 } }
+    ReconciliationReportEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, request_id, api_version]
+      properties: { data: { $ref: '#/components/schemas/ReconciliationReport' }, request_id: { type: string }, api_version: { type: string, const: 2026-08-01 } }
+    WebhookEventEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, request_id, api_version]
+      properties: { data: { $ref: '#/components/schemas/StoredWebhookEvent' }, request_id: { type: string }, api_version: { type: string, const: 2026-08-01 } }
+    TransferEventsEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, request_id, api_version]
+      properties: { data: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/MerchantTransfer' } } } }, request_id: { type: string }, api_version: { type: string, const: 2026-08-01 } }
+    QuoteDetailEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, request_id, api_version]
+      properties: { data: { $ref: '#/components/schemas/QuoteDetail' }, request_id: { type: string }, api_version: { type: string, const: 2026-08-01 } }
+    CandidateListEnvelope:
+      type: object
+      required: [data, request_id, api_version]
+      properties: { data: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/MatchCandidate' } } } }, request_id: { type: string }, api_version: { type: string, const: 2026-08-01 } }
+    ManualResolutionEnvelope:
+      type: object
+      required: [data, request_id, api_version]
+      properties: { data: { $ref: '#/components/schemas/ManualResolution' }, request_id: { type: string }, api_version: { type: string, const: 2026-08-01 } }
+    AIRankEnvelope:
+      type: object
+      required: [data, request_id, api_version]
+      properties: { data: { $ref: '#/components/schemas/AIRankResult' }, request_id: { type: string }, api_version: { type: string, const: 2026-08-01 } }
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error, request_id]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, details]
+          properties:
+            code:
+              type: string
+              enum: [validation_error, authentication_failed, forbidden, idempotency_conflict, state_conflict, version_conflict, not_found, rate_limited, dependency_unavailable, internal_error]
+            message: { type: string }
+            details: { type: object, additionalProperties: true }
+        request_id: { type: string }
+    WebhookEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, event_type, schema_version, sequence, occurred_at, merchant_id, livemode, payment_intent]
+      allOf:
+        - if:
+            properties: { event_type: { const: payment.settled } }
+            required: [event_type]
+          then:
+            required: [settlement]
+            not: { anyOf: [{ required: [observation] }, { required: [resolution] }] }
+        - if:
+            properties: { event_type: { enum: [payment.observed, payment.confirming] } }
+            required: [event_type]
+          then:
+            required: [observation]
+            not: { anyOf: [{ required: [settlement] }, { required: [resolution] }] }
+        - if:
+            properties: { event_type: { const: payment.reorged } }
+            required: [event_type]
+          then:
+            oneOf:
+              - { required: [observation], not: { required: [settlement] } }
+              - { required: [settlement], not: { required: [observation] } }
+            not: { required: [resolution] }
+        - if:
+            properties: { event_type: { const: payment.resolution.updated } }
+            required: [event_type]
+          then:
+            required: [resolution]
+            not: { anyOf: [{ required: [observation] }, { required: [settlement] }] }
+      properties:
+        event_id: { type: string, minLength: 1 }
+        event_type:
+          type: string
+          enum: [payment.intent.created, payment.route.created, payment.observed, payment.confirming, payment.partially_paid, payment.needs_review, payment.settled, payment.overpaid, payment.expired, payment.cancelled, payment.reorged, payment.resolution.updated]
+        schema_version: { type: string, const: '1' }
+        sequence: { type: integer, format: int64, minimum: 1 }
+        occurred_at: { type: string, format: date-time }
+        merchant_id: { type: string, minLength: 1 }
+        livemode: { type: boolean }
+        payment_intent: { $ref: '#/components/schemas/WebhookPaymentIntent' }
+        settlement: { $ref: '#/components/schemas/WebhookSettlement' }
+        observation: { $ref: '#/components/schemas/WebhookObservation' }
+        resolution: { $ref: '#/components/schemas/WebhookResolution' }
+      description: |
+        Delivered with `Merchant-Webhook-Signature: t=<unix>,key=<key-id>,event=<event-id>,v1=<base64url-hmac>`.
+        The delivery also sends `Merchant-Delivery-Id` and `Content-Digest`. The signing input is
+        `<event-id>.<unix timestamp>.<exact HTTP body>`. Replays retain the event ID and canonical body,
+        but receive a new delivery ID, timestamp, and signature. A successful consumer must return a
+        2xx JSON body with exactly the matching `acknowledged_event_id`; empty, malformed, or mismatched
+        acknowledgements are retried and eventually dead-lettered.
+    WebhookPaymentIntent:
+      type: object
+      additionalProperties: false
+      required: [id, merchant_order_id, status, amount_minor, currency]
+      properties:
+        id: { type: string, minLength: 1 }
+        merchant_order_id: { type: string, minLength: 1 }
+        status: { $ref: '#/components/schemas/PaymentIntentStatus' }
+        amount_minor: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+    WebhookSettlement:
+      type: object
+      additionalProperties: false
+      required: [settlement_id, asset_id, expected_raw, received_raw, credited_raw, finality, manual_resolution]
+      oneOf:
+        - required: [network, transaction_hash, event_index, block_height, block_time]
+          not:
+            anyOf:
+              - required: [provider_id]
+              - required: [provider_reference]
+              - required: [provider_event_id]
+              - required: [provider_evidence_sha256]
+        - required: [provider_id, provider_reference, provider_event_id, provider_evidence_sha256]
+          not:
+            anyOf:
+              - required: [network]
+              - required: [transaction_hash]
+              - required: [event_index]
+              - required: [block_height]
+              - required: [block_time]
+      properties:
+        settlement_id: { type: string, minLength: 1 }
+        asset_id: { type: string, minLength: 1 }
+        network: { type: string, minLength: 1 }
+        expected_raw: { $ref: '#/components/schemas/AtomicAmount' }
+        received_raw: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        credited_raw: { $ref: '#/components/schemas/AtomicAmount' }
+        transaction_hash: { type: string, minLength: 1 }
+        event_index: { type: string, minLength: 1 }
+        block_height: { $ref: '#/components/schemas/AtomicAmount' }
+        block_time: { type: string, format: date-time }
+        provider_id: { type: string, minLength: 1, maxLength: 128 }
+        provider_reference: { type: string, minLength: 1, maxLength: 255 }
+        provider_event_id: { type: string, minLength: 1, maxLength: 255 }
+        provider_evidence_sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        finality: { type: string, enum: [observed, confirmed, finalized, reorged, provider_verified] }
+        manual_resolution: { type: boolean }
+    WebhookObservation:
+      type: object
+      additionalProperties: false
+      required: [observation_id, payment_route_id, network, asset_id, transaction_hash, event_index, from_address, to_address, amount_raw, asset_decimals, block_height, block_hash, block_time, confirmations, required_confirmations, finality, evidence_sha256]
+      properties:
+        observation_id: { type: string, minLength: 1 }
+        payment_route_id: { type: string, minLength: 1 }
+        network: { type: string, minLength: 1 }
+        asset_id: { type: string, minLength: 1 }
+        transaction_hash: { type: string, minLength: 1 }
+        event_index: { type: string, minLength: 1 }
+        from_address: { type: string, minLength: 1 }
+        to_address: { type: string, minLength: 1 }
+        amount_raw: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        asset_decimals: { type: integer, minimum: 0, maximum: 77 }
+        block_height: { $ref: '#/components/schemas/AtomicAmount' }
+        block_hash: { type: string, minLength: 1 }
+        block_time: { type: string, format: date-time }
+        confirmations: { type: integer, format: int64, minimum: 0 }
+        required_confirmations: { type: integer, format: int64, minimum: 1 }
+        finality: { type: string, enum: [observed, confirmed, finalized, reorged] }
+        evidence_sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+    WebhookResolution:
+      type: object
+      additionalProperties: false
+      required: [resolution_id, unmatched_payment_id, transfer_event_id, payment_route_id, status, version, approval_required, approved, accept_shortfall, accept_late_payment, accept_cross_asset, evidence_verified]
+      properties:
+        resolution_id: { type: string, minLength: 1 }
+        unmatched_payment_id: { type: string, minLength: 1 }
+        transfer_event_id: { type: string, minLength: 1 }
+        payment_route_id: { type: string, minLength: 1 }
+        status: { type: string, enum: [approval_required, verification_requested, verification_retry, resolved, invalid, conflict] }
+        version: { type: integer, format: int64, minimum: 1 }
+        approval_required: { type: boolean }
+        approved: { type: boolean }
+        accept_shortfall: { type: boolean }
+        accept_late_payment: { type: boolean }
+        accept_cross_asset: { type: boolean }
+        evidence_verified: { type: boolean }
+    HostedProviderCallback:
+      type: object
+      additionalProperties: false
+      required: [event_id, provider_reference, status, asset_id, amount_atomic, asset_decimals, occurred_at]
+      properties:
+        event_id: { type: string, minLength: 1, maxLength: 255 }
+        provider_reference: { type: string, minLength: 1, maxLength: 255 }
+        status: { type: string, enum: [pending, authorized, paid, cancelled, failed, refunded] }
+        asset_id: { type: string, minLength: 1, maxLength: 128 }
+        amount_atomic: { $ref: '#/components/schemas/PositiveAtomicAmount' }
+        asset_decimals: { type: integer, minimum: 0, maximum: 77 }
+        occurred_at: { type: string, format: date-time }
+    HostedProviderCallbackEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, request_id, api_version]
+      properties:
+        data:
+          type: object
+          additionalProperties: false
+          required: [duplicate, out_of_order, quarantined, settled]
+          properties:
+            duplicate: { type: boolean }
+            out_of_order: { type: boolean }
+            quarantined: { type: boolean }
+            settled: { type: boolean }
+            provider_inbox_id: { type: string }
+            prebind_evidence_id: { type: string }
+            intent_id: { type: string }
+            route_id: { type: string }
+            settlement_id: { type: string }
+            webhook_event_id: { type: string }
+        request_id: { type: string }
+        api_version: { type: string, const: 2026-08-01 }
+    WebhookAcknowledgement:
+      type: object
+      additionalProperties: false
+      required: [acknowledged_event_id]
+      properties:
+        acknowledged_event_id: { type: string, minLength: 1 }

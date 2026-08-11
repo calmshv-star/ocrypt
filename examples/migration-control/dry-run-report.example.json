@@ -1,0 +1,9 @@
+{
+  "dry_run": true,
+  "admissible": true,
+  "manifest_id": "018f0f65-7a34-7cc4-9f36-7a86496ee461",
+  "migration_id": "018f0f65-7a34-7cc4-9f36-7a86496ee462",
+  "kind": "inventory",
+  "payload_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "signer_key_ids": ["operator-a", "operator-b"]
+}

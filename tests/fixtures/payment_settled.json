@@ -1,0 +1,30 @@
+{
+  "event_id": "evt_fixture_settled_01",
+  "event_type": "payment.settled",
+  "schema_version": "1",
+  "sequence": 42,
+  "occurred_at": "2026-08-10T12:34:56.123Z",
+  "merchant_id": "merchant_fixture",
+  "livemode": false,
+  "payment_intent": {
+    "id": "pi_fixture_01",
+    "merchant_order_id": "order-fixture-01",
+    "status": "settled",
+    "amount_minor": "49900",
+    "currency": "RUB"
+  },
+  "settlement": {
+    "settlement_id": "st_fixture_01",
+    "asset_id": "usdt-tron",
+    "network": "tron:mainnet",
+    "expected_raw": "6380000",
+    "received_raw": "6380000",
+    "credited_raw": "6380000",
+    "transaction_hash": "fixture-not-a-real-transaction",
+    "event_index": "log:0",
+    "block_height": "100000000",
+    "block_time": "2026-08-10T12:33:00Z",
+    "finality": "finalized",
+    "manual_resolution": false
+  }
+}

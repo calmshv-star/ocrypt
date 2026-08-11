@@ -1,0 +1,112 @@
+{
+  "genesis": "11111111111111111111111111111111",
+  "slot": 1,
+  "block": {
+    "blockhash": "So11111111111111111111111111111111111111112",
+    "previousBlockhash": "11111111111111111111111111111111",
+    "parentSlot": 0,
+    "blockTime": 100,
+    "transactions": [
+      {
+        "transaction": {
+          "signatures": [
+            "1111111111111111111111111111111111111111111111111111111111111111"
+          ],
+          "message": {
+            "accountKeys": [
+              "11111111111111111111111111111111",
+              "So11111111111111111111111111111111111111112",
+              "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+              "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              "SysvarRent111111111111111111111111111111111",
+              "Vote111111111111111111111111111111111111111"
+            ],
+            "instructions": [
+              {
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "parsed": {
+                  "type": "transfer",
+                  "info": {
+                    "source": "11111111111111111111111111111111",
+                    "destination": "So11111111111111111111111111111111111111112",
+                    "lamports": "10"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "meta": {
+          "err": null,
+          "preTokenBalances": [
+            {
+              "accountIndex": 2,
+              "mint": "So11111111111111111111111111111111111111112",
+              "owner": "11111111111111111111111111111111",
+              "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+            },
+            {
+              "accountIndex": 4,
+              "mint": "11111111111111111111111111111111",
+              "owner": "11111111111111111111111111111111",
+              "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+            }
+          ],
+          "postTokenBalances": [
+            {
+              "accountIndex": 3,
+              "mint": "So11111111111111111111111111111111111111112",
+              "owner": "So11111111111111111111111111111111111111112",
+              "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+            },
+            {
+              "accountIndex": 5,
+              "mint": "11111111111111111111111111111111",
+              "owner": "So11111111111111111111111111111111111111112",
+              "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+            }
+          ],
+          "innerInstructions": [
+            {
+              "index": 0,
+              "instructions": [
+                {
+                  "program": "spl-token",
+                  "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+                  "parsed": {
+                    "type": "transferChecked",
+                    "info": {
+                      "source": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                      "destination": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+                      "tokenAmount": {
+                        "amount": "20"
+                      }
+                    }
+                  }
+                },
+                {
+                  "program": "spl-token",
+                  "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                  "parsed": {
+                    "type": "transfer",
+                    "info": {
+                      "source": "SysvarRent111111111111111111111111111111111",
+                      "destination": "Vote111111111111111111111111111111111111111",
+                      "amount": "30"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected_kinds": [
+    "native_top_level",
+    "token2022_transfer",
+    "spl_transfer"
+  ]
+}

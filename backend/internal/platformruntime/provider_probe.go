@@ -1,0 +1,173 @@
+package platformruntime
+
+import (
+	"context"
+	"errors"
+	"net"
+	"time"
+
+	"github.com/calmshv-star/ocrypt/backend/internal/domain"
+	"github.com/calmshv-star/ocrypt/backend/internal/hostedproviders"
+	"github.com/calmshv-star/ocrypt/backend/internal/platformadmin"
+	"github.com/calmshv-star/ocrypt/backend/internal/providerops"
+	"github.com/calmshv-star/ocrypt/backend/internal/providers"
+	"github.com/calmshv-star/ocrypt/backend/internal/scanner"
+)
+
+type HostedProbeLoader interface {
+	LoadHostedProbe(context.Context, providerops.Probe) (providerops.HostedProbeTarget, error)
+}
+
+type ProviderHealthProber struct {
+	Reader        platformadmin.RuntimeStateReader
+	SecretDir     string
+	Now           func() time.Time
+	HostedLoader  HostedProbeLoader
+	HostedAdapter hostedproviders.Adapter
+}
+
+func (p ProviderHealthProber) Probe(ctx context.Context, probe providerops.Probe) providerops.Observation {
+	started := time.Now()
+	observed := time.Now().UTC()
+	if p.Now != nil {
+		observed = p.Now().UTC()
+	}
+	failure := func(category providerops.ErrorCategory) providerops.Observation {
+		latency := time.Since(started)
+		if latency > 30*time.Second {
+			latency = 30 * time.Second
+		}
+		return providerops.Observation{Success: false, Error: category, Latency: latency, ObservedAt: observed}
+	}
+	if probe.Candidate.ProviderKind == providerops.ProviderHosted {
+		return p.probeHosted(ctx, probe, started, observed)
+	}
+	if p.Reader == nil || probe.Candidate.ProviderKind != providerops.ProviderOnChain || probe.Candidate.ConfigLogicalKey == "" || probe.Candidate.ChainID == "" {
+		return failure(providerops.ErrorPolicyDenied)
+	}
+	keys := []platformadmin.RuntimeSnapshotKey{
+		{Kind: platformadmin.KindRPCProvider, LogicalKey: probe.Candidate.ConfigLogicalKey},
+		{Kind: platformadmin.KindChain, LogicalKey: probe.Candidate.ChainID},
+	}
+	state, err := p.Reader.ActiveRuntimeState(ctx, platformadmin.Scope{}, keys)
+	if err != nil || len(state.Snapshots) != 2 {
+		return failure(providerops.ErrorConnect)
+	}
+	var rpc rpcPayload
+	var chain chainPayload
+	for _, snapshot := range state.Snapshots {
+		switch snapshot.Kind {
+		case platformadmin.KindRPCProvider:
+			if snapshot.ID != probe.Candidate.PlatformSnapshotID || strictDecode(snapshot.Payload, &rpc) != nil {
+				return failure(providerops.ErrorPolicyDenied)
+			}
+		case platformadmin.KindChain:
+			if strictDecode(snapshot.Payload, &chain) != nil {
+				return failure(providerops.ErrorInvalidResponse)
+			}
+		}
+	}
+	if rpc.ProviderID != probe.Candidate.ProviderID || rpc.ChainRef != probe.Candidate.ChainID || chain.GenesisHash == "" {
+		return failure(providerops.ErrorChainMismatch)
+	}
+	headers, err := (ScannerLoader{SecretDir: p.SecretDir}).readHeaders(rpc.CredentialRef)
+	if err != nil {
+		return failure(providerops.ErrorAuthRejected)
+	}
+	source, err := providers.NewSource(providers.Config{
+		Kind:       providers.Kind(rpc.ProviderKind),
+		HTTP:       providers.HTTPConfig{Endpoint: rpc.Endpoint, Headers: headers, Timeout: probe.Candidate.Policy.Timeout},
+		ProviderID: rpc.ProviderID, ChainID: rpc.ChainRef,
+	})
+	if err != nil {
+		return failure(providerops.ErrorPolicyDenied)
+	}
+	heads, err := source.Heads(ctx)
+	if err != nil {
+		return failure(classifyProviderProbeError(err))
+	}
+	if len(heads) != 1 || heads[0].Provider != rpc.ProviderID || heads[0].ChainID != rpc.ChainRef {
+		return failure(providerops.ErrorChainMismatch)
+	}
+	if heads[0].GenesisHash != chain.GenesisHash {
+		return failure(providerops.ErrorGenesisMismatch)
+	}
+	if err = probeReadOnlyCapability(ctx, source, probe.Candidate.Policy.Operation, heads[0]); err != nil {
+		return failure(classifyProviderProbeError(err))
+	}
+	height, headObserved := heads[0].SafeHeight, heads[0].ObservedAt
+	return providerops.Observation{Success: true, Error: providerops.ErrorNone, Latency: time.Since(started), ObservedAt: observed, HeadHeight: &height, HeadObservedAt: &headObserved}
+}
+
+func (p ProviderHealthProber) probeHosted(ctx context.Context, probe providerops.Probe, started, observed time.Time) providerops.Observation {
+	failure := func(category providerops.ErrorCategory) providerops.Observation {
+		latency := time.Since(started)
+		if latency > 30*time.Second {
+			latency = 30 * time.Second
+		}
+		return providerops.Observation{Success: false, Error: category, Latency: latency, ObservedAt: observed}
+	}
+	if p.HostedLoader == nil || p.HostedAdapter == nil || probe.Candidate.Policy.Operation != providerops.OperationStatus || probe.Candidate.ProbeReference == "" {
+		return failure(providerops.ErrorPolicyDenied)
+	}
+	target, err := p.HostedLoader.LoadHostedProbe(ctx, probe)
+	if err != nil {
+		return failure(providerops.ErrorPolicyDenied)
+	}
+	config := domain.HostedProviderConfig{
+		ID: target.ProviderID, TenantID: target.TenantID, MerchantID: target.MerchantID,
+		AdapterKind: target.AdapterKind, APIOrigin: target.APIOrigin, CreatePath: target.CreatePath,
+		CancelPath: target.CancelPath, StatusPath: target.StatusPath, RefundPath: target.RefundPath,
+		ReconcilePath: target.ReconcilePath, PaymentURLOrigins: target.PaymentURLOrigins,
+		CredentialRef: target.CredentialRef, APIKeyID: target.APIKeyID,
+		CallbackSecretRef: target.CallbackSecretRef, CallbackKeyID: target.CallbackKeyID,
+		CallbackSignatureKind: target.SignatureScheme, AssetID: target.AssetID,
+		AssetDecimals: target.AssetDecimals, Currency: target.Currency, Status: target.Status,
+	}
+	if err = hostedproviders.ValidateCallbackConfig(config); err != nil {
+		return failure(providerops.ErrorPolicyDenied)
+	}
+	state, err := p.HostedAdapter.Status(ctx, config, target.ProviderReference)
+	if err != nil {
+		return failure(classifyProviderProbeError(err))
+	}
+	if state.ProviderReference != target.ProviderReference || state.AssetID != target.AssetID || state.AssetDecimals != target.AssetDecimals {
+		return failure(providerops.ErrorInvalidResponse)
+	}
+	return providerops.Observation{Success: true, Error: providerops.ErrorNone, Latency: time.Since(started), ObservedAt: observed}
+}
+
+func probeReadOnlyCapability(ctx context.Context, source scanner.Source, operation providerops.Operation, head scanner.ProviderHead) error {
+	switch operation {
+	case providerops.OperationHealth, providerops.OperationHead:
+		return nil
+	case providerops.OperationRange, providerops.OperationTransactionLookup, providerops.OperationTransferVerify:
+		_, err := source.ScanRange(ctx, head.SafeHeight, head.SafeHeight)
+		return err
+	default:
+		return errors.New("unsupported provider health capability")
+	}
+}
+
+func classifyProviderProbeError(err error) providerops.ErrorCategory {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return providerops.ErrorTimeout
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) {
+		if networkError.Timeout() {
+			return providerops.ErrorTimeout
+		}
+		return providerops.ErrorConnect
+	}
+	switch providers.ErrorKindOf(err) {
+	case providers.ErrorRateLimited:
+		return providerops.ErrorRateLimited
+	case providers.ErrorMalformed:
+		return providerops.ErrorInvalidResponse
+	case providers.ErrorTransient:
+		return providerops.ErrorUpstream5xx
+	default:
+		return providerops.ErrorUpstream4xx
+	}
+}

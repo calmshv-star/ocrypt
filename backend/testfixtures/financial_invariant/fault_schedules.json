@@ -1,0 +1,13 @@
+{
+  "canonical_identity": {
+    "chain_id": "eip155:1",
+    "transaction_id": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "event_index": "log:0",
+    "asset_id": "usdc-ethereum",
+    "to_address": "0x2222222222222222222222222222222222222222"
+  },
+  "causal_operations": ["observe","settle_lost_response","reorg_replace","reinclude","settle_lost_response"],
+  "injectable_faults": ["duplicate_observation","retry_settlement","duplicate_outbox_delivery","duplicate_callback_delivery","duplicate_reorg"],
+  "terminal_expectation": {"active_matches":1,"active_credit_atomic":"100","net_credit_atomic":"100"},
+  "notes": "Offline deterministic model. Live PostgreSQL/provider/destination behavior is a separate release gate."
+}

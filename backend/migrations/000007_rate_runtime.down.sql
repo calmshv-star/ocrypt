@@ -1,0 +1,11 @@
+BEGIN;
+DROP TABLE IF EXISTS rate_collection_dead_letters CASCADE;
+DROP TABLE IF EXISTS admitted_rate_tick_observations CASCADE;
+DROP TABLE IF EXISTS admitted_rate_ticks CASCADE;
+DROP TABLE IF EXISTS rate_runtime_pair_bindings CASCADE;
+DROP INDEX IF EXISTS asset_rate_ticks_one_active_pair_idx;
+DROP TABLE IF EXISTS rate_source_observations CASCADE;
+DROP TABLE IF EXISTS rate_runtime_jobs CASCADE;
+DROP TABLE IF EXISTS rate_runtime_identities CASCADE;
+DROP FUNCTION IF EXISTS rate_runtime_immutable_row();
+COMMIT;

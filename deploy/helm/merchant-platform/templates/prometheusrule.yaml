@@ -1,0 +1,28 @@
+{{- if .Values.observability.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "merchant.fullname" . }}
+  labels:
+    {{- include "merchant.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: merchant-platform.availability
+      rules:
+        - alert: MerchantPlatformDeploymentUnavailable
+          expr: >-
+            kube_deployment_status_replicas_unavailable{namespace={{ .Release.Namespace | quote }},deployment=~{{ printf "%s-(api|management-api|admin-api|platform-admin-api|platform-outbox-publisher|financial-api|financial-worker|rate-worker|reconciliation-worker|legacy-gateway|settlement-worker|matching-worker|callback-worker|outbox-worker|resolution-worker|proof-worker|plan-worker|scanner)" (include "merchant.fullname" .) | quote }}} > 0
+          for: 10m
+          labels: {severity: critical}
+          annotations:
+            summary: Merchant Platform workload has unavailable replicas
+            runbook: docs/runbooks/en/service-unavailable.md
+        - alert: MerchantPlatformCrashLoop
+          expr: >-
+            increase(kube_pod_container_status_restarts_total{namespace={{ .Release.Namespace | quote }},pod=~{{ printf "%s-.*" (include "merchant.fullname" .) | quote }}}[15m]) > 3
+          for: 5m
+          labels: {severity: warning}
+          annotations:
+            summary: Merchant Platform container is repeatedly restarting
+            runbook: docs/runbooks/en/service-unavailable.md
+{{- end }}

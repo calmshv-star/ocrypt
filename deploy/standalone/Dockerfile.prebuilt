@@ -1,0 +1,7 @@
+FROM gcr.io/distroless/static-debian12:nonroot
+ARG BINARY
+LABEL org.opencontainers.image.title="ocrypt ${BINARY}" \
+      org.opencontainers.image.version="2026.08.11-standalone"
+COPY --chown=65532:65532 service /app/service
+USER 65532:65532
+ENTRYPOINT ["/app/service"]

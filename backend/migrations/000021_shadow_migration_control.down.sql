@@ -1,0 +1,67 @@
+BEGIN;
+
+REVOKE ALL ON FUNCTION migration_post_verified_opening(uuid,text,uuid,bigint,text,uuid),migration_record_payment_verification(uuid,uuid,text,uuid,bigint,text,bytea,bytea,text[],bigint),migration_apply_order(uuid,text,uuid,bigint,text,text,uuid,uuid,uuid,uuid,text,numeric,text,smallint,text,text,numeric,smallint,text,timestamptz,timestamptz,uuid,bigint,bigint,uuid,bigint,bytea),migration_apply_watch_address(uuid,text,uuid,bigint,text,uuid,uuid,text,text,text),migration_platform_create_admitted(uuid,uuid),record_migration_canary_version(uuid,uuid,uuid),record_migration_decommission_evidence(uuid,text,uuid,bigint,text,text,bytea),record_migration_shadow_comparison(uuid,text,uuid,bigint,bigint,text,text,text,text,text,text,jsonb),stage_migration_import_item(uuid,text,uuid,bigint,bigint,text,text,jsonb),claim_migration_workload(uuid,text,integer),migration_pending_actuator_action(uuid),acknowledge_migration_actuator(uuid,bigint,bigint,text,text,text,text),execute_migration_transition(uuid,uuid,bigint,bigint,bigint,text,uuid,text,timestamptz,text,bytea),decide_migration_transition(uuid,uuid,bigint,boolean,text,uuid,text,timestamptz,text,bytea),request_migration_transition(uuid,uuid,text,bigint,bigint,uuid,text,uuid,text,timestamptz,text,bytea),attach_migration_manifest(uuid,bigint,uuid,text,bytea,bytea,text[],uuid,text,timestamptz,text,text,bytea),create_migration_run(uuid,text,text,text,uuid,text,timestamptz,text,bytea) FROM PUBLIC;
+
+DROP TRIGGER IF EXISTS migration_callback_delivery_fence ON callback_deliveries;
+DROP TRIGGER IF EXISTS migration_payment_credit_fence ON payment_matches;
+DROP TRIGGER IF EXISTS migration_provider_observation ON provider_inbox;
+DROP TRIGGER IF EXISTS migration_transfer_observation ON transfer_events;
+DROP TRIGGER IF EXISTS migration_imported_address_never_release ON addresses;
+DROP TRIGGER IF EXISTS migration_callback_ownership_after_create ON payment_intents;
+DROP TRIGGER IF EXISTS migration_platform_create_fence ON payment_intents;
+DROP TRIGGER IF EXISTS migration_platform_route_fence ON payment_routes;
+DROP FUNCTION IF EXISTS migration_guard_platform_route();
+DROP FUNCTION IF EXISTS migration_suppress_platform_callback();
+DROP FUNCTION IF EXISTS migration_guard_payment_credit();
+DROP FUNCTION IF EXISTS migration_observe_provider_identity();
+DROP FUNCTION IF EXISTS migration_observe_transfer_identity();
+DROP FUNCTION IF EXISTS migration_protect_watch_address();
+DROP FUNCTION IF EXISTS migration_track_callback_ownership();
+DROP FUNCTION IF EXISTS migration_guard_platform_create();
+DROP FUNCTION IF EXISTS migration_post_verified_opening(uuid,text,uuid,bigint,text,uuid);
+DROP FUNCTION IF EXISTS migration_record_payment_verification(uuid,uuid,text,uuid,bigint,text,bytea,bytea,text[],bigint);
+DROP FUNCTION IF EXISTS migration_apply_order(uuid,text,uuid,bigint,text,text,uuid,uuid,uuid,uuid,text,numeric,text,smallint,text,text,numeric,smallint,text,timestamptz,timestamptz,uuid,bigint,bigint,uuid,bigint,bytea);
+DROP FUNCTION IF EXISTS migration_apply_watch_address(uuid,text,uuid,bigint,text,uuid,uuid,text,text,text);
+DROP FUNCTION IF EXISTS migration_platform_create_admitted(uuid,uuid);
+DROP FUNCTION IF EXISTS record_migration_canary_version(uuid,uuid,uuid);
+DROP FUNCTION IF EXISTS record_migration_shadow_comparison(uuid,text,uuid,bigint,bigint,text,text,text,text,text,text,jsonb);
+DROP FUNCTION IF EXISTS record_migration_decommission_evidence(uuid,text,uuid,bigint,text,text,bytea);
+DROP FUNCTION IF EXISTS stage_migration_import_item(uuid,text,uuid,bigint,bigint,text,text,jsonb);
+DROP FUNCTION IF EXISTS migration_worker_lease_valid(uuid,text,uuid,bigint);
+DROP FUNCTION IF EXISTS claim_migration_workload(uuid,text,integer);
+DROP FUNCTION IF EXISTS migration_pending_actuator_action(uuid);
+DROP FUNCTION IF EXISTS acknowledge_migration_actuator(uuid,bigint,bigint,text,text,text,text);
+DROP FUNCTION IF EXISTS execute_migration_transition(uuid,uuid,bigint,bigint,bigint,text,uuid,text,timestamptz,text,bytea);
+DROP FUNCTION IF EXISTS migration_transition_blocked(migration_runs,text,uuid,timestamptz);
+DROP FUNCTION IF EXISTS decide_migration_transition(uuid,uuid,bigint,boolean,text,uuid,text,timestamptz,text,bytea);
+DROP FUNCTION IF EXISTS request_migration_transition(uuid,uuid,text,bigint,bigint,uuid,text,uuid,text,timestamptz,text,bytea);
+DROP FUNCTION IF EXISTS attach_migration_manifest(uuid,bigint,uuid,text,bytea,bytea,text[],uuid,text,timestamptz,text,text,bytea);
+DROP FUNCTION IF EXISTS create_migration_run(uuid,text,text,text,uuid,text,timestamptz,text,bytea);
+DROP FUNCTION IF EXISTS migration_append_control_event(migration_runs,uuid,text,text,text,jsonb,timestamptz);
+DROP FUNCTION IF EXISTS migration_state_edge(text,text);
+DROP FUNCTION IF EXISTS migration_admin_allowed(uuid,uuid,text,text,timestamptz);
+
+DROP TABLE IF EXISTS migration_desired_actions;
+DROP TABLE IF EXISTS migration_decommission_evidence;
+DROP TABLE IF EXISTS migration_canary_versions;
+DROP TABLE IF EXISTS migration_shadow_callback_comparisons;
+DROP TABLE IF EXISTS migration_callback_ownership;
+DROP TABLE IF EXISTS migration_shadow_comparisons;
+DROP TABLE IF EXISTS migration_review;
+DROP TABLE IF EXISTS migration_event_ownership;
+DROP TABLE IF EXISTS migration_verification_evidence;
+DROP FUNCTION IF EXISTS migration_verification_frozen();
+DROP TABLE IF EXISTS migration_imported_orders;
+DROP TABLE IF EXISTS migration_imported_addresses;
+DROP TABLE IF EXISTS migration_import_items;
+DROP TABLE IF EXISTS migration_worker_leases;
+DROP TABLE IF EXISTS migration_control_idempotency;
+DROP TABLE IF EXISTS migration_transition_requests;
+DROP TABLE IF EXISTS migration_manifest_versions;
+DROP TABLE IF EXISTS migration_runs;
+DROP FUNCTION IF EXISTS migration_reject_mutation();
+
+DELETE FROM admin_role_permissions WHERE permission_key IN ('migration:read','migration:request','migration:approve','migration:execute');
+DELETE FROM admin_permissions WHERE permission_key IN ('migration:read','migration:request','migration:approve','migration:execute');
+
+COMMIT;

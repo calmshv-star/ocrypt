@@ -1,0 +1,13 @@
+{
+  "name": "MERCHANT_EVENTS_REFERENCE_V1",
+  "durable_name": "MERCHANT_EVENTS_REFERENCE_V1",
+  "deliver_policy": "all",
+  "ack_policy": "explicit",
+  "ack_wait": 30000000000,
+  "max_deliver": 20,
+  "filter_subject": "merchant.events.v1",
+  "replay_policy": "instant",
+  "max_ack_pending": 1000,
+  "max_batch": 100,
+  "max_expires": 10000000000
+}

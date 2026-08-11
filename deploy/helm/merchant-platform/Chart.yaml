@@ -1,0 +1,12 @@
+apiVersion: v2
+name: merchant-platform
+description: Fail-closed deployment chart for the Merchant Platform control and data planes
+type: application
+version: 0.2.0
+appVersion: "0.2.0"
+kubeVersion: ">=1.30.0-0"
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: changed
+      description: Isolated public, control, financial, rate, scanner, provider-health and queue-role workloads with fail-closed routing and migrations.

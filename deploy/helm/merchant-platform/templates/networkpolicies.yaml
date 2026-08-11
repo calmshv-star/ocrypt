@@ -1,0 +1,188 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $root := . -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "merchant.fullname" . }}-default-deny
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "merchant.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "merchant.fullname" . }}-dns
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "merchant.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.dns.namespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml .Values.networkPolicy.dns.podSelector | nindent 12 }}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+{{- range $name, $cfg := .Values.workloads }}
+{{- if $cfg.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "merchant.fullname" $root }}-{{ $name }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "merchant.selectorLabels" (dict "root" $root "component" $name) | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  {{- $edgeComponent := or (eq $name "api") (eq $name "management-api") (eq $name "admin-api") -}}
+  {{- $adminUpstream := or (eq $name "management-api") (eq $name "platform-admin-api") (eq $name "merchant-settings-api") (eq $name "financial-api") -}}
+  {{- $adminUpstreamPort := ternary 8447 (ternary 8444 $cfg.port (eq $name "financial-api")) (eq $name "merchant-settings-api") -}}
+  {{- if or $cfg.network.ingressFrom $root.Values.networkPolicy.healthIngressFrom (and $edgeComponent $root.Values.networkPolicy.edgeIngressFrom) $adminUpstream }}
+  ingress:
+    {{- if and $edgeComponent $root.Values.networkPolicy.edgeIngressFrom }}
+    - from:
+        {{- toYaml $root.Values.networkPolicy.edgeIngressFrom | nindent 8 }}
+      ports: [{protocol: TCP, port: {{ $cfg.port }}}]
+    {{- end }}
+    {{- if $adminUpstream }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "merchant.selectorLabels" (dict "root" $root "component" "admin-api") | nindent 14 }}
+      ports: [{protocol: TCP, port: {{ $adminUpstreamPort }}}]
+    {{- end }}
+    {{- if $cfg.network.ingressFrom }}
+    - from:
+        {{- toYaml $cfg.network.ingressFrom | nindent 8 }}
+      ports: [{protocol: TCP, port: {{ ternary 8082 $cfg.port (eq $name "legacy-gateway") }}}]
+    {{- end }}
+    {{- if $root.Values.networkPolicy.healthIngressFrom }}
+    - from:
+        {{- toYaml $root.Values.networkPolicy.healthIngressFrom | nindent 8 }}
+      ports: [{protocol: TCP, port: {{ $cfg.port }}}]
+    {{- end }}
+  {{- end }}
+  {{- if or $cfg.databaseAccess $cfg.network.internalEgress $cfg.network.httpsEgressPeers (eq $name "admin-api") }}
+  egress:
+    {{- if and $cfg.databaseAccess $root.Values.networkPolicy.databasePeers }}
+    - to:
+        {{- toYaml $root.Values.networkPolicy.databasePeers | nindent 8 }}
+      ports:
+        {{- range $root.Values.networkPolicy.databasePorts }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
+    {{- end }}
+    {{- range $rule := $cfg.network.internalEgress }}
+    - to:
+        {{- toYaml $rule.to | nindent 8 }}
+      ports:
+        {{- toYaml $rule.ports | nindent 8 }}
+    {{- end }}
+    {{- if eq $name "admin-api" }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "merchant.selectorLabels" (dict "root" $root "component" "management-api") | nindent 14 }}
+      ports: [{protocol: TCP, port: 8445}]
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "merchant.selectorLabels" (dict "root" $root "component" "platform-admin-api") | nindent 14 }}
+      ports: [{protocol: TCP, port: 8446}]
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "merchant.selectorLabels" (dict "root" $root "component" "merchant-settings-api") | nindent 14 }}
+      ports: [{protocol: TCP, port: 8447}]
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "merchant.selectorLabels" (dict "root" $root "component" "financial-api") | nindent 14 }}
+      ports: [{protocol: TCP, port: 8444}]
+    {{- end }}
+    {{- if $cfg.network.httpsEgressPeers }}
+    - to:
+        {{- toYaml $cfg.network.httpsEgressPeers | nindent 8 }}
+      ports: [{protocol: TCP, port: 443}]
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- if .Values.migrationActuator.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "merchant.fullname" . }}-migration-traffic-actuator
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "merchant.selectorLabels" (dict "root" . "component" "migration-traffic-actuator") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  egress:
+    {{- if .Values.networkPolicy.databasePeers }}
+    - to:
+        {{- toYaml .Values.networkPolicy.databasePeers | nindent 8 }}
+      ports:
+        {{- range .Values.networkPolicy.databasePorts }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
+    {{- end }}
+    - to:
+        {{- toYaml .Values.migrationActuator.httpsEgressPeers | nindent 8 }}
+      ports: [{protocol: TCP, port: 443}]
+{{- end }}
+{{- if .Values.migration.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "merchant.fullname" . }}-migration
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "merchant.selectorLabels" (dict "root" . "component" "migration") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  egress:
+    {{- if .Values.networkPolicy.databasePeers }}
+    - to:
+        {{- toYaml .Values.networkPolicy.databasePeers | nindent 8 }}
+      ports:
+        {{- range .Values.networkPolicy.databasePorts }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
+    {{- end }}
+{{- end }}
+{{- if .Values.migrationVerifier.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "merchant.fullname" . }}-migration-control-worker
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "merchant.selectorLabels" (dict "root" . "component" "migration-control-worker") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  egress:
+    {{- if .Values.networkPolicy.databasePeers }}
+    - to:
+        {{- toYaml .Values.networkPolicy.databasePeers | nindent 8 }}
+      ports:
+        {{- range .Values.networkPolicy.databasePorts }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
+    {{- end }}
+    {{- if .Values.migrationVerifier.httpsEgressPeers }}
+    - to:
+        {{- toYaml .Values.migrationVerifier.httpsEgressPeers | nindent 8 }}
+      ports: [{protocol: TCP, port: 443}]
+    {{- end }}
+{{- end }}
+{{- end }}

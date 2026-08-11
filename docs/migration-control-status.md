@@ -1,0 +1,7 @@
+# Migration control release status
+
+`000021_shadow_migration_control` and its down migration are present. Static code covers signed bounded manifests, two-person/MFA transitions, fenced import and verification work, observe-only shadow comparisons, canary ownership, separate actuator acknowledgement, explicit canary abort/rollback, database credit/callback/address fences, and DB-derived decommission blockers.
+
+Deployment defaults are closed: the verifier is a one-shot Job/Compose profile with `MIGRATION_EXECUTE=false`, no Service, an isolated function-only database role, exact file-mounted provider trust material, TLS 1.3 mTLS and explicit HTTPS egress. The offline CLI never executes mutations. A separate, disabled-by-default one-shot traffic actuator reads one exact fenced desired action, signs the canonical switch request, accepts only a matching signed acknowledgement from the pinned mTLS endpoint, and only then advances the database state. Platform control and the actuator use distinct database credentials.
+
+Local evidence is limited to repository checks. No live source database export, provider or chain quorum, PostgreSQL migration rehearsal, canary traffic, actuator switch, rollback, decommission, Helm server-side dry-run, container runtime or production restore was executed here. The release manifest deliberately rejects production approval until those artifacts are supplied.

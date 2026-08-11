@@ -1,0 +1,23 @@
+{
+  "asset_id": "usdt-tron",
+  "callback_key_id": "legacy-json_md5-v1",
+  "chain_id": "tron-mainnet",
+  "config_id": "00000000-0000-7000-8000-000000000181",
+  "core_key_id": "mk_live_legacy_bridge",
+  "core_secret_ref": "core-hmac-v1",
+  "credential_id": "00000000-0000-7000-8000-000000000182",
+  "currency": "RUB",
+  "currency_scale": 2,
+  "ip_allowlist": ["203.0.113.10/32"],
+  "legacy_payment_type": "json_md5",
+  "legacy_network": "tron",
+  "legacy_secret_ref": "legacy-md5-v1",
+  "legacy_token": "USDT",
+  "merchant_id": "00000000-0000-7000-8000-000000000183",
+  "pid": "replace-with-legacy-pid",
+  "protocol": "json_md5",
+  "sunset_at": "2026-12-31T23:59:59Z",
+  "tenant_id": "00000000-0000-7000-8000-000000000184",
+  "valid_from": "2026-08-11T00:00:00Z",
+  "valid_until": "2026-12-31T23:59:59Z"
+}

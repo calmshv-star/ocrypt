@@ -1,0 +1,175 @@
+{{- if .Values.global.requireImageDigest }}
+{{- range $name, $cfg := .Values.workloads }}
+{{- if and $cfg.enabled (empty $cfg.image.digest) }}{{- fail (printf "workloads.%s.image.digest is required" $name) }}{{- end }}
+{{- end }}
+{{- if and .Values.migration.enabled (empty .Values.migration.image.digest) }}{{- fail "migration.image.digest is required" }}{{- end }}
+{{- if and .Values.migrationVerifier.enabled (empty .Values.migrationVerifier.image.digest) }}{{- fail "migrationVerifier.image.digest is required" }}{{- end }}
+{{- if and .Values.migrationActuator.enabled (empty .Values.migrationActuator.image.digest) }}{{- fail "migrationActuator.image.digest is required" }}{{- end }}
+{{- end }}
+{{- $databaseRequired := or .Values.migration.enabled (and .Values.migrationVerifier.enabled .Values.migrationVerifier.execute) .Values.migrationActuator.enabled -}}
+{{- range $name, $cfg := .Values.workloads }}
+{{- if and $cfg.enabled $cfg.databaseAccess }}{{- $databaseRequired = true -}}{{- end }}
+{{- end }}
+{{- if .Values.migrationActuator.enabled }}
+{{- if or (empty .Values.migrationActuator.migrationID) (empty .Values.migrationActuator.serverName) (empty .Values.migrationActuator.requestKeyID) }}{{- fail "migration actuator requires exact migration and key identities" }}{{- end }}
+{{- if or (not (hasPrefix "https://" .Values.migrationActuator.switchURL)) (not (hasSuffix ":443/v1/migration-actions/apply" .Values.migrationActuator.switchURL)) }}{{- fail "migration actuator requires exact HTTPS:443 traffic switch path" }}{{- end }}
+{{- if ne (len .Values.migrationActuator.secretFiles) 5 }}{{- fail "migration actuator requires CA, client mTLS, request key and acknowledgement key-ring files" }}{{- end }}
+{{- if empty .Values.migrationActuator.httpsEgressPeers }}{{- fail "migration actuator requires explicit HTTPS egress peers" }}{{- end }}
+{{- end }}
+{{- if and $databaseRequired (empty .Values.networkPolicy.databasePeers) }}{{- fail "enabled database workloads require explicit networkPolicy.databasePeers" }}{{- end }}
+{{- if .Values.migrationVerifier.enabled }}
+{{- if or (empty .Values.migrationVerifier.migrationID) (empty .Values.migrationVerifier.sourceID) (empty .Values.migrationVerifier.workerID) }}{{- fail "migration verifier requires exact migration/source/worker identities" }}{{- end }}
+{{- if ne (len .Values.migrationVerifier.secretFiles) 5 }}{{- fail "migration verifier requires config, key ring, CA and client mTLS files" }}{{- end }}
+{{- if empty .Values.migrationVerifier.httpsEgressPeers }}{{- fail "migration verifier requires explicit provider HTTPS egress peers" }}{{- end }}
+{{- end }}
+{{- range $name := list "api" "admin-api" "management-api" "platform-outbox-publisher" "callback-worker" "resolution-worker" "proof-worker" "scanner" "rate-worker" "reconciliation-worker" "retention-worker" "legacy-gateway" "merchant-invitation-delivery-worker" "financial-worker" }}
+{{- $cfg := index $.Values.workloads $name }}
+{{- if and $cfg.enabled (empty $cfg.network.httpsEgressPeers) }}{{- fail (printf "enabled %s requires explicit HTTPS egress peers" $name) }}{{- end }}
+{{- end }}
+{{- $legacy := index .Values.workloads "legacy-gateway" -}}
+{{- if $legacy.enabled }}
+{{- if $legacy.service.enabled }}{{- fail "legacy compatibility requires a separately admitted source-preserving listener; chart Service stays disabled" }}{{- end }}
+{{- if ne (toString $legacy.env.APP_ENV) "production" }}{{- fail "legacy compatibility requires APP_ENV=production" }}{{- end }}
+{{- if ne (toString $legacy.env.LEGACY_COMPAT_ENABLED) "true" }}{{- fail "legacy compatibility requires explicit enable" }}{{- end }}
+{{- if or (ne (int $legacy.port) 9101) (ne (toString $legacy.env.LEGACY_HEALTH_ADDRESS) ":9101") (ne (toString $legacy.env.LEGACY_HTTP_ADDRESS) ":8082") }}{{- fail "legacy listener/health contract drift" }}{{- end }}
+{{- if empty $legacy.env.LEGACY_SUNSET_AT }}{{- fail "legacy compatibility requires an explicit sunset" }}{{- end }}
+{{- range $key := list "LEGACY_PUBLIC_BASE_URL" "LEGACY_CHECKOUT_BASE_URL" "LEGACY_CORE_URL" }}{{- if not (hasPrefix "https://" (toString (index $legacy.env $key))) }}{{- fail (printf "legacy compatibility requires HTTPS %s" $key) }}{{- end }}{{- end }}
+{{- range $key := list "LEGACY_SECRET_DIR" "LEGACY_CORE_CA_FILE" "LEGACY_CORE_SERVER_NAME" "LEGACY_CORE_CLIENT_CERT_FILE" "LEGACY_CORE_CLIENT_KEY_FILE" }}{{- if empty (index $legacy.env $key) }}{{- fail (printf "legacy compatibility requires %s" $key) }}{{- end }}{{- end }}
+{{- if or (ne (len $legacy.secretFiles) 3) (ne (len $legacy.secretDirectories) 1) }}{{- fail "legacy compatibility requires separate CA/cert/key files and one credential directory" }}{{- end }}
+{{- if empty $legacy.network.httpsEgressPeers }}{{- fail "legacy compatibility requires explicit core/callback HTTPS egress peers" }}{{- end }}
+{{- end }}
+{{- $outbox := index .Values.workloads "outbox-worker" -}}
+{{- if $outbox.enabled }}
+{{- if $outbox.service.enabled }}{{- fail "JetStream outbox health must remain pod-private without a Service" }}{{- end }}
+{{- if ne (toString $outbox.env.APP_ENV) "production" }}{{- fail "JetStream outbox requires APP_ENV=production" }}{{- end }}
+{{- if ne (toString $outbox.env.OUTBOX_PUBLISHER) "jetstream" }}{{- fail "production outbox requires the explicit jetstream publisher" }}{{- end }}
+{{- if ne (toString $outbox.env.WORKER_ROLES) "outbox" }}{{- fail "JetStream publisher workload may run only the outbox role" }}{{- end }}
+{{- if or (not (hasPrefix "tls://" (toString $outbox.env.OUTBOX_NATS_URLS))) (contains "nats://" (toString $outbox.env.OUTBOX_NATS_URLS)) (contains "wss://" (toString $outbox.env.OUTBOX_NATS_URLS)) (contains "@" (toString $outbox.env.OUTBOX_NATS_URLS)) }}{{- fail "all outbox NATS URLs must be credential-free tls:// endpoints" }}{{- end }}
+{{- range $key := list "OUTBOX_NATS_CA_FILE" "OUTBOX_NATS_SERVER_NAME" "OUTBOX_NATS_CLIENT_CERT_FILE" "OUTBOX_NATS_CLIENT_KEY_FILE" "OUTBOX_NATS_CREDS_FILE" }}
+{{- if empty (index $outbox.env $key) }}{{- fail (printf "JetStream outbox requires %s" $key) }}{{- end }}
+{{- end }}
+{{- if hasKey $outbox.env "OUTBOX_NATS_TOKEN_FILE" }}{{- fail "Helm outbox must select exactly one external NATS credential file" }}{{- end }}
+{{- if or (ne (toString $outbox.env.OUTBOX_MAX_RETRY_DELAY) "15m") (ne (toString $outbox.env.OUTBOX_JETSTREAM_DUPLICATE_WINDOW) "30m") }}{{- fail "JetStream duplicate window must remain above the maximum retry delay" }}{{- end }}
+{{- if or (ne (toString $outbox.env.OUTBOX_JETSTREAM_MAX_AGE) "168h") (ne (toString $outbox.env.OUTBOX_JETSTREAM_MAX_BYTES) "10737418240") (ne (toString $outbox.env.OUTBOX_JETSTREAM_MAX_MESSAGES) "10000000") (ne (toString $outbox.env.OUTBOX_JETSTREAM_MAX_MESSAGE_BYTES) "1048576") (lt (int $outbox.env.OUTBOX_JETSTREAM_REPLICAS) 3) }}{{- fail "JetStream retention and size limits differ from the admitted production policy" }}{{- end }}
+{{- if ne (len $outbox.secretFiles) 4 }}{{- fail "JetStream outbox requires separate CA, client certificate, client key and credentials files" }}{{- end }}
+{{- if ne (len $outbox.network.internalEgress) 1 }}{{- fail "JetStream outbox requires exactly one internal NATS egress rule" }}{{- end }}
+{{- $natsEgress := index $outbox.network.internalEgress 0 -}}
+{{- if or (empty $natsEgress.to) (ne (len $natsEgress.ports) 1) }}{{- fail "JetStream outbox NATS egress requires explicit peers and one port" }}{{- end }}
+{{- $natsPort := index $natsEgress.ports 0 -}}
+{{- if or (ne (int $natsPort.port) 4222) (ne (toString $natsPort.protocol) "TCP") }}{{- fail "JetStream outbox egress is restricted to TCP 4222" }}{{- end }}
+{{- if not (empty $outbox.network.ingressFrom) }}{{- fail "JetStream outbox may not admit workload ingress" }}{{- end }}
+{{- if not (empty $outbox.network.httpsEgressPeers) }}{{- fail "JetStream outbox must not inherit arbitrary HTTPS egress" }}{{- end }}
+{{- end }}
+{{- $settings := index .Values.workloads "merchant-settings-api" -}}
+{{- $invitationDelivery := index .Values.workloads "merchant-invitation-delivery-worker" -}}
+{{- if and $settings.enabled (eq (toString $settings.env.MERCHANT_SETTINGS_EMAIL_INVITES_ENABLED) "true") (not $invitationDelivery.enabled) }}{{- fail "email invitations require merchant-invitation-delivery-worker" }}{{- end }}
+{{- if $invitationDelivery.enabled }}
+{{- if ne $invitationDelivery.workerIDEnv "MERCHANT_INVITATION_DELIVERY_WORKER_ID" }}{{- fail "merchant invitation delivery worker identity must come from the unique pod UID" }}{{- end }}
+{{- if not (hasPrefix "https://" (toString $invitationDelivery.env.MERCHANT_SETTINGS_INVITE_NOTIFIER_URL)) }}{{- fail "merchant invitation notifier URL must use HTTPS" }}{{- end }}
+{{- if or (empty $invitationDelivery.env.MERCHANT_INVITE_TOKEN_KEY_RING_FILE) (empty $invitationDelivery.env.MERCHANT_SETTINGS_INVITE_NOTIFIER_BEARER_FILE) (empty $invitationDelivery.env.MERCHANT_SETTINGS_INVITE_NOTIFIER_CA_FILE) }}{{- fail "merchant invitation delivery requires key ring, bearer file and pinned notifier CA paths" }}{{- end }}
+{{- if or (empty $invitationDelivery.secretFiles) (empty $invitationDelivery.secretDirectories) }}{{- fail "merchant invitation delivery requires notifier file Secrets and a token key-ring Secret" }}{{- end }}
+{{- if empty $invitationDelivery.network.httpsEgressPeers }}{{- fail "merchant invitation delivery requires an explicitly admitted notifier HTTPS egress peer" }}{{- end }}
+{{- if $invitationDelivery.service.enabled }}{{- fail "merchant invitation delivery health must remain pod-private without a Service" }}{{- end }}
+{{- end }}
+{{- $adminAPI := index .Values.workloads "admin-api" -}}
+{{- if $adminAPI.enabled }}
+{{- $merchantSettingsOrigin := printf "https://%s-merchant-settings-api.%s.svc:8447" (include "merchant.fullname" .) .Release.Namespace -}}
+{{- $merchantSettingsServerName := printf "%s-merchant-settings-api.%s.svc" (include "merchant.fullname" .) .Release.Namespace -}}
+{{- $financialOrigin := printf "https://%s-financial-api.%s.svc:8444" (include "merchant.fullname" .) .Release.Namespace -}}
+{{- $financialServerName := printf "%s-financial-api.%s.svc" (include "merchant.fullname" .) .Release.Namespace -}}
+{{- if ne $adminAPI.env.MERCHANT_SETTINGS_INTERNAL_URL $merchantSettingsOrigin }}{{- fail (printf "admin MERCHANT_SETTINGS_INTERNAL_URL must be %s" $merchantSettingsOrigin) }}{{- end }}
+{{- if ne $adminAPI.env.MERCHANT_SETTINGS_INTERNAL_SERVER_NAME $merchantSettingsServerName }}{{- fail (printf "admin merchant settings TLS server name must be %s" $merchantSettingsServerName) }}{{- end }}
+{{- if ne $adminAPI.env.FINANCIAL_INTERNAL_URL $financialOrigin }}{{- fail (printf "admin FINANCIAL_INTERNAL_URL must be %s" $financialOrigin) }}{{- end }}
+{{- if ne $adminAPI.env.FINANCIAL_INTERNAL_SERVER_NAME $financialServerName }}{{- fail (printf "admin financial TLS server name must be %s" $financialServerName) }}{{- end }}
+{{- end }}
+{{- $financialAPI := index .Values.workloads "financial-api" }}
+{{- if and $financialAPI.enabled (empty $financialAPI.network.ingressFrom) }}{{- fail "enabled financial-api requires explicit private ingress peers" }}{{- end }}
+{{- if $financialAPI.enabled }}
+{{- range $key := list "FINANCIAL_TLS_CLIENT_CA_FILE" "FINANCIAL_MONITOR_CLIENT_CERT_FILE" "FINANCIAL_MONITOR_CLIENT_KEY_FILE" "FINANCIAL_MONITOR_CA_FILE" "FINANCIAL_MONITOR_SERVER_NAME" }}
+{{- if empty (index $financialAPI.env $key) }}{{- fail (printf "financial mTLS runtime requires %s" $key) }}{{- end }}
+{{- end }}
+{{- if lt (len $financialAPI.secretFiles) 7 }}{{- fail "financial API requires distinct server, client-CA, assertion, and monitor mTLS files" }}{{- end }}
+{{- end }}
+{{- if .Values.ingress.enabled }}
+{{- if not .Values.workloads.api.enabled }}{{- fail "ingress requires workloads.api.enabled" }}{{- end }}
+{{- if not (index .Values.workloads "management-api").enabled }}{{- fail "ingress requires workloads.management-api.enabled" }}{{- end }}
+{{- if not (index .Values.workloads "admin-api").enabled }}{{- fail "ingress requires workloads.admin-api.enabled" }}{{- end }}
+{{- if empty .Values.ingress.managementAnnotations }}{{- fail "ingress requires controller-specific management HTTPS/CA/SNI annotations" }}{{- end }}
+{{- if not .Values.ingress.managementTLSVerified }}{{- fail "ingress.managementTLSVerified must attest backend CA/SNI verification" }}{{- end }}
+{{- if empty .Values.ingress.publicCapabilityRateLimitAnnotations }}{{- fail "ingress requires controller-specific capability rate-limit annotations" }}{{- end }}
+{{- if not .Values.ingress.publicCapabilityRateLimitVerified }}{{- fail "ingress.publicCapabilityRateLimitVerified must attest edge rate limiting" }}{{- end }}
+{{- if empty .Values.networkPolicy.edgeIngressFrom }}{{- fail "ingress requires explicit networkPolicy.edgeIngressFrom peers" }}{{- end }}
+{{- $managementOrigin := printf "https://%s-management-api.%s.svc:8445" (include "merchant.fullname" .) .Release.Namespace }}
+{{- $platformOrigin := printf "https://%s-platform-admin-api.%s.svc:8446" (include "merchant.fullname" .) .Release.Namespace }}
+{{- if ne (index .Values.workloads "admin-api").env.MANAGEMENT_INTERNAL_URL $managementOrigin }}{{- fail (printf "admin MANAGEMENT_INTERNAL_URL must be %s" $managementOrigin) }}{{- end }}
+{{- if ne (index .Values.workloads "admin-api").env.PLATFORM_ADMIN_INTERNAL_URL $platformOrigin }}{{- fail (printf "admin PLATFORM_ADMIN_INTERNAL_URL must be %s" $platformOrigin) }}{{- end }}
+{{- range .Values.ingress.coreAPIPaths }}
+{{- if or (hasPrefix "/v1/checkout-sessions" .) (hasPrefix "/v1/payment-links" .) (hasPrefix "/v1/public/payment-links" .) }}{{- fail "coreAPIPaths cannot claim management-owned paths" }}{{- end }}
+{{- end }}
+{{- end }}
+{{- $scanner := index .Values.workloads "scanner" -}}
+{{- if $scanner.enabled }}
+{{- if empty $scanner.env.SCANNER_PLATFORM_RUNTIME_JSON }}{{- fail "scanner requires SCANNER_PLATFORM_RUNTIME_JSON" }}{{- end }}
+{{- if empty $scanner.env.SCANNER_SECRET_DIR }}{{- fail "scanner requires a confined SCANNER_SECRET_DIR" }}{{- end }}
+{{- range $legacy := list "SCANNER_CHAIN_ID" "SCANNER_GENESIS_HASH" "SCANNER_PROVIDER_URLS" "SCANNER_UNSAFE_DEVELOPMENT_STATIC_CONFIG" }}
+{{- if hasKey $scanner.env $legacy }}{{- fail (printf "production scanner may not set legacy static key %s" $legacy) }}{{- end }}
+{{- end }}
+{{- end }}
+{{- $providerHealth := index .Values.workloads "provider-health-worker" -}}
+{{- if $providerHealth.enabled }}
+{{- if ne $providerHealth.workerIDEnv "WORKER_ID" }}{{- fail "provider health identity must come from the unique pod UID" }}{{- end }}
+{{- if ne (int $providerHealth.port) 9100 }}{{- fail "provider health must use the private 9100 port" }}{{- end }}
+{{- if ne (toString $providerHealth.env.PROVIDER_HEALTH_ADDRESS) ":9100" }}{{- fail "provider health listener contract drift" }}{{- end }}
+{{- if or (empty $providerHealth.env.PROVIDER_HEALTH_SECRET_DIR) (empty $providerHealth.secretDirectories) }}{{- fail "provider health requires a mounted credential directory" }}{{- end }}
+{{- if empty $providerHealth.network.httpsEgressPeers }}{{- fail "provider health requires explicitly admitted provider HTTPS egress peers" }}{{- end }}
+{{- end }}
+{{- $publisher := index .Values.workloads "platform-outbox-publisher" -}}
+{{- if $publisher.enabled }}
+{{- if ne (int $publisher.replicas) 1 }}{{- fail "platform outbox publisher requires one pre-provisioned unique service identity per replica" }}{{- end }}
+{{- if $publisher.service.enabled }}{{- fail "platform outbox publisher health must remain pod-private without a Service" }}{{- end }}
+{{- if ne (toString $publisher.env.PLATFORM_OUTBOX_HEALTH_ADDRESS) "127.0.0.1:9098" }}{{- fail "platform outbox publisher health must bind only to loopback" }}{{- end }}
+{{- if not (hasSuffix "/v1/platform-admin/events" (toString $publisher.env.PLATFORM_OUTBOX_DESTINATION_URL)) }}{{- fail "platform outbox publisher requires the exact HTTPS event destination path" }}{{- end }}
+{{- if not (hasPrefix "https://" (toString $publisher.env.PLATFORM_OUTBOX_DESTINATION_URL)) }}{{- fail "platform outbox publisher destination must use HTTPS" }}{{- end }}
+{{- range $key := list "PLATFORM_OUTBOX_DESTINATION_CA_FILE" "PLATFORM_OUTBOX_DESTINATION_CERT_FILE" "PLATFORM_OUTBOX_DESTINATION_KEY_FILE" "PLATFORM_OUTBOX_DESTINATION_TOKEN_FILE" }}
+{{- if empty (index $publisher.env $key) }}{{- fail (printf "platform outbox publisher requires %s" $key) }}{{- end }}
+{{- end }}
+{{- $publisherSecretNames := list -}}
+{{- range $item := $publisher.secretEnv }}{{- $publisherSecretNames = append $publisherSecretNames $item.name -}}{{- end }}
+{{- if not (has "PLATFORM_OUTBOX_DATABASE_URL" $publisherSecretNames) }}{{- fail "platform outbox database URL must come from a Secret" }}{{- end }}
+{{- if not (has "PLATFORM_OUTBOX_WORKER_ID" $publisherSecretNames) }}{{- fail "platform outbox service identity must come from a Secret" }}{{- end }}
+{{- if ne (len $publisher.secretFiles) 4 }}{{- fail "platform outbox publisher requires separate CA, client certificate, client key and bearer file refs" }}{{- end }}
+{{- if empty $publisher.network.httpsEgressPeers }}{{- fail "platform outbox publisher requires an explicit destination egress peer" }}{{- end }}
+{{- end }}
+{{- if and .Values.platformOutbox.claimExternalPublication (not $publisher.enabled) }}
+{{- fail "platform outbox publication may be claimed only with the private publisher enabled" }}
+{{- end }}
+{{- if and $publisher.enabled (not .Values.platformOutbox.claimExternalPublication) }}
+{{- fail "enabled platform outbox publisher requires an explicit external publication claim" }}
+{{- end }}
+{{- $retention := index .Values.workloads "retention-worker" -}}
+{{- if $retention.enabled }}
+{{- if $retention.service.enabled }}{{- fail "retention health must remain pod-private without a Service" }}{{- end }}
+{{- if ne $retention.workerIDEnv "RETENTION_WORKER_ID" }}{{- fail "retention worker identity must come from the unique pod UID" }}{{- end }}
+{{- if ne (toString $retention.env.APP_ENV) "production" }}{{- fail "retention worker requires APP_ENV=production" }}{{- end }}
+{{- if ne (toString $retention.env.RETENTION_OBJECT_STORE) "s3" }}{{- fail "retention worker requires the S3 Object-Lock store" }}{{- end }}
+{{- if ne (toString $retention.env.RETENTION_HEALTH_ADDRESS) ":9099" }}{{- fail "retention health must use the private :9099 listener" }}{{- end }}
+{{- if not (hasPrefix "https://" (toString $retention.env.RETENTION_S3_ENDPOINT)) }}{{- fail "retention S3 endpoint must use HTTPS" }}{{- end }}
+{{- range $key := list "RETENTION_SIGNING_PRIVATE_KEY_FILE" "RETENTION_SIGNING_KEY_ID" "RETENTION_S3_ACCESS_KEY_ID_FILE" "RETENTION_S3_SECRET_ACCESS_KEY_FILE" "RETENTION_S3_SESSION_TOKEN_FILE" }}
+{{- if empty (index $retention.env $key) }}{{- fail (printf "retention worker requires %s" $key) }}{{- end }}
+{{- end }}
+{{- $retentionSecretNames := list -}}
+{{- range $item := $retention.secretEnv }}{{- $retentionSecretNames = append $retentionSecretNames $item.name -}}{{- end }}
+{{- if not (has "RETENTION_DATABASE_URL" $retentionSecretNames) }}{{- fail "retention database URL must come from a Secret" }}{{- end }}
+{{- if ne (len $retention.secretFiles) 4 }}{{- fail "retention worker requires separate Ed25519, access-key, secret-key and session-token file refs" }}{{- end }}
+{{- if empty $retention.network.httpsEgressPeers }}{{- fail "retention worker requires an explicitly admitted S3 HTTPS egress peer" }}{{- end }}
+{{- end }}
+{{- $retentionControl := index .Values.workloads "retention-control-scheduler" -}}
+{{- $platformAdmin := index .Values.workloads "platform-admin-api" -}}
+{{- if and $platformAdmin.enabled (not $retentionControl.enabled) }}{{- fail "platform admin requires the retention control scheduler heartbeat" }}{{- end }}
+{{- if $retentionControl.enabled }}
+{{- if $retentionControl.service.enabled }}{{- fail "retention control scheduler health must remain pod-private without a Service" }}{{- end }}
+{{- if ne $retentionControl.workerIDEnv "RETENTION_CONTROL_WORKER_ID" }}{{- fail "retention control identity must come from the unique pod UID" }}{{- end }}
+{{- if ne (toString $retentionControl.env.APP_ENV) "production" }}{{- fail "retention control scheduler requires APP_ENV=production" }}{{- end }}
+{{- if ne (toString $retentionControl.env.RETENTION_CONTROL_HEALTH_ADDRESS) "127.0.0.1:9102" }}{{- fail "retention control health must bind loopback :9102" }}{{- end }}
+{{- if or (not (empty $retentionControl.network.ingressFrom)) (not (empty $retentionControl.network.internalEgress)) (not (empty $retentionControl.network.httpsEgressPeers)) }}{{- fail "retention control scheduler may reach only PostgreSQL" }}{{- end }}
+{{- end }}

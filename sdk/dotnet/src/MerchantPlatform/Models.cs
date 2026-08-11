@@ -1,0 +1,26 @@
+namespace MerchantPlatform;
+
+public sealed record RouteSelector(string Provider,string? ChainId,string? ProviderId,string AssetId) { public static RouteSelector OnChain(string chainId,string assetId)=>new("on_chain",chainId,null,assetId); public static RouteSelector HostedGateway(string providerId,string assetId)=>new("hosted_gateway",null,providerId,assetId); }
+public sealed record CreatePaymentIntentRequest(string MerchantOrderId, string AmountMinor, string Currency, int CurrencyScale, string? Description = null, string? CustomerReference = null, int? ExpiresIn = null, string? ExpiresAt = null, IReadOnlyList<RouteSelector>? AllowedRoutes = null, IReadOnlyDictionary<string, object?>? Metadata = null) { public void Validate() => Amounts.Require(AmountMinor, true); }
+public sealed record OnChainRouteRequest(string ChainId,string AssetId);
+public sealed record HostedGatewayRouteRequest(string ProviderId,string AssetId);
+public sealed record CreatePaymentRouteRequest(string Provider,OnChainRouteRequest? OnChain,HostedGatewayRouteRequest? HostedGateway,int? ExpiresIn=null) { public static CreatePaymentRouteRequest OnChainRoute(string chainId,string assetId,int? expiresIn=null)=>new("on_chain",new(chainId,assetId),null,expiresIn); public static CreatePaymentRouteRequest HostedGatewayRoute(string providerId,string assetId,int? expiresIn=null)=>new("hosted_gateway",null,new(providerId,assetId),expiresIn); }
+public sealed record CancelPaymentIntentRequest(string Reason, long? ExpectedVersion = null);
+public sealed record ExpirePaymentIntentRequest(string Reason, long ExpectedVersion);
+public sealed record UpdatePaymentIntentMetadataRequest(long ExpectedVersion, IReadOnlyDictionary<string, object?> Metadata);
+public sealed record CreateReconciliationReportRequest(string PeriodStart,string PeriodEnd,string Format="jsonl_v1");
+public sealed record SubmitPaymentProofRequest(string PaymentIntentId, string ChainId, string TransactionId);
+public sealed record PaymentRoute(string Id,string IntentId,string? ChainId,string AssetId,string Provider,string? ProviderId,string? ProviderOrderId,string? ProviderReference,string? PaymentUrl,string ExpectedAmountAtomic,int AssetDecimals,string DisplayAmount,string? Address,string? Memo,long RequiredFinality,string Status,long Version,string StartsAt,string ExpiresAt,string GraceEndsAt);
+public sealed record PaymentIntent(string Id, string MerchantId, string MerchantOrderId, string? CustomerReference, string AmountMinor, string Currency, int CurrencyScale, string? Description, string Status, string? StatusReason, IReadOnlyDictionary<string, object?>? Metadata, IReadOnlyList<RouteSelector> AllowedRoutes, long Version, string CreatedAt, string UpdatedAt, string ExpiresAt, string? SettledAt, string? CancelledAt, IReadOnlyList<PaymentRoute> Routes, string? CheckoutToken);
+public sealed record PaymentProof(string Id, string MerchantId, string PaymentIntentId, string ChainId, string TransactionId, string Status, IReadOnlyList<string> TransferEventIds, string CreatedAt, string UpdatedAt, long Version);
+public sealed record Asset(string Id, string ChainId, string Symbol, string Name, string Kind, string? Contract, int Decimals, string Status, string MinimumDepositAtomic);
+public sealed record WebhookEvent(string EventId, string EventType, string SchemaVersion, long Sequence, string OccurredAt, string MerchantId, bool Livemode, IReadOnlyDictionary<string, object?> PaymentIntent, IReadOnlyDictionary<string, object?>? Settlement, IReadOnlyDictionary<string, object?>? Observation, IReadOnlyDictionary<string, object?>? Resolution);
+public sealed record Envelope<T>(T Data, string RequestId, string ApiVersion);
+public sealed record CursorPage<T>(IReadOnlyList<T> Items, string NextCursor);
+public sealed record EventPage<T>(IReadOnlyList<T> Items,string NextCursor,string NextSequence);
+public sealed record PublicEvent(string EventId,string EventType,string SchemaVersion,string AggregateId,string AggregateType,long AggregateVersion,long Sequence,object? Payload,string OccurredAt);
+public sealed record ReconciliationReport(string Id,string Status,string Format,string PeriodStart,string PeriodEnd,string SnapshotLedgerSequence,string SnapshotCutoff,int AttemptCount,string? LastErrorCode,string? ObjectSizeBytes,string? ObjectSha256,string? Signature,string? SigningKeyId,string? DownloadPath,string CreatedAt,string UpdatedAt,string? CompletedAt,long Version);
+public sealed record ReportDownload(byte[] Bytes,string Sha256,string Signature,string SigningKeyId);
+public sealed record CheckoutRoute(string Id,string Provider,string? ProviderId,string? Network,string Asset,string Amount,string? Address,string? PaymentUrl,string? TransactionHash,string? ExplorerUrl);
+public sealed record CheckoutSession(string IntentId, string OrderId, string Status, string ExpiresAt, string SelectedRouteId, IReadOnlyList<CheckoutRoute> Routes);
+public static class Amounts { public static void Require(string value, bool positive = false) { if (value is null || value.Length > 78 || !System.Text.RegularExpressions.Regex.IsMatch(value, positive ? "^[1-9][0-9]*$" : "^(0|[1-9][0-9]*)$")) throw new ArgumentException("amount must be a canonical integer string"); } }
