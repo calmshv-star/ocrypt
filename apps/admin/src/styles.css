@@ -1,3 +1,73 @@
+/* The admin cabinet uses a neutral merchant palette. Semantic colours are
+   reserved for payment state; navigation and actions remain monochrome. */
+:root {
+  --mp-bg: #f4f4f2;
+  --mp-surface: #ffffff;
+  --mp-surface-soft: #f1f1ee;
+  --mp-surface-raised: #ffffff;
+  --mp-text: #262624;
+  --mp-text-strong: #0a0a0a;
+  --mp-muted: #686863;
+  --mp-subtle: #73736d;
+  --mp-border: #e3e3de;
+  --mp-border-strong: #cecec7;
+  --mp-primary: #181817;
+  --mp-primary-strong: #000000;
+  --mp-primary-soft: #e9e9e5;
+  --mp-primary-contrast: #ffffff;
+  --mp-info: #5d5d58;
+  --mp-info-soft: #eeeeeb;
+  --mp-shadow-xs: 0 1px 2px rgba(0, 0, 0, .04);
+  --mp-shadow-sm: 0 10px 28px rgba(0, 0, 0, .07);
+  --mp-shadow-lg: 0 28px 80px rgba(0, 0, 0, .18);
+}
+
+:root[data-theme="dark"] {
+  --mp-bg: #080808;
+  --mp-surface: #111111;
+  --mp-surface-soft: #181817;
+  --mp-surface-raised: #1d1d1c;
+  --mp-text: #d9d9d5;
+  --mp-text-strong: #fafaf7;
+  --mp-muted: #9d9d96;
+  --mp-subtle: #a7a7a0;
+  --mp-border: #292927;
+  --mp-border-strong: #3b3b37;
+  --mp-primary: #f0f0eb;
+  --mp-primary-strong: #ffffff;
+  --mp-primary-soft: #292927;
+  --mp-primary-contrast: #0a0a0a;
+  --mp-info: #bebeb6;
+  --mp-info-soft: #242422;
+  --mp-positive: #62c9a8;
+  --mp-positive-soft: #15352d;
+  --mp-warning: #e6b25f;
+  --mp-warning-soft: #382a17;
+  --mp-negative: #ed8295;
+  --mp-negative-soft: #3c2127;
+  --mp-violet: #b9a1ea;
+  --mp-violet-soft: #2d2540;
+  --mp-shadow-xs: 0 1px 2px rgba(0, 0, 0, .3);
+  --mp-shadow-sm: 0 12px 30px rgba(0, 0, 0, .32);
+  --mp-shadow-lg: 0 28px 80px rgba(0, 0, 0, .58);
+}
+
+.mp-brand__mark {
+  background: #111111;
+  box-shadow: 0 7px 18px rgba(0, 0, 0, .2);
+}
+
+.mp-workspace-switcher__icon,
+.mp-button--primary,
+.mp-skip-link {
+  color: var(--mp-primary-contrast);
+}
+
+:root .admin-overview-action.is-primary,
+:root .admin-overview-action.is-primary:hover {
+  color: var(--mp-primary-contrast);
+}
+
 .admin-page { width: min(100%, 1560px); margin: 0 auto; }
 .admin-page > * + * { margin-top: 18px; }
 .financial-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,420px),1fr)); gap: 16px; margin-top: 16px; }

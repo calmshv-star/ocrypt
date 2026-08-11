@@ -25,8 +25,10 @@ describe("shared UI", () => {
   it("renders an accessible shell and persists a theme change", () => {
     const workspaceText = "Workspace";
     const dashboardText = "Dashboard content";
+    const storageKey = "merchant-admin-theme-v2-test";
+    window.localStorage.removeItem(storageKey);
     render(
-      <ThemeProvider defaultTheme="light">
+      <ThemeProvider defaultTheme="light" storageKey={storageKey}>
         <AppShell
           labels={labels}
           navGroups={[{ label: "Operations", items: [{ href: "#/overview", icon: LayoutDashboard, label: "Overview" }] }]}
@@ -39,9 +41,10 @@ describe("shared UI", () => {
 
     expect(screen.getByRole("navigation", { name: labels.primaryNavigation })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: dashboardText })).toBeInTheDocument();
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
     fireEvent.click(screen.getByRole("button", { name: labels.theme }));
     expect(document.documentElement).toHaveAttribute("data-theme", "dark");
-    expect(window.localStorage.getItem("merchant-platform-theme")).toBe("dark");
+    expect(window.localStorage.getItem(storageKey)).toBe("dark");
   });
 
   it("keeps responsive table labels and keyboard-selectable rows", () => {

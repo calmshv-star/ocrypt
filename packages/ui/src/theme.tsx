@@ -26,14 +26,14 @@ function getSystemTheme(): ResolvedTheme {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-function getInitialTheme(defaultTheme: Theme): Theme {
+function getInitialTheme(defaultTheme: Theme, storageKey: string): Theme {
   if (typeof window === "undefined") return defaultTheme;
-  const stored = window.localStorage.getItem(STORAGE_KEY);
+  const stored = window.localStorage.getItem(storageKey);
   return stored === "light" || stored === "dark" || stored === "system" ? stored : defaultTheme;
 }
 
-export function ThemeProvider({ children, defaultTheme = "system" }: PropsWithChildren<{ defaultTheme?: Theme }>) {
-  const [theme, setThemeState] = useState<Theme>(() => getInitialTheme(defaultTheme));
+export function ThemeProvider({ children, defaultTheme = "system", storageKey = STORAGE_KEY }: PropsWithChildren<{ defaultTheme?: Theme; storageKey?: string }>) {
+  const [theme, setThemeState] = useState<Theme>(() => getInitialTheme(defaultTheme, storageKey));
   const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(getSystemTheme);
   const resolvedTheme = theme === "system" ? systemTheme : theme;
 
@@ -51,8 +51,8 @@ export function ThemeProvider({ children, defaultTheme = "system" }: PropsWithCh
 
   const setTheme = useCallback((nextTheme: Theme) => {
     setThemeState(nextTheme);
-    window.localStorage.setItem(STORAGE_KEY, nextTheme);
-  }, []);
+    window.localStorage.setItem(storageKey, nextTheme);
+  }, [storageKey]);
 
   const toggleTheme = useCallback(() => {
     setTheme(resolvedTheme === "dark" ? "light" : "dark");

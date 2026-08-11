@@ -23,7 +23,7 @@ const queryClient = new QueryClient({
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ThemeProvider>
+    <ThemeProvider defaultTheme="light" storageKey="merchant-admin-theme-v2">
       <I18nProvider>
         <QueryClientProvider client={queryClient}>
           <HashRouter>
