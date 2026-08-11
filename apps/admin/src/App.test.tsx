@@ -25,7 +25,29 @@ const principal: AdminPrincipal = {
 function client(overrides: Record<string, unknown> = {}) {
   return {
     me: vi.fn().mockResolvedValue(principal),
-    overview: vi.fn().mockResolvedValue({ open_intents: 7, settled_today: 11, unmatched: 2, webhook_backlog: 3, scanner_gap_count: 0, latest_cursor: "cursor_live_01" }),
+    overview: vi.fn().mockResolvedValue({
+      period_started_at: "2026-08-06T00:00:00Z",
+      period_ended_at: "2026-08-12T09:00:00Z",
+      created_today: 16,
+      settled_today: 11,
+      settled_created_today: 10,
+      settlement_rate_bps: 6250,
+      open_intents: 7,
+      confirming: 2,
+      partially_paid: 1,
+      reorg_review: 0,
+      unmatched: 2,
+      webhook_backlog: 3,
+      webhook_dead_letter: 1,
+      scanner_gap_count: 0,
+      settled_volume_today: [{ amount_minor:"128000", currency:"USD", currency_scale:2 }],
+      payment_flow: [
+        { date:"2026-08-06", created:10, settled:8 }, { date:"2026-08-07", created:12, settled:9 }, { date:"2026-08-08", created:9, settled:7 },
+        { date:"2026-08-09", created:14, settled:12 }, { date:"2026-08-10", created:11, settled:9 }, { date:"2026-08-11", created:15, settled:13 },
+        { date:"2026-08-12", created:16, settled:11 }
+      ],
+      recent_intents: [{ id:"20000000-0000-4000-8000-000000000010", merchant_id:merchantId, merchant_order_id:"ORDER-1042", amount_minor:"128000", currency:"USD", currency_scale:2, status:"settled", created_at:"2026-08-12T08:40:00Z", expires_at:"2026-08-12T09:00:00Z" }]
+    }),
     intents: vi.fn().mockResolvedValue({ items: [] }),
     transfers: vi.fn().mockResolvedValue({ items: [] }),
     unmatched: vi.fn().mockResolvedValue({ items: [] }),
@@ -51,7 +73,7 @@ describe("admin application", () => {
   it("renders fixture data only in explicit preview mode and localizes it", async () => {
     renderApp("/overview", { preview: true });
     expect(await screen.findByRole("heading", { name: "Payment operations" })).toBeInTheDocument();
-    expect(screen.getByText("Preview data")).toBeInTheDocument();
+    expect(screen.getAllByText("Preview data").length).toBeGreaterThan(0);
     expect(screen.getByText("Test environment")).toBeInTheDocument();
     expect(screen.getByText("Demo operator")).toBeInTheDocument();
     expect(screen.queryByText("10000000-0000-4000-8000-000000000003")).not.toBeInTheDocument();
@@ -66,9 +88,10 @@ describe("admin application", () => {
   it("loads the authenticated scope and renders only real overview values in production", async () => {
     const liveClient = client();
     renderApp("/overview", { client: liveClient, preview: false });
-    expect(await screen.findByText("cursor_live_01")).toBeInTheDocument();
-    expect(screen.getByText("7")).toBeInTheDocument();
-    expect(screen.getByText("11")).toBeInTheDocument();
+    expect((await screen.findAllByText("1,280.00 USD")).length).toBeGreaterThan(0);
+    expect(screen.getByText("ORDER-1042")).toBeInTheDocument();
+    expect(screen.getByText("Action queue")).toBeInTheDocument();
+    expect(screen.queryByText("cursor_live_01")).not.toBeInTheDocument();
     expect(screen.queryByText("Preview data")).not.toBeInTheDocument();
     expect(screen.queryByText("Atlas Commerce")).not.toBeInTheDocument();
     expect(liveClient.me).toHaveBeenCalledWith(expect.any(AbortSignal));
@@ -157,7 +180,7 @@ describe("admin application", () => {
     const logout = vi.fn().mockResolvedValue(undefined);
     const liveClient = client({ logout });
     renderApp("/overview", { client: liveClient, preview: false });
-    await screen.findByText("cursor_live_01");
+    await screen.findByText("ORDER-1042");
     fireEvent.keyDown(screen.getByRole("button", { name: "Account" }), { key: "Enter" });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Sign out" }));
     expect(await screen.findByRole("heading", { name: "Sign in required" })).toBeInTheDocument();

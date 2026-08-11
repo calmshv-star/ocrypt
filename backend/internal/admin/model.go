@@ -191,12 +191,36 @@ type AuditEntry struct {
 }
 
 type Overview struct {
-	OpenIntents     int64  `json:"open_intents"`
-	SettledToday    int64  `json:"settled_today"`
-	Unmatched       int64  `json:"unmatched"`
-	WebhookBacklog  int64  `json:"webhook_backlog"`
-	ScannerGapCount int64  `json:"scanner_gap_count"`
-	LatestCursor    string `json:"latest_cursor,omitempty"`
+	PeriodStartedAt     time.Time           `json:"period_started_at"`
+	PeriodEndedAt       time.Time           `json:"period_ended_at"`
+	CreatedToday        int64               `json:"created_today"`
+	SettledToday        int64               `json:"settled_today"`
+	SettledCreatedToday int64               `json:"settled_created_today"`
+	SettlementRateBPS   int64               `json:"settlement_rate_bps"`
+	OpenIntents         int64               `json:"open_intents"`
+	Confirming          int64               `json:"confirming"`
+	PartiallyPaid       int64               `json:"partially_paid"`
+	ReorgReview         int64               `json:"reorg_review"`
+	Unmatched           int64               `json:"unmatched"`
+	WebhookBacklog      int64               `json:"webhook_backlog"`
+	WebhookDeadLetter   int64               `json:"webhook_dead_letter"`
+	ScannerGapCount     int64               `json:"scanner_gap_count"`
+	LatestCursor        string              `json:"latest_cursor,omitempty"`
+	SettledVolumeToday  []OverviewMoney     `json:"settled_volume_today"`
+	PaymentFlow         []OverviewFlowPoint `json:"payment_flow"`
+	RecentIntents       []IntentRow         `json:"recent_intents"`
+}
+
+type OverviewMoney struct {
+	AmountMinor   string `json:"amount_minor"`
+	Currency      string `json:"currency"`
+	CurrencyScale int16  `json:"currency_scale"`
+}
+
+type OverviewFlowPoint struct {
+	Date    string `json:"date"`
+	Created int64  `json:"created"`
+	Settled int64  `json:"settled"`
 }
 
 type IntentRow struct {

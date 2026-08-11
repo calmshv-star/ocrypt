@@ -428,30 +428,159 @@ func retryableAdminTransaction(err error) bool {
 
 func (r *PostgresRepository) Overview(ctx context.Context, p Principal, s Scope) (value Overview, err error) {
 	err = r.withinScope(ctx, p, s, pgx.ReadOnly, func(tx pgx.Tx) error {
-		merchantFilter, args := scopeFilter(s, 1)
+		value.SettledVolumeToday = []OverviewMoney{}
+		value.PaymentFlow = []OverviewFlowPoint{}
+		value.RecentIntents = []IntentRow{}
+		if err := tx.QueryRow(ctx, `SELECT
+  clock_timestamp(),
+  (date_trunc('day',clock_timestamp() AT TIME ZONE 'UTC') - interval '6 days') AT TIME ZONE 'UTC'`).Scan(&value.PeriodEndedAt, &value.PeriodStartedAt); err != nil {
+			return err
+		}
+		dayStartedAt := value.PeriodStartedAt.AddDate(0, 0, 6)
+		merchantFilter, merchantArgs := scopeFilter(s, 1)
 		unmatchedFilter := ""
 		if s.MerchantID != "" {
 			unmatchedFilter = ` AND EXISTS(SELECT 1 FROM match_candidates mc JOIN payment_routes pr ON pr.id=mc.route_id AND pr.tenant_id=mc.tenant_id WHERE mc.unmatched_id=unmatched_payments.id AND cardinality(mc.disqualifiers)=0 AND pr.merchant_id=$1 AND mc.candidate_set_version=(SELECT max(latest.candidate_set_version) FROM match_candidates latest WHERE latest.unmatched_id=unmatched_payments.id AND latest.tenant_id=unmatched_payments.tenant_id))`
 		}
-		queries := []struct {
-			sql    string
-			target any
-		}{
-			{`SELECT count(*) FROM payment_intents WHERE status IN ('created','awaiting_route_selection','pending','observed','partially_paid')` + merchantFilter, &value.OpenIntents},
-			{`SELECT count(*) FROM payment_intents WHERE status='settled' AND settled_at>=date_trunc('day',clock_timestamp() AT TIME ZONE 'UTC')` + merchantFilter, &value.SettledToday},
-			{`SELECT count(*) FROM unmatched_payments WHERE status NOT IN ('resolved','ignored','invalid','reorged')` + unmatchedFilter, &value.Unmatched},
-			{`SELECT count(*) FROM callback_deliveries WHERE status IN ('pending','retry','dead_letter')`, &value.WebhookBacklog},
-			{`SELECT count(*) FROM scanner_gaps WHERE status='open'`, &value.ScannerGapCount},
+		count := func(query string, target *int64, queryArgs ...any) error {
+			return tx.QueryRow(ctx, query, queryArgs...).Scan(target)
 		}
-		for _, q := range queries {
-			queryArgs := []any{}
-			if (strings.Contains(q.sql, "payment_intents") || strings.Contains(q.sql, "match_candidates")) && s.MerchantID != "" {
-				queryArgs = args
-			}
-			if err := tx.QueryRow(ctx, q.sql, queryArgs...).Scan(q.target); err != nil {
+		dayArgs := []any{dayStartedAt}
+		dayFilter := ""
+		if s.MerchantID != "" {
+			dayArgs = append(dayArgs, s.MerchantID)
+			dayFilter = " AND merchant_id=$2"
+		}
+		if err := count(`SELECT count(*) FROM payment_intents WHERE created_at >= $1`+dayFilter, &value.CreatedToday, dayArgs...); err != nil {
+			return err
+		}
+		if err := count(`SELECT count(*) FROM payment_intents WHERE status IN ('settled','overpaid') AND settled_at >= $1`+dayFilter, &value.SettledToday, dayArgs...); err != nil {
+			return err
+		}
+		if err := count(`SELECT count(*) FROM payment_intents WHERE created_at >= $1 AND status IN ('settled','overpaid')`+dayFilter, &value.SettledCreatedToday, dayArgs...); err != nil {
+			return err
+		}
+		if value.CreatedToday > 0 {
+			value.SettlementRateBPS = value.SettledCreatedToday * 10_000 / value.CreatedToday
+		}
+		if err := count(`SELECT count(*) FROM payment_intents WHERE status IN ('created','awaiting_route_selection','pending','observed','partially_paid','confirmed')`+merchantFilter, &value.OpenIntents, merchantArgs...); err != nil {
+			return err
+		}
+		if err := count(`SELECT count(*) FROM payment_intents WHERE status IN ('observed','confirmed')`+merchantFilter, &value.Confirming, merchantArgs...); err != nil {
+			return err
+		}
+		if err := count(`SELECT count(*) FROM payment_intents WHERE status='partially_paid'`+merchantFilter, &value.PartiallyPaid, merchantArgs...); err != nil {
+			return err
+		}
+		if err := count(`SELECT count(*) FROM payment_intents WHERE status='reorg_review'`+merchantFilter, &value.ReorgReview, merchantArgs...); err != nil {
+			return err
+		}
+		if err := count(`SELECT count(*) FROM unmatched_payments WHERE status NOT IN ('resolved','ignored','invalid','reorged')`+unmatchedFilter, &value.Unmatched, merchantArgs...); err != nil {
+			return err
+		}
+		if err := count(`SELECT count(*) FROM scanner_gaps WHERE status='open'`, &value.ScannerGapCount); err != nil {
+			return err
+		}
+
+		callbackArgs := []any{}
+		callbackFilter := ""
+		if s.MerchantID != "" {
+			callbackArgs = append(callbackArgs, s.MerchantID)
+			callbackFilter = " WHERE e.merchant_id=$1"
+		}
+		if err := tx.QueryRow(ctx, `SELECT
+  count(*) FILTER (WHERE d.status IN ('pending','retry','dead_letter')),
+  count(*) FILTER (WHERE d.status='dead_letter')
+FROM callback_deliveries d
+JOIN callback_events e ON e.id=d.callback_event_id AND e.tenant_id=d.tenant_id`+callbackFilter, callbackArgs...).Scan(&value.WebhookBacklog, &value.WebhookDeadLetter); err != nil {
+			return err
+		}
+
+		volumeRows, err := tx.Query(ctx, `SELECT sum(amount_minor)::text,currency::text,currency_scale
+FROM payment_intents
+WHERE status IN ('settled','overpaid') AND settled_at >= $1`+dayFilter+`
+GROUP BY currency,currency_scale ORDER BY currency`, dayArgs...)
+		if err != nil {
+			return err
+		}
+		for volumeRows.Next() {
+			var amount OverviewMoney
+			if err := volumeRows.Scan(&amount.AmountMinor, &amount.Currency, &amount.CurrencyScale); err != nil {
+				volumeRows.Close()
 				return err
 			}
+			value.SettledVolumeToday = append(value.SettledVolumeToday, amount)
 		}
+		if err := volumeRows.Err(); err != nil {
+			volumeRows.Close()
+			return err
+		}
+		volumeRows.Close()
+
+		flowArgs := []any{value.PeriodStartedAt, value.PeriodEndedAt}
+		flowMerchantJoin := ""
+		if s.MerchantID != "" {
+			flowArgs = append(flowArgs, s.MerchantID)
+			flowMerchantJoin = " AND i.merchant_id=$3"
+		}
+		flowRows, err := tx.Query(ctx, `WITH days AS (
+  SELECT generate_series(
+    date_trunc('day',$1::timestamptz AT TIME ZONE 'UTC'),
+    date_trunc('day',$2::timestamptz AT TIME ZONE 'UTC'),
+    interval '1 day'
+  ) AS day
+)
+SELECT to_char(days.day,'YYYY-MM-DD'),
+  count(i.id) FILTER (WHERE i.created_at AT TIME ZONE 'UTC' >= days.day AND i.created_at AT TIME ZONE 'UTC' < days.day + interval '1 day'),
+  count(i.id) FILTER (WHERE i.settled_at AT TIME ZONE 'UTC' >= days.day AND i.settled_at AT TIME ZONE 'UTC' < days.day + interval '1 day')
+FROM days
+LEFT JOIN payment_intents i ON (
+  (i.created_at AT TIME ZONE 'UTC' >= days.day AND i.created_at AT TIME ZONE 'UTC' < days.day + interval '1 day')
+  OR (i.settled_at AT TIME ZONE 'UTC' >= days.day AND i.settled_at AT TIME ZONE 'UTC' < days.day + interval '1 day')
+)`+flowMerchantJoin+`
+GROUP BY days.day ORDER BY days.day`, flowArgs...)
+		if err != nil {
+			return err
+		}
+		for flowRows.Next() {
+			var point OverviewFlowPoint
+			if err := flowRows.Scan(&point.Date, &point.Created, &point.Settled); err != nil {
+				flowRows.Close()
+				return err
+			}
+			value.PaymentFlow = append(value.PaymentFlow, point)
+		}
+		if err := flowRows.Err(); err != nil {
+			flowRows.Close()
+			return err
+		}
+		flowRows.Close()
+
+		recentArgs := []any{}
+		recentFilter := ""
+		if s.MerchantID != "" {
+			recentArgs = append(recentArgs, s.MerchantID)
+			recentFilter = " WHERE merchant_id=$1"
+		}
+		recentArgs = append(recentArgs, 6)
+		recentRows, err := tx.Query(ctx, `SELECT id::text,merchant_id::text,merchant_order_id,amount_minor::text,currency,currency_scale,status::text,created_at,expires_at
+FROM payment_intents`+recentFilter+fmt.Sprintf(" ORDER BY created_at DESC,id DESC LIMIT $%d", len(recentArgs)), recentArgs...)
+		if err != nil {
+			return err
+		}
+		for recentRows.Next() {
+			var intent IntentRow
+			if err := recentRows.Scan(&intent.ID, &intent.MerchantID, &intent.MerchantOrderID, &intent.AmountMinor, &intent.Currency, &intent.CurrencyScale, &intent.Status, &intent.CreatedAt, &intent.ExpiresAt); err != nil {
+				recentRows.Close()
+				return err
+			}
+			value.RecentIntents = append(value.RecentIntents, intent)
+		}
+		if err := recentRows.Err(); err != nil {
+			recentRows.Close()
+			return err
+		}
+		recentRows.Close()
 		return nil
 	})
 	return value, classifyAdminDB(err)

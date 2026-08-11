@@ -11,7 +11,6 @@ const AssetsPage = lazy(() => import("./pages/AssetsPage").then((module) => ({ d
 const ApiClientsPage = lazy(() => import("./pages/ApiClientsPage").then((module) => ({ default: module.ApiClientsPage })));
 const AuditPage = lazy(() => import("./pages/AuditPage").then((module) => ({ default: module.AuditPage })));
 const IntentsPage = lazy(() => import("./pages/IntentsPage").then((module) => ({ default: module.IntentsPage })));
-const OverviewPage = lazy(() => import("./pages/OverviewPage").then((module) => ({ default: module.OverviewPage })));
 const ReconciliationPage = lazy(() => import("./pages/ReconciliationPage").then((module) => ({ default: module.ReconciliationPage })));
 const PaymentLinksPage = lazy(() => import("./pages/PaymentLinksPage").then((module) => ({ default: module.PaymentLinksPage })));
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then((module) => ({ default: module.SettingsPage })));
@@ -56,7 +55,7 @@ function AccessScreen({ state }: { state: "loading" | "unauthenticated" | "error
 function PreviewRoutes() {
   return <Routes>
     <Route element={<Navigate replace to="/overview" />} path="/" />
-    <Route element={<OverviewPage mode="platform" />} path="/overview" />
+    <Route element={<LiveOverviewPage />} path="/overview" />
     <Route element={<IntentsPage />} path="/intents" />
     <Route element={<TransfersPage />} path="/transfers" />
     <Route element={<UnmatchedPage />} path="/unmatched" />

@@ -1173,7 +1173,45 @@ components:
     Problem: {type: object, additionalProperties: false, required: [type,title,status,code,detail], properties: {type: {type: string}, title: {type: string}, status: {type: integer}, code: {type: string}, detail: {type: string}}}
     Scope: {type: object, additionalProperties: false, properties: {tenant_id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}}}
     Principal: {type: object, additionalProperties: false, required: [user_id,session_id,display_name,roles,permissions,scopes,amr], properties: {user_id: {$ref: '#/components/schemas/UUID'}, session_id: {$ref: '#/components/schemas/UUID'}, display_name: {type: string}, email: {type: string, format: email}, roles: {type: array, items: {type: string}}, permissions: {type: array, items: {type: string}}, scopes: {type: array, items: {$ref: '#/components/schemas/Scope'}}, acr: {type: string}, amr: {type: array, items: {type: string}}, step_up_until: {type: string, format: date-time}}}
-    Overview: {type: object, additionalProperties: false, required: [open_intents,settled_today,unmatched,webhook_backlog,scanner_gap_count], properties: {open_intents: {type: integer}, settled_today: {type: integer}, unmatched: {type: integer}, webhook_backlog: {type: integer}, scanner_gap_count: {type: integer}, latest_cursor: {type: string}}}
+    OverviewMoney:
+      type: object
+      additionalProperties: false
+      required: [amount_minor, currency, currency_scale]
+      properties:
+        amount_minor: {type: string, pattern: '^[0-9]+$'}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        currency_scale: {type: integer, minimum: 0, maximum: 9}
+    OverviewFlowPoint:
+      type: object
+      additionalProperties: false
+      required: [date, created, settled]
+      properties:
+        date: {type: string, format: date}
+        created: {type: integer, minimum: 0}
+        settled: {type: integer, minimum: 0}
+    Overview:
+      type: object
+      additionalProperties: false
+      required: [period_started_at,period_ended_at,created_today,settled_today,settled_created_today,settlement_rate_bps,open_intents,confirming,partially_paid,reorg_review,unmatched,webhook_backlog,webhook_dead_letter,scanner_gap_count,settled_volume_today,payment_flow,recent_intents]
+      properties:
+        period_started_at: {type: string, format: date-time}
+        period_ended_at: {type: string, format: date-time}
+        created_today: {type: integer, minimum: 0}
+        settled_today: {type: integer, minimum: 0}
+        settled_created_today: {type: integer, minimum: 0}
+        settlement_rate_bps: {type: integer, minimum: 0, maximum: 10000}
+        open_intents: {type: integer, minimum: 0}
+        confirming: {type: integer, minimum: 0}
+        partially_paid: {type: integer, minimum: 0}
+        reorg_review: {type: integer, minimum: 0}
+        unmatched: {type: integer, minimum: 0}
+        webhook_backlog: {type: integer, minimum: 0}
+        webhook_dead_letter: {type: integer, minimum: 0}
+        scanner_gap_count: {type: integer, minimum: 0}
+        latest_cursor: {type: string}
+        settled_volume_today: {type: array, maxItems: 64, items: {$ref: '#/components/schemas/OverviewMoney'}}
+        payment_flow: {type: array, minItems: 7, maxItems: 7, items: {$ref: '#/components/schemas/OverviewFlowPoint'}}
+        recent_intents: {type: array, maxItems: 6, items: {$ref: '#/components/schemas/Intent'}}
     Intent: {type: object, required: [id,merchant_id,merchant_order_id,amount_minor,currency,currency_scale,status,created_at,expires_at], properties: {id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, merchant_order_id: {type: string}, amount_minor: {type: string, pattern: '^[0-9]+$'}, currency: {type: string}, currency_scale: {type: integer}, status: {type: string}, created_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time}}}
     Transfer: {type: object, required: [id,chain_id,transaction_id,asset_id,amount_atomic,status,confirmations,observed_at], properties: {id: {$ref: '#/components/schemas/UUID'}, chain_id: {type: string}, transaction_id: {type: string}, asset_id: {type: string}, amount_atomic: {type: string, pattern: '^[0-9]+$'}, status: {type: string}, confirmations: {type: integer}, observed_at: {type: string, format: date-time}}}
     Candidate: {type: object, required: [id,route_id,rank,score,evidence,disqualified], properties: {id: {$ref: '#/components/schemas/UUID'}, route_id: {$ref: '#/components/schemas/UUID'}, rank: {type: integer}, score: {type: integer}, evidence: {type: object}, disqualified: {type: boolean}}}

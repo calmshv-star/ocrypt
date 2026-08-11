@@ -1,13 +1,49 @@
 import { useI18n, type MessageKey } from "@merchant/i18n";
 import { Badge, Button, DataTable, Input, PageHeader, SectionCard, StatCard, StatusBadge, type DataTableColumn } from "@merchant/ui";
 import { useQueryClient } from "@tanstack/react-query";
-import { Activity, FileClock, Fingerprint, RadioTower, RefreshCw, Scale, Webhook } from "lucide-react";
+import { Activity, AlertTriangle, ArrowRight, CheckCircle2, CircleDollarSign, Clock3, FileClock, Fingerprint, RadioTower, RefreshCw, Scale, Webhook } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { isStepUpError, useAdmin, useAdminQuery } from "./AdminProvider";
-import type { ActionRequest, AdminScope, AssetRow, AuditRow, IntentRow, Page, Permission, ReconciliationRow, TransferRow, UnmatchedRow, WebhookRow } from "./api/types";
+import type { ActionRequest, AdminScope, AssetRow, AuditRow, IntentRow, Overview, Page, Permission, ReconciliationRow, TransferRow, UnmatchedRow, WebhookRow } from "./api/types";
 
 type Resource = "intents" | "transfers" | "assets" | "reconciliation" | "audit";
 type DisplayRow = { id: string; cells: ReactNode[] };
+
+const previewOverview: Overview = {
+  period_started_at: "2026-08-06T00:00:00Z",
+  period_ended_at: "2026-08-12T09:35:00Z",
+  created_today: 143,
+  settled_today: 131,
+  settled_created_today: 126,
+  settlement_rate_bps: 8811,
+  open_intents: 12,
+  confirming: 7,
+  partially_paid: 2,
+  reorg_review: 0,
+  unmatched: 1,
+  webhook_backlog: 4,
+  webhook_dead_letter: 1,
+  scanner_gap_count: 0,
+  settled_volume_today: [
+    { amount_minor: "428650000", currency: "RUB", currency_scale: 2 },
+    { amount_minor: "1864000", currency: "USD", currency_scale: 2 },
+  ],
+  payment_flow: [
+    { date: "2026-08-06", created: 119, settled: 111 },
+    { date: "2026-08-07", created: 126, settled: 118 },
+    { date: "2026-08-08", created: 101, settled: 96 },
+    { date: "2026-08-09", created: 108, settled: 102 },
+    { date: "2026-08-10", created: 134, settled: 125 },
+    { date: "2026-08-11", created: 151, settled: 141 },
+    { date: "2026-08-12", created: 143, settled: 131 },
+  ],
+  recent_intents: [
+    { id: "20000000-0000-4000-8000-000000000061", merchant_id: "10000000-0000-4000-8000-000000000002", merchant_order_id: "ORDER-1061", amount_minor: "49900", currency: "RUB", currency_scale: 2, status: "settled", created_at: "2026-08-12T09:31:00Z", expires_at: "2026-08-12T09:51:00Z" },
+    { id: "20000000-0000-4000-8000-000000000060", merchant_id: "10000000-0000-4000-8000-000000000002", merchant_order_id: "ORDER-1060", amount_minor: "129900", currency: "RUB", currency_scale: 2, status: "confirmed", created_at: "2026-08-12T09:28:00Z", expires_at: "2026-08-12T09:48:00Z" },
+    { id: "20000000-0000-4000-8000-000000000059", merchant_id: "10000000-0000-4000-8000-000000000002", merchant_order_id: "ORDER-1059", amount_minor: "79900", currency: "RUB", currency_scale: 2, status: "partially_paid", created_at: "2026-08-12T09:22:00Z", expires_at: "2026-08-12T09:42:00Z" },
+    { id: "20000000-0000-4000-8000-000000000058", merchant_id: "10000000-0000-4000-8000-000000000002", merchant_order_id: "ORDER-1058", amount_minor: "249900", currency: "RUB", currency_scale: 2, status: "pending", created_at: "2026-08-12T09:16:00Z", expires_at: "2026-08-12T09:36:00Z" },
+  ],
+};
 
 function pageItems<T>(
   page: Page<T> | undefined,
@@ -53,27 +89,141 @@ function PageState({ permission, query, children }: { permission: Permission; qu
 }
 
 export function LiveOverviewPage() {
-  const { t } = useI18n();
-  const { can } = useAdmin();
+  const { locale, t } = useI18n();
+  const admin = useAdmin();
+  const { can } = admin;
   const query = useAdminQuery("overview", "dashboard:read", (client, scope) => client.overview(scope));
+  const overview = admin.preview ? previewOverview : query.data;
+  const queryState = admin.preview ? { isPending: false, isError: false, refetch: query.refetch } : query;
+  const volumes = Array.isArray(overview?.settled_volume_today) ? overview.settled_volume_today : [];
+  const flow = Array.isArray(overview?.payment_flow) ? overview.payment_flow : [];
+  const recent = Array.isArray(overview?.recent_intents) ? overview.recent_intents : [];
+  const actionCount = overview ? overview.unmatched + overview.partially_paid + overview.reorg_review + overview.webhook_dead_letter : 0;
   return <div className="admin-page">
-    <PageHeader description={t("page.overview.description")} eyebrow={<><Activity size={13} />{t("admin.connected")}</>} title={t("page.overview.title")} />
-    <PageState permission="dashboard:read" query={query}>
-      {query.data ? <>
+    <PageHeader
+      actions={<><a className="admin-overview-action" href="#/intents">{t("overview.allPayments")}<ArrowRight size={14} /></a><a className="admin-overview-action is-primary" href="#/payment-links">{t("overview.createPaymentLink")}<ArrowRight size={14} /></a></>}
+      description={t("page.overview.description")}
+      eyebrow={<><Activity size={13} />{t(admin.preview ? "common.previewData" : "admin.connected")}</>}
+      title={t("page.overview.title")}
+    />
+    <PageState permission="dashboard:read" query={queryState}>
+      {overview ? <>
         <section aria-label={t("overview.keyMetrics")} className="admin-stat-grid">
-          <StatCard label={t("admin.openIntents")} value={String(query.data.open_intents)} />
-          <StatCard label={t("admin.settledToday")} value={String(query.data.settled_today)} />
-          <StatCard label={t("overview.unmatched")} value={String(query.data.unmatched)} />
-          <StatCard label={t("admin.webhookBacklog")} value={String(query.data.webhook_backlog)} />
-          <StatCard label={t("admin.scannerGaps")} value={String(query.data.scanner_gap_count)} />
+          <StatCard
+            changeLabel={t("overview.today")}
+            icon={<CircleDollarSign size={16} />}
+            label={t("overview.todayVolume")}
+            value={volumes.length > 0
+              ? <span className="admin-overview-money">{volumes.slice(0, 2).map((amount) => <span key={`${amount.currency}:${amount.currency_scale}`}>{formatOverviewMoney(amount.amount_minor, amount.currency_scale, amount.currency, locale)}</span>)}{volumes.length > 2 && <small>{t("overview.moreCurrencies", { count: volumes.length - 2 })}</small>}</span>
+              : <span className="admin-overview-empty-value">—</span>}
+          />
+          <StatCard
+            change={`${formatBasisPoints(overview.settlement_rate_bps)}%`}
+            changeLabel={t("overview.ofCreatedToday", { settled: overview.settled_created_today, created: overview.created_today })}
+            icon={<CheckCircle2 size={16} />}
+            label={t("overview.settledToday")}
+            trend={overview.settlement_rate_bps >= 9000 ? "up" : "flat"}
+            value={String(overview.settled_today)}
+          />
+          <StatCard
+            changeLabel={t("overview.confirmingCount", { count: overview.confirming })}
+            icon={<Clock3 size={16} />}
+            label={t("overview.inProgress")}
+            trend="flat"
+            value={String(overview.open_intents)}
+          />
+          <StatCard
+            changeLabel={actionCount === 0 ? t("overview.noActions") : t("overview.openIssues")}
+            icon={<AlertTriangle size={16} />}
+            label={t("overview.needsAction")}
+            trend={actionCount === 0 ? "up" : "down"}
+            value={String(actionCount)}
+          />
         </section>
-        {query.data.latest_cursor && <SectionCard title={t("admin.latestCursor")}><code className="admin-live-code">{query.data.latest_cursor}</code></SectionCard>}
+
+        <section className="admin-live-overview-grid">
+          <SectionCard className="admin-live-flow-card" description={t("overview.flowDescriptionShort")} title={t("overview.flowTitleSevenDays")}>
+            <div className="admin-live-flow-legend"><span className="is-created">{t("overview.created")}</span><span className="is-settled">{t("overview.settled")}</span></div>
+            <div className="admin-live-flow-chart">
+              {flow.map((point) => {
+                const max = Math.max(...flow.flatMap((item) => [item.created, item.settled]), 1);
+                const label = formatOverviewDay(point.date, locale);
+                return <div aria-label={`${label}: ${t("overview.created")} ${point.created}, ${t("overview.settled")} ${point.settled}`} className="admin-live-flow-day" key={point.date} role="img">
+                  <span className="admin-live-flow-bars"><i className="is-created" style={{ height: `${Math.max(4, point.created / max * 100)}%` }} /><i className="is-settled" style={{ height: `${Math.max(4, point.settled / max * 100)}%` }} /></span>
+                  <small>{label}</small>
+                </div>;
+              })}
+            </div>
+          </SectionCard>
+
+          <SectionCard className="admin-live-actions-card" description={t("overview.actionQueueDescription")} title={t("overview.actionQueue")}>
+            {actionCount === 0
+              ? <div className="admin-live-actions-empty"><CheckCircle2 size={22} /><strong>{t("overview.noActions")}</strong><span>{t("overview.noActionsDescription")}</span></div>
+              : <div className="admin-live-action-list">
+                  <OverviewAction href="#/unmatched" label={t("overview.unmatchedPayments")} severity="violet" value={overview.unmatched} />
+                  <OverviewAction href="#/intents" label={t("overview.partialPayments")} severity="warning" value={overview.partially_paid} />
+                  <OverviewAction href="#/intents" label={t("overview.reorgReview")} severity="negative" value={overview.reorg_review} />
+                  <OverviewAction href="#/webhooks" label={t("overview.webhookFailures")} severity="negative" value={overview.webhook_dead_letter} />
+                </div>}
+            {(overview.webhook_backlog > 0 || overview.scanner_gap_count > 0) && <div className="admin-live-health-note"><Webhook size={14} /><span>{t("overview.deliveryHealth", { callbacks: overview.webhook_backlog, gaps: overview.scanner_gap_count })}</span></div>}
+          </SectionCard>
+        </section>
+
+        <SectionCard
+          action={<span className="domain-freshness"><Clock3 size={12} />{t("overview.updatedAt", { value: formatDate(overview.period_ended_at, locale) })}</span>}
+          description={t("overview.recentPaymentsDescription")}
+          title={t("overview.recentPayments")}
+        >
+          {recent.length === 0
+            ? <StatePanel state="empty" />
+            : <div className="admin-live-recent-list">
+                <div aria-hidden="true" className="admin-live-recent-head"><span>{t("admin.reference")}</span><span>{t("common.amount")}</span><span>{t("common.status")}</span><span>{t("admin.createdAt")}</span></div>
+                {recent.map((intent) => <a className="admin-live-recent-row" href="#/intents" key={intent.id}>
+                  <span><strong>{intent.merchant_order_id}</strong><code>{short(intent.id)}</code></span>
+                  <strong>{formatOverviewMoney(intent.amount_minor, intent.currency_scale, intent.currency, locale)}</strong>
+                  <StatusBadge status={intent.status}>{t(overviewIntentStatusKey(intent.status))}</StatusBadge>
+                  <time dateTime={intent.created_at}>{formatDate(intent.created_at, locale)}</time>
+                </a>)}
+              </div>}
+        </SectionCard>
       </>
       : can("dashboard:read")
         ? <StatePanel state="empty" />
         : null}
     </PageState>
   </div>;
+}
+
+function OverviewAction({ href, label, severity, value }: { href:string;label:ReactNode;severity:"violet"|"warning"|"negative";value:number }) {
+  if (value <= 0) return null;
+  return <a className={`admin-live-action-row is-${severity}`} href={href}><span><strong>{label}</strong><small>{value}</small></span><ArrowRight size={15} /></a>;
+}
+
+function formatBasisPoints(value:number) {
+  return (Math.max(0, value) / 100).toFixed(2).replace(/\.00$/, "");
+}
+
+function formatOverviewMoney(value:string, scale:number, currency:string, locale:string) {
+  const exact = formatExactMinor(value, scale);
+  const [integer = "0", fraction] = exact.split(".");
+  let grouped = integer;
+  try { grouped = new Intl.NumberFormat(locale, { maximumFractionDigits:0 }).format(BigInt(integer)); } catch { grouped = integer; }
+  return `${grouped}${fraction ? `.${fraction}` : ""} ${currency}`;
+}
+
+function formatOverviewDay(value:string, locale:string) {
+  const parsed = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed) ? new Intl.DateTimeFormat(locale, { weekday:"short", timeZone:"UTC" }).format(parsed) : value;
+}
+
+function overviewIntentStatusKey(status:string):MessageKey {
+  if (status === "settled") return "status.settled";
+  if (status === "observed") return "status.observed";
+  if (status === "confirmed") return "status.confirmed";
+  if (status === "partially_paid") return "status.partiallyPaid";
+  if (status === "expired" || status === "cancelled") return "status.expired";
+  if (status === "needs_review" || status === "reorg_review" || status === "overpaid" || status === "reversed") return "status.needsReview";
+  return "status.pending";
 }
 
 function resourcePermission(resource: Resource): Permission {
