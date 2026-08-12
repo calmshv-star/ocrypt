@@ -45,7 +45,7 @@ export type Overview = {
   recent_intents:IntentRow[];
 };
 export type IntentRow = { id:string;merchant_id:string;merchant_order_id:string;amount_minor:string;currency:string;currency_scale:number;status:string;created_at:string;expires_at:string };
-export type TransferRow = { id:string;chain_id:string;transaction_id:string;asset_id:string;amount_atomic:string;status:string;confirmations:number;observed_at:string };
+export type TransferRow = { id:string;chain_id:string;transaction_id:string;asset_id:string;asset_symbol:string;asset_decimals:number;amount_atomic:string;status:string;confirmations:number;observed_at:string };
 export type CandidateRow = { id:string;route_id:string;rank:number;score:number;evidence:unknown;disqualified:boolean };
 export type UnmatchedRow = { id:string;event_id:string;classification:string;status:string;severity:string;assigned_operator_id?:string;version:number;created_at:string;candidates:CandidateRow[] };
 export type WebhookRow = { id:string;merchant_id:string;url:string;status:string;failure_count:number;last_success_at?:string };

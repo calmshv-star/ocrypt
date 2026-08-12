@@ -67,7 +67,7 @@ export const ru = {
   "page.intents.title": "Платёжные намерения",
   "page.intents.description": "Неизменяемые требования оплаты, маршруты, котировки и состояние расчётов.",
   "page.transfers.title": "Ончейн-переводы",
-  "page.transfers.description": "Нормализованные события с finality, matching и исходными доказательствами.",
+  "page.transfers.description": "Переводы из блокчейнов с подтверждениями, сопоставлением и исходными доказательствами.",
   "page.unmatched.title": "Очередь неопознанных",
   "page.unmatched.description": "Безопасный разбор неоднозначных, поздних, неполных и wrong-asset переводов.",
   "page.webhooks.title": "Доставка webhooks",

@@ -97,6 +97,19 @@ func TestOverviewWebhookHealthIsMerchantScopedAndReadable(t *testing.T) {
 	}
 }
 
+func TestTransferRowsExposeHumanAmountMetadata(t *testing.T) {
+	repository, err := os.ReadFile("postgres.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(repository)
+	for _, fragment := range []string{"JOIN assets a ON a.id=e.asset_id AND a.chain_id=e.chain_id", "a.symbol,a.decimals", "&v.AssetSymbol, &v.AssetDecimals, &v.AmountAtomic"} {
+		if !strings.Contains(source, fragment) {
+			t.Errorf("transfer list is missing display amount metadata: %q", fragment)
+		}
+	}
+}
+
 func TestManualResolutionBridgePersistsAndRechecksCandidateVersion(t *testing.T) {
 	raw, err := os.ReadFile("postgres.go")
 	if err != nil {
