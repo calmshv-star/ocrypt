@@ -33,7 +33,7 @@ export function IntentsPage() {
   return (
     <div className="admin-page">
       <PageHeader
-        actions={<><Button variant="secondary"><Download size={15} />{t("common.export")}</Button><Button><Plus size={16} />{t("intents.create")}</Button></>}
+        actions={<><Button disabled variant="secondary"><Download size={15} />{t("common.export")}</Button><Button disabled><Plus size={16} />{t("intents.create")}</Button></>}
         description={t("page.intents.description")}
         eyebrow={<><ReceiptText size={13} />{t("common.previewData")}</>}
         title={t("page.intents.title")}
@@ -47,8 +47,8 @@ export function IntentsPage() {
           <option value="confirming">{t("status.confirming")}</option>
           <option value="needs_review">{t("status.needsReview")}</option>
         </Select>
-        <Button variant="secondary"><CalendarRange size={15} />{t("common.last24Hours")}</Button>
-        <Button variant="secondary"><Filter size={15} />{t("common.filters")}</Button>
+        <Button disabled variant="secondary"><CalendarRange size={15} />{t("common.last24Hours")}</Button>
+        <Button disabled variant="secondary"><Filter size={15} />{t("common.filters")}</Button>
       </Toolbar>
       <DataTable columns={columns} data={filtered} empty={t("common.noResults")} getRowKey={(intent) => intent.id} nextLabel={t("common.next")} onRowClick={setSelected} page={1} pages={8} previousLabel={t("common.previous")} rowsLabel={t("common.rows")} />
 

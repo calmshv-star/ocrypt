@@ -13,12 +13,12 @@ export function AssetsPage() {
     { key: "latency", header: t("assets.latency"), render: (provider) => provider.latency },
     { key: "cursor", header: t("assets.cursor"), render: (provider) => provider.cursor },
     { key: "status", header: t("common.status"), render: (provider) => <StatusBadge status={provider.status}>{t(provider.status === "healthy" ? "status.healthy" : provider.status === "degraded" ? "status.degraded" : "status.paused")}</StatusBadge> },
-    { key: "test", header: "", render: () => <Button size="sm" variant="quiet"><RefreshCw size={13} />{t("assets.test")}</Button> }
+    { key: "test", header: "", render: () => <Button disabled size="sm" variant="quiet"><RefreshCw size={13} />{t("assets.test")}</Button> }
   ];
 
   return (
     <div className="admin-page">
-      <PageHeader actions={<><Button variant="secondary"><Activity size={15} />{t("assets.scannerJobs")}</Button><Button><Plus size={15} />{t("assets.onboard")}</Button></>} description={t("page.assets.description")} eyebrow={<><RadioTower size={13} />{t("assets.dataPlane")}</>} title={t("page.assets.title")} />
+      <PageHeader actions={<><Button disabled variant="secondary"><Activity size={15} />{t("assets.scannerJobs")}</Button><Button disabled><Plus size={15} />{t("assets.onboard")}</Button></>} description={t("page.assets.description")} eyebrow={<><RadioTower size={13} />{t("assets.dataPlane")}</>} title={t("page.assets.title")} />
       <section className="admin-stat-grid">
         <StatCard icon={<Server size={16} />} label={t("assets.providerQuorum")} value="15 / 16" change={t("assets.oneQuarantined")} trend="down" />
         <StatCard icon={<Gauge size={16} />} label={t("assets.scannerLag")} value="2.4 s" change="p95" trend="flat" />

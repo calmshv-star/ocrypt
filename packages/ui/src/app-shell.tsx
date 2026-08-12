@@ -39,6 +39,7 @@ export type ShellNavItem = {
 export type ShellNavGroup = {
   label: string;
   items: ShellNavItem[];
+  collapsible?: boolean;
 };
 
 type SignOutHandler = () =>
@@ -104,10 +105,8 @@ function SidebarContent({
         {!collapsed && environment}
       </div>
       <nav aria-label={labels.primaryNavigation} className="mp-sidebar__nav">
-        {navGroups.map((group) => (
-          <div className="mp-nav-group" key={group.label}>
-            {!collapsed && <p className="mp-nav-group__label">{group.label}</p>}
-            {group.items.map((item) => {
+        {navGroups.map((group) => {
+          const items = group.items.map((item) => {
               const Icon = item.icon;
               const itemKey = `${group.label}:${item.href}:${item.label}`;
               const link = (
@@ -129,9 +128,10 @@ function SidebarContent({
                   <Tooltip.Portal><Tooltip.Content className="mp-tooltip" side="right" sideOffset={8}>{item.label}</Tooltip.Content></Tooltip.Portal>
                 </Tooltip.Root>
               ) : link;
-            })}
-          </div>
-        ))}
+            });
+          if (group.collapsible && !collapsed) return <details className="mp-nav-group" key={group.label} open={group.items.some((item) => item.active)}><summary className="mp-nav-group__label">{group.label}</summary>{items}</details>;
+          return <div className="mp-nav-group" key={group.label}>{!collapsed && <p className="mp-nav-group__label">{group.label}</p>}{items}</div>;
+        })}
       </nav>
       <div className="mp-sidebar__foot">
         <span className="mp-health-dot" />
@@ -166,6 +166,10 @@ export function AppShell({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const notificationItems = useMemo(() => {
+    const preferred = new Set(["#/unmatched", "#/webhooks", "#/management-actions"]);
+    return navGroups.flatMap((group) => group.items).filter((item) => preferred.has(item.href));
+  }, [navGroups]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -217,17 +221,29 @@ export function AppShell({
             {headerStart}
           </div>
           <div className="mp-topbar__actions">
-            <Button className="mp-command-trigger" onClick={() => setCommandOpen(true)} variant="quiet">
+            <Button aria-label={labels.commandMenu} className="mp-command-trigger" onClick={() => setCommandOpen(true)} variant="quiet">
               <Search aria-hidden="true" size={16} />
               <span>{labels.searchPlaceholder}</span>
               <kbd><Command size={11} />{"K"}</kbd>
             </Button>
             {headerEnd}
             <ThemeToggle label={labels.theme} />
-            <span className="mp-icon-button-wrap">
-              <IconButton label={labels.notifications}><Bell aria-hidden="true" size={18} /></IconButton>
-              <span className="mp-notification-dot" />
-            </span>
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <IconButton label={labels.notifications}><Bell aria-hidden="true" size={18} /></IconButton>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content align="end" className="mp-menu mp-notification-menu" sideOffset={8}>
+                  <div className="mp-menu__profile"><strong>{labels.notifications}</strong></div>
+                  <DropdownMenu.Separator className="mp-menu__separator" />
+                  {notificationItems.length === 0 && <p className="mp-notification-menu__empty">{labels.noResults}</p>}
+                  {notificationItems.map((item) => {
+                    const Icon = item.icon;
+                    return <DropdownMenu.Item asChild key={item.href}><a className="mp-menu__item mp-notification-menu__item" href={item.href} onClick={handleNavigate}><Icon aria-hidden="true" size={16} /><span>{item.label}</span>{item.badge !== undefined && <Badge tone="neutral">{item.badge}</Badge>}</a></DropdownMenu.Item>;
+                  })}
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
                 <button aria-label={labels.account} className="mp-user-trigger">

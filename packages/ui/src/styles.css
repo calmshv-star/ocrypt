@@ -136,15 +136,19 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .mp-workspace-switcher strong, .mp-workspace-switcher small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mp-workspace-switcher strong { color: var(--mp-text-strong); font-size: 12px; }
 .mp-workspace-switcher small { color: var(--mp-muted); font-size: 10px; }
-.mp-sidebar__nav { flex: 1; overflow: auto; padding: 10px 12px 70px; scrollbar-width: thin; }
+.mp-sidebar__nav { min-height: 0; flex: 1; overflow: auto; padding: 10px 12px; scrollbar-width: thin; }
 .mp-nav-group + .mp-nav-group { margin-top: 21px; }
 .mp-nav-group__label { margin: 0 10px 7px; color: var(--mp-subtle); font-size: 10px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.mp-nav-group > summary.mp-nav-group__label { display: flex; min-height: 30px; align-items: center; justify-content: space-between; cursor: pointer; list-style: none; }
+.mp-nav-group > summary.mp-nav-group__label::-webkit-details-marker { display: none; }
+.mp-nav-group > summary.mp-nav-group__label::after { color: var(--mp-muted); content: "+"; font-size: 14px; font-weight: 500; letter-spacing: 0; }
+.mp-nav-group[open] > summary.mp-nav-group__label::after { content: "−"; }
 .mp-nav-item { display: flex; min-height: 40px; align-items: center; gap: 11px; border-radius: 10px; padding: 0 10px; color: var(--mp-muted); font-weight: 590; transition: color .15s ease, background-color .15s ease; }
 .mp-nav-item:hover { background: var(--mp-surface-soft); color: var(--mp-text-strong); }
 .mp-nav-item.is-active { background: var(--mp-primary-soft); color: var(--mp-primary); font-weight: 720; }
 .mp-nav-item .mp-badge { margin-left: auto; }
 .mp-nav-item.is-collapsed { justify-content: center; padding: 0; }
-.mp-sidebar__foot { position: absolute; inset: auto 12px 12px; display: flex; min-height: 38px; align-items: center; gap: 9px; border: 1px solid var(--mp-border); border-radius: 10px; background: var(--mp-surface-soft); padding: 0 11px; color: var(--mp-muted); font-size: 11px; }
+.mp-sidebar__foot { position: static; display: flex; min-height: 38px; flex: 0 0 auto; align-items: center; gap: 9px; margin: 8px 12px 12px; border: 1px solid var(--mp-border); border-radius: 10px; background: var(--mp-surface-soft); padding: 0 11px; color: var(--mp-muted); font-size: 11px; }
 .mp-health-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mp-positive); box-shadow: 0 0 0 4px color-mix(in srgb, var(--mp-positive) 12%, transparent); }
 .mp-sidebar__collapse { position: absolute; top: 80px; right: -16px; width: 31px; min-width: 31px; height: 31px; min-height: 31px; border: 1px solid var(--mp-border); border-radius: 50%; background: var(--mp-surface); box-shadow: var(--mp-shadow-sm); }
 .mp-shell.is-collapsed .mp-sidebar__workspace { display: none; }
@@ -164,7 +168,6 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .mp-user-trigger__text strong { color: var(--mp-text-strong); font-size: 11px; }
 .mp-user-trigger__text small { color: var(--mp-muted); font-size: 9px; }
 .mp-icon-button-wrap { position: relative; display: inline-flex; }
-.mp-notification-dot { position: absolute; right: 7px; top: 7px; width: 7px; height: 7px; border: 2px solid var(--mp-bg); border-radius: 50%; background: var(--mp-negative); }
 .mp-mobile-menu { display: none; }
 .mp-main { min-height: 100vh; padding: calc(var(--mp-topbar-height) + 27px) clamp(18px, 2.4vw, 36px) 48px; }
 
@@ -176,6 +179,9 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .mp-menu__separator { height: 1px; margin: 5px -6px; background: var(--mp-border); }
 .mp-menu__item { border-radius: 7px; padding: 8px 9px; color: var(--mp-text); font-size: 12px; outline: none; }
 .mp-menu__item[data-highlighted] { background: var(--mp-surface-soft); color: var(--mp-text-strong); }
+.mp-notification-menu { width: min(310px, calc(100vw - 24px)); }
+.mp-notification-menu__item { display: grid; min-height: 42px; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.mp-notification-menu__empty { margin: 8px 9px; color: var(--mp-muted); font-size: 11px; }
 .mp-dialog-overlay { position: fixed; z-index: 80; inset: 0; background: rgba(9, 14, 27, .55); backdrop-filter: blur(4px); animation: mp-fade-in .16s ease both; }
 @keyframes mp-fade-in { from { opacity: 0; } }
 .mp-mobile-drawer { position: fixed; z-index: 90; inset: 0 auto 0 0; display: flex; width: min(88vw, 312px); flex-direction: column; background: var(--mp-surface); box-shadow: var(--mp-shadow-lg); animation: mp-drawer-in .2s ease both; }

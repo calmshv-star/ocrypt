@@ -63,7 +63,7 @@ export function UnmatchedPage() {
   return (
     <div className="admin-page">
       <PageHeader
-        actions={<><Button variant="secondary"><RefreshCw size={15} />{t("unmatched.refreshCandidates")}</Button><Button><UserRoundCheck size={15} />{t("unmatched.claim")}</Button></>}
+        actions={<><Button disabled variant="secondary"><RefreshCw size={15} />{t("unmatched.refreshCandidates")}</Button><Button disabled><UserRoundCheck size={15} />{t("unmatched.claim")}</Button></>}
         description={t("page.unmatched.description")}
         eyebrow={<><Fingerprint size={13} />{t("unmatched.policyReview")}</>}
         title={t("page.unmatched.title")}
@@ -74,7 +74,7 @@ export function UnmatchedPage() {
           <option value="all">{t("common.allReasons")}</option>
           <option value="late">{t("unmatched.late")}</option><option value="underpaid">{t("unmatched.underpaid")}</option><option value="wrong_asset">{t("unmatched.wrongAsset")}</option><option value="ambiguous">{t("unmatched.ambiguous")}</option>
         </Select>
-        <Button variant="secondary">{t("unmatched.myCases")}</Button>
+        <Button disabled variant="secondary">{t("unmatched.myCases")}</Button>
         <Badge tone="violet">{t("unmatched.queueSummary")}</Badge>
       </Toolbar>
 
@@ -97,7 +97,7 @@ export function UnmatchedPage() {
           <section className="unmatched-review">
             <div className="unmatched-review__head">
               <div><span>CASE</span><h2>{selected.id}</h2><p>{t(reasonKeys[selected.reason])} · {t("common.createdAgo", { age: formatDuration(selected.age) })}</p></div>
-              <div><RiskBadge risk={selected.risk} /><Button size="sm" variant="secondary">⋯</Button></div>
+              <div><RiskBadge risk={selected.risk} /><Button aria-label={t("common.more")} disabled size="sm" variant="secondary">⋯</Button></div>
             </div>
             <div className="unmatched-review__facts">
               <div><span>{t("common.amount")}</span><strong>{selected.amount}</strong><small>{selected.fiat} {t("common.atBlockTime")}</small></div>
@@ -117,30 +117,30 @@ export function UnmatchedPage() {
               </section>
 
               <section className="unmatched-candidates">
-                <div className="unmatched-section-title"><div><h3>{t("unmatched.candidates")}</h3><p>{t("unmatched.deterministicOnly")}</p></div><Button size="sm" variant="secondary"><Sparkles size={14} />{t("unmatched.requestAiRank")}</Button></div>
+                <div className="unmatched-section-title"><div><h3>{t("unmatched.candidates")}</h3><p>{t("unmatched.deterministicOnly")}</p></div><Button disabled size="sm" variant="secondary"><Sparkles size={14} />{t("unmatched.requestAiRank")}</Button></div>
                 <AIAdvisory title={t("unmatched.aiRank")}>{t("unmatched.aiBody")}</AIAdvisory>
                 <div className="unmatched-candidate-list">
-                  {selected.candidates.length === 0 && <div className="unmatched-no-candidate"><strong>{t("unmatched.noCandidate")}</strong><p>{t("unmatched.noCandidateBody")}</p><Button size="sm" variant="secondary">{t("unmatched.auditedSearch")}</Button></div>}
+                  {selected.candidates.length === 0 && <div className="unmatched-no-candidate"><strong>{t("unmatched.noCandidate")}</strong><p>{t("unmatched.noCandidateBody")}</p><Button disabled size="sm" variant="secondary">{t("unmatched.auditedSearch")}</Button></div>}
                   {selected.candidates.map((candidate, index) => (
                     <article className="unmatched-candidate" key={candidate.intentId}>
                       <div className="unmatched-candidate__rank"><span>#{index + 1}</span><strong>{candidate.score}%</strong></div>
                       <div className="unmatched-candidate__body"><div><strong>{candidate.orderId}</strong><code>{candidate.intentId}</code><small>{candidate.merchant}</small></div><ProgressBar label={t("unmatched.candidateScore", { score: candidate.score })} tone={candidate.score > 90 ? "positive" : "warning"} value={candidate.score} /><ul>{candidate.evidence.map((evidence) => <li key={evidence}><CheckCircle2 size={13} />{evidenceKeys[evidence] ? t(evidenceKeys[evidence]) : evidence}</li>)}</ul></div>
-                      <Button onClick={() => setSelectedCandidate(candidate.intentId)} size="sm" variant={selectedCandidate === candidate.intentId ? "primary" : "secondary"}>{t("common.select")}</Button>
+                      <Button disabled={resolutionRequested} onClick={() => setSelectedCandidate(candidate.intentId)} size="sm" variant={selectedCandidate === candidate.intentId ? "primary" : "secondary"}>{t("common.select")}</Button>
                     </article>
                   ))}
                 </div>
               </section>
             </div>
             <div className="unmatched-resolution-form">
-              <label className="unmatched-resolution-form__check"><input checked={exceptionAccepted} data-testid="accept-cross-asset" onChange={(event) => setExceptionAccepted(event.target.checked)} type="checkbox" /><span>{t("unmatched.acceptException")}</span></label>
-              <label><span>{t("unmatched.resolutionReason")}</span><textarea data-testid="resolution-reason" onChange={(event) => setResolutionReason(event.target.value)} placeholder={t("unmatched.resolutionPlaceholder")} rows={3} value={resolutionReason} /></label>
-              {resolutionRequested && <p aria-live="polite" data-testid="resolution-status" role="status">{t("unmatched.approvalPending")}</p>}
+              <label className="unmatched-resolution-form__check"><input checked={exceptionAccepted} data-testid="accept-cross-asset" disabled={resolutionRequested} onChange={(event) => setExceptionAccepted(event.target.checked)} type="checkbox" /><span>{t("unmatched.acceptException")}</span></label>
+              <label><span>{t("unmatched.resolutionReason")}</span><textarea data-testid="resolution-reason" disabled={resolutionRequested} onChange={(event) => setResolutionReason(event.target.value)} placeholder={t("unmatched.resolutionPlaceholder")} rows={3} value={resolutionReason} /></label>
+              {resolutionRequested && <p aria-live="polite" className="unmatched-resolution-pending" data-testid="resolution-status" role="status"><UserRoundCheck aria-hidden="true" size={18}/><span>{t("unmatched.approvalPending")}</span></p>}
             </div>
             <div className="unmatched-review__actions">
-              <Button variant="quiet">{t("unmatched.ignoreReason")}</Button>
+              <Button disabled variant="quiet">{t("unmatched.ignoreReason")}</Button>
               <span />
-              <Button variant="secondary">{t("unmatched.independentVerification")}</Button>
-              <Button data-testid="request-resolution" disabled={!canRequestResolution} onClick={() => setResolutionRequested(true)}>{t("unmatched.requestResolution")}</Button>
+              <Button disabled variant="secondary">{t("unmatched.independentVerification")}</Button>
+              <Button data-testid="request-resolution" disabled={!canRequestResolution || resolutionRequested} onClick={() => setResolutionRequested(true)}>{t(resolutionRequested ? "unmatched.approvalPending" : "unmatched.requestResolution")}</Button>
             </div>
           </section>
         )}

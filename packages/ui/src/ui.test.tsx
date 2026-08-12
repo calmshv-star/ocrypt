@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { LayoutDashboard } from "lucide-react";
+import { Fingerprint, LayoutDashboard, Webhook } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
 import { AppShell } from "./app-shell";
 import { DataTable } from "./data-table";
@@ -41,6 +41,7 @@ describe("shared UI", () => {
 
     expect(screen.getByRole("navigation", { name: labels.primaryNavigation })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: dashboardText })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: labels.commandMenu })).toBeInTheDocument();
     expect(document.documentElement).toHaveAttribute("data-theme", "light");
     fireEvent.click(screen.getByRole("button", { name: labels.theme }));
     expect(document.documentElement).toHaveAttribute("data-theme", "dark");
@@ -65,5 +66,26 @@ describe("shared UI", () => {
     expect(container.querySelector("td")).toHaveAttribute("data-label", "Transfer");
     fireEvent.keyDown(screen.getByText("evt_01").closest("tr")!, { key: "Enter" });
     expect(onRowClick).toHaveBeenCalledWith({ id: "evt_01" });
+  });
+
+  it("opens a real notifications menu without a fake unread indicator", () => {
+    const { container } = render(
+      <ThemeProvider defaultTheme="light">
+        <AppShell
+          labels={labels}
+          navGroups={[{ label: "Operations", items: [
+            { href: "#/unmatched", icon: Fingerprint, label: "Unmatched" },
+            { href: "#/webhooks", icon: Webhook, label: "Webhooks" },
+          ] }]}
+        >
+          <h1>Dashboard</h1>
+        </AppShell>
+      </ThemeProvider>
+    );
+
+    expect(container.querySelector(".mp-notification-dot")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: labels.notifications }));
+    expect(screen.getByRole("link", { name: "Unmatched" })).toHaveAttribute("href", "#/unmatched");
+    expect(screen.getByRole("link", { name: "Webhooks" })).toHaveAttribute("href", "#/webhooks");
   });
 });

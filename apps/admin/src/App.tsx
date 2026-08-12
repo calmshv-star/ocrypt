@@ -1,5 +1,5 @@
 import { useI18n } from "@merchant/i18n";
-import { AppShell, Badge, Button, Select, WorkspaceSwitcher, type ShellNavGroup } from "@merchant/ui";
+import { AppShell, Badge, Button, PRODUCT_NAME, Select, WorkspaceSwitcher, type ShellNavGroup } from "@merchant/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { Activity, Archive, Blocks, CircleDollarSign, FileClock, Fingerprint, GitCompareArrows, KeyRound, Landmark, LayoutDashboard, Link2, RadioTower, ReceiptText, RefreshCw, Scale, Settings2, ShieldCheck, UsersRound, Webhook } from "lucide-react";
 import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react";
@@ -21,6 +21,7 @@ const WebhooksPage = lazy(() => import("./pages/WebhooksPage").then((module) => 
 const LiveOverviewPage = lazy(() => import("./LiveAdminPages").then((module) => ({ default: module.LiveOverviewPage })));
 const LiveResourcePage = lazy(() => import("./LiveAdminPages").then((module) => ({ default: module.LiveResourcePage })));
 const LiveUnmatchedPage = lazy(() => import("./LiveAdminPages").then((module) => ({ default: module.LiveUnmatchedPage })));
+const UnavailablePage = lazy(() => import("./LiveAdminPages").then((module) => ({ default: module.UnavailablePage })));
 const PaymentLinksManagementPage = lazy(() => import("./ManagementPages").then((module) => ({ default: module.PaymentLinksManagementPage })));
 const APIClientsManagementPage = lazy(() => import("./ManagementPages").then((module) => ({ default: module.APIClientsManagementPage })));
 const WebhookManagementPage = lazy(() => import("./ManagementPages").then((module) => ({ default: module.WebhookManagementPage })));
@@ -49,7 +50,7 @@ function AccessScreen({ state }: { state: "loading" | "unauthenticated" | "error
   const { client } = useAdmin();
   const title = state === "loading" ? t("admin.sessionLoading") : state === "unauthenticated" ? t("admin.signInTitle") : state === "scope" ? t("admin.noScopeTitle") : t("admin.sessionErrorTitle");
   const body = state === "unauthenticated" ? t("admin.signInBody") : state === "scope" ? t("admin.noScopeBody") : state === "error" ? t("admin.sessionErrorBody") : "";
-  return <main className="admin-access"><Select aria-label={t("common.locale")} onChange={(event) => setLocale(event.target.value as typeof locale)} value={locale}>{locales.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}</Select><section aria-busy={state === "loading" || undefined} role={state === "error" ? "alert" : "status"}><h1>{title}</h1>{body && <p>{body}</p>}{state === "unauthenticated" && client && <a className="mp-button mp-button--primary mp-button--md" href={client.loginURL(safeReturnPath())}>{t("common.signIn")}</a>}{state === "error" && <Button onClick={() => window.location.reload()}>{t("common.retry")}</Button>}</section></main>;
+  return <main className="admin-access"><Select aria-label={t("common.locale")} onChange={(event) => setLocale(event.target.value as typeof locale)} value={locale}>{locales.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}</Select><section aria-busy={state === "loading" || undefined} role={state === "error" ? "alert" : "status"}><div className="admin-access__brand"><span aria-hidden="true" className="mp-brand__mark"><span/><span/></span><strong>{PRODUCT_NAME}</strong></div><div className="admin-access__content"><span aria-hidden="true" className="admin-access__shield"><ShieldCheck size={24}/></span><div><h1>{title}</h1>{body && <p>{body}</p>}</div></div>{state === "unauthenticated" && client && <a className="mp-button mp-button--primary mp-button--md" href={client.loginURL(safeReturnPath())}>{t("common.signIn")}</a>}{state === "error" && <Button onClick={() => window.location.reload()}>{t("common.retry")}</Button>}</section></main>;
 }
 
 function PreviewRoutes() {
@@ -67,9 +68,9 @@ function PreviewRoutes() {
     <Route element={<PaymentLinksPage />} path="/payment-links" />
     <Route element={<TeamPage />} path="/team" />
     <Route element={<SettingsPage />} path="/settings" />
-    <Route element={<AuditPage />} path="/management-audit" />
-    <Route element={<SettingsPage />} path="/platform" />
-    <Route element={<AuditPage />} path="/management-actions" />
+    <Route element={<UnavailablePage description={"management.auditBody"} title={"management.auditTitle"} />} path="/management-audit" />
+    <Route element={<UnavailablePage description={"platform.body"} title={"platform.title"} />} path="/platform" />
+    <Route element={<UnavailablePage description={"management.actionsBody"} title={"management.actionsTitle"} />} path="/management-actions" />
     <Route element={<MatchingPolicyPage />} path="/matching-policies" />
     <Route element={<FinancialSweepsPage />} path="/financial/sweeps" />
     <Route element={<FinancialRefundsPage />} path="/financial/refunds" />
@@ -157,7 +158,7 @@ function AdminApplication() {
       admin.can("financial:read") && !admin.scope?.merchantId && { label: t("financial.refunds"), href: "#/financial/refunds", icon: ReceiptText, active: active("/financial/refunds") },
       admin.can("financial:read") && !admin.scope?.merchantId && { label: t("financial.reconciliation"), href: "#/financial/reconciliation-runs", icon: RefreshCw, active: active("/financial/reconciliation-runs") }
   ].filter(Boolean) as ShellNavGroup["items"];
-  const navGroups = [operations.length && { label: t("nav.operations"), items: operations }, financial.length && { label: t("financial.cabinet"), items: financial }, integration.length && { label: t("nav.integration"), items: integration }, infrastructure.length && { label: t("common.platform"), items: infrastructure }].filter(Boolean) as ShellNavGroup[];
+  const navGroups = [operations.length && { label: t("nav.operations"), items: operations }, financial.length && { label: t("financial.cabinet"), items: financial }, integration.length && { label: t("nav.integration"), items: integration }, infrastructure.length && { label: t("common.platform"), items: infrastructure, collapsible: true }].filter(Boolean) as ShellNavGroup[];
 
   if (!admin.preview && location.pathname === "/invite") return <Suspense fallback={<div aria-busy="true" className="admin-route-loading"><span /><span /><span /></div>}><InvitationAcceptPage /></Suspense>;
   if (admin.sessionState === "loading") return <AccessScreen state="loading" />;

@@ -13,12 +13,12 @@ export function ReconciliationPage() {
     { key: "delta", header: t("reconciliation.delta"), render: (report) => <strong className={report.status === "balanced" ? "domain-text-positive" : "domain-text-warning"}>{report.delta}</strong> },
     { key: "status", header: t("common.status"), render: (report) => <StatusBadge status={report.status}>{t(report.status === "balanced" ? "reconciliation.clean" : "reconciliation.investigate")}</StatusBadge> },
     { key: "created", header: t("reconciliation.created"), render: (report) => report.created },
-    { key: "download", header: "", render: () => <Button size="sm" variant="quiet"><ArrowDownToLine size={13} />{t("common.download")}</Button> }
+    { key: "download", header: "", render: () => <Button disabled size="sm" variant="quiet"><ArrowDownToLine size={13} />{t("common.download")}</Button> }
   ];
 
   return (
     <div className="admin-page">
-      <PageHeader actions={<Button><FilePlus2 size={15} />{t("reconciliation.newReport")}</Button>} description={t("page.reconciliation.description")} eyebrow={<><Scale size={13} />{t("reconciliation.controls")}</>} title={t("page.reconciliation.title")} />
+      <PageHeader actions={<Button disabled><FilePlus2 size={15} />{t("reconciliation.newReport")}</Button>} description={t("page.reconciliation.description")} eyebrow={<><Scale size={13} />{t("reconciliation.controls")}</>} title={t("page.reconciliation.title")} />
       <section className="admin-stat-grid admin-stat-grid--three">
         <StatCard change={t("reconciliation.lastClose", { time: "01:12 UTC" })} icon={<CheckCircle2 size={16} />} label={t("reconciliation.ledgerBalance")} trend="flat" value="$0.00" />
         <StatCard change={t("reconciliation.needReplay", { count: 3 })} icon={<FileCheck2 size={16} />} label={t("reconciliation.merchantAcknowledgements")} trend="down" value="99.96%" />
@@ -37,7 +37,7 @@ export function ReconciliationPage() {
           <div className="reconciliation-attention">
             {[
               ["evt_82G4", "Northstar SaaS", t("reconciliation.retryingAttempt", { count: 3 })], ["evt_1PL8", "Northstar SaaS", t("reconciliation.retryingAttempt", { count: 2 })], ["evt_7GQ2", "Northstar SaaS", t("reconciliation.deadLetterAssigned")]
-            ].map(([event, merchant, state]) => <div key={event}><span className="reconciliation-attention__icon"><ShieldCheck size={15} /></span><span><strong>{event}</strong><small>{merchant}</small></span><span>{state}</span><Button size="sm" variant="quiet">{t("common.open")}</Button></div>)}
+            ].map(([event, merchant, state]) => <div key={event}><span className="reconciliation-attention__icon"><ShieldCheck size={15} /></span><span><strong>{event}</strong><small>{merchant}</small></span><span>{state}</span><Button disabled size="sm" variant="quiet">{t("common.open")}</Button></div>)}
           </div>
         </SectionCard>
       </section>

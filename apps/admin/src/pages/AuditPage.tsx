@@ -20,15 +20,15 @@ export function AuditPage() {
 
   return (
     <div className="admin-page">
-      <PageHeader actions={<Button variant="secondary"><Download size={15} />{t("audit.wormExport")}</Button>} description={t("page.audit.description")} eyebrow={<><FileClock size={13} />{t("audit.tamperHistory")}</>} title={t("page.audit.title")} />
+      <PageHeader actions={<Button disabled variant="secondary"><Download size={15} />{t("audit.wormExport")}</Button>} description={t("page.audit.description")} eyebrow={<><FileClock size={13} />{t("audit.tamperHistory")}</>} title={t("page.audit.title")} />
       <div className="audit-integrity-banner">
         <span><ShieldCheck size={21} /></span><div><strong>{t("audit.chainVerified")}</strong><p>{t("audit.chainSummary")}</p></div><Badge tone="positive">{t("audit.verified")}</Badge>
       </div>
       <Toolbar>
         <label className="admin-search-field"><Search aria-hidden="true" size={15} /><Input aria-label={t("common.search")} onChange={(event) => setQuery(event.target.value)} placeholder={t("audit.searchPlaceholder")} value={query} /></label>
         <Select aria-label={t("audit.actorType")}><option>{t("audit.allActors")}</option><option>{t("audit.humanOperator")}</option><option>{t("audit.serviceIdentity")}</option></Select>
-        <Button variant="secondary"><CalendarRange size={15} />{t("common.last24Hours")}</Button>
-        <Button variant="secondary"><KeyRound size={15} />{t("audit.sensitiveActions")}</Button>
+        <Button disabled variant="secondary"><CalendarRange size={15} />{t("common.last24Hours")}</Button>
+        <Button disabled variant="secondary"><KeyRound size={15} />{t("audit.sensitiveActions")}</Button>
       </Toolbar>
       <DataTable columns={columns} data={filtered} empty={t("common.noResults")} getRowKey={(event) => event.id} nextLabel={t("common.next")} page={1} pages={42} previousLabel={t("common.previous")} rowsLabel={t("common.rows")} />
     </div>

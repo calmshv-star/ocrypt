@@ -18,11 +18,11 @@ export function ApiClientsPage() {
     { key: "scope", header: t("apiClients.scopes"), render: (client) => <code className="domain-code">{client.scopes}</code> },
     { key: "environment", header: t("common.status"), render: (client) => <StatusBadge status={client.environment === "live" ? "healthy" : "observed"}>{t(client.environment === "live" ? "common.live" : "common.sandbox")}</StatusBadge> },
     { key: "last", header: t("apiClients.lastUsed"), render: (client) => client.lastUsed },
-    { key: "rotate", header: "", render: () => <Button size="sm" variant="quiet"><RotateCw size={13} />{t("apiClients.rotate")}</Button> }
+    { key: "rotate", header: "", render: () => <Button disabled size="sm" variant="quiet"><RotateCw size={13} />{t("apiClients.rotate")}</Button> }
   ];
 
   return <div className="admin-page">
-    <PageHeader actions={<Button><Plus size={15} />{t("apiClients.create")}</Button>} description={t("page.apiClients.description")} eyebrow={<><KeyRound size={13} />{t("common.previewData")}</>} title={t("page.apiClients.title")} />
+    <PageHeader actions={<Button disabled><Plus size={15} />{t("apiClients.create")}</Button>} description={t("page.apiClients.description")} eyebrow={<><KeyRound size={13} />{t("common.previewData")}</>} title={t("page.apiClients.title")} />
     <div className="webhook-security-strip"><span><KeyRound size={17} /></span><div><strong>HMAC-SHA256</strong><p>{t("settings.dualControl")}</p></div><Badge tone="info">{t("common.kms")}</Badge></div>
     <DataTable columns={columns} data={clients} empty={t("common.noResults")} getRowKey={(client) => client.id} nextLabel={t("common.next")} previousLabel={t("common.previous")} rowsLabel={t("common.rows")} />
   </div>;

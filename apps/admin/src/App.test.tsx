@@ -85,6 +85,33 @@ describe("admin application", () => {
     expect(document.documentElement.lang).toBe("ru");
   });
 
+  it("keeps preview-only actions honest and never substitutes another control-plane page", async () => {
+    const first = renderApp("/webhooks", { preview: true });
+    expect(await screen.findByRole("button", { name: "Add endpoint" })).toBeDisabled();
+    expect(screen.getAllByRole("button", { name: "Inspect" }).every((button) => button.hasAttribute("disabled"))).toBe(true);
+    first.unmount();
+
+    renderApp("/management-actions", { preview: true });
+    expect(await screen.findByRole("heading", { name: "Management approval actions" })).toBeInTheDocument();
+    expect(screen.getByText("Management integration unavailable")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Audit log" })).not.toBeInTheDocument();
+  });
+
+  it("locks a submitted preview resolution into its visible approval state", async () => {
+    renderApp("/unmatched", { preview: true });
+    const reason = await screen.findByTestId("resolution-reason");
+    const accept = screen.getByTestId("accept-cross-asset");
+    fireEvent.click(accept);
+    fireEvent.change(reason, { target: { value: "Evidence and policy exception reviewed" } });
+    const request = screen.getByTestId("request-resolution");
+    expect(request).toBeEnabled();
+    fireEvent.click(request);
+    expect(await screen.findByTestId("resolution-status")).toHaveTextContent("Approval pending");
+    expect(reason).toBeDisabled();
+    expect(accept).toBeDisabled();
+    expect(request).toBeDisabled();
+  });
+
   it("loads the authenticated scope and renders only real overview values in production", async () => {
     const liveClient = client();
     renderApp("/overview", { client: liveClient, preview: false });

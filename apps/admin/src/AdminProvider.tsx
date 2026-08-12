@@ -31,7 +31,15 @@ const previewPrincipal: AdminPrincipal = {
   session_id: "10000000-0000-4000-8000-000000000002",
   display_name: "preview_operator",
   roles: ["preview"],
-  permissions: ["dashboard:read", "payments:read", "unmatched:read", "unmatched:claim", "resolution:request", "resolution:approve", "webhooks:read", "webhooks:replay", "infrastructure:read", "infrastructure:edit", "reconciliation:read", "audit:read", "team:admin", "payment_links:read", "payment_links:write", "webhook_settings:read", "webhook_settings:write", "webhook_settings:rotate", "webhook_settings:disable", "api_clients:read", "api_clients:write", "api_clients:rotate", "api_clients:revoke", "management_audit:read", "matching_policy:read", "matching_policy:write", "matching_policy:approve", "matching_policy:activate", "platform_config:read", "platform_config:write", "platform_config:request", "platform_config:approve", "platform_config:schedule", "platform_config:activate", "platform_config:rollback", "platform_config:emergency", "financial:read", "financial:sweep_create", "financial:sweep_cancel", "financial:sweep_approve", "financial:refund_create", "financial:refund_cancel", "financial:refund_approve", "financial:reconciliation_request", "financial:reconciliation_execute"],
+  permissions: [
+    "dashboard:read", "payments:read", "unmatched:read", "unmatched:claim", "resolution:request", "resolution:approve",
+    "webhooks:read", "webhooks:replay", "infrastructure:read", "infrastructure:edit", "reconciliation:read", "audit:read",
+    "team:admin", "payment_links:read", "payment_links:write", "webhook_settings:read", "webhook_settings:write",
+    "webhook_settings:rotate", "api_clients:read", "api_clients:write", "api_clients:rotate", "management_audit:read",
+    "matching_policy:read", "matching_policy:write", "matching_policy:approve",
+    "matching_policy:activate", "platform_config:read", "platform_config:write", "platform_config:request", "platform_config:approve",
+    "platform_config:schedule", "platform_config:activate", "platform_config:rollback", "platform_config:emergency", "financial:read",
+  ],
   scopes: [{ tenant_id: "10000000-0000-4000-8000-000000000003" }],
   amr: ["preview"]
 };

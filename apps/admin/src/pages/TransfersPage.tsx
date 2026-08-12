@@ -27,7 +27,7 @@ export function TransfersPage() {
   return (
     <div className="admin-page">
       <PageHeader
-        actions={<><Button variant="secondary"><RefreshCw size={15} />{t("common.refresh")}</Button><Button variant="secondary"><Download size={15} />{t("common.export")}</Button></>}
+        actions={<><Button disabled variant="secondary"><RefreshCw size={15} />{t("common.refresh")}</Button><Button disabled variant="secondary"><Download size={15} />{t("common.export")}</Button></>}
         description={t("page.transfers.description")}
         eyebrow={<><Blocks size={13} />{t("transfers.ledger")}</>}
         title={t("page.transfers.title")}
@@ -38,7 +38,7 @@ export function TransfersPage() {
           <option value="all">{t("common.allNetworks")}</option>
           {["Tron", "Ethereum", "Solana", "TON", "Polygon"].map((item) => <option key={item}>{item}</option>)}
         </Select>
-        <Button variant="secondary"><Filter size={15} />{t("common.filters")}</Button>
+        <Button disabled variant="secondary"><Filter size={15} />{t("common.filters")}</Button>
       </Toolbar>
       <DataTable columns={columns} data={filtered} empty={t("common.noResults")} getRowKey={(transfer) => transfer.id} nextLabel={t("common.next")} onRowClick={setSelected} page={1} pages={12} previousLabel={t("common.previous")} rowsLabel={t("common.rows")} />
 
@@ -58,7 +58,7 @@ export function TransfersPage() {
               { label: t("transfers.atomicAmount"), value: selected.asset === "ETH" ? "215482000000000000" : selected.amount.replaceAll(/[^0-9]/g, "") },
               { label: t("transfers.evidenceDigest"), value: <code>{"sha256:7ce2…91ad"}</code> }
             ]} /></div>
-            <div className="domain-raw-card"><span>{t("transfers.rawEvidence")}</span><Button size="sm" variant="secondary">{t("transfers.viewPayload")}</Button></div>
+            <div className="domain-raw-card"><span>{t("transfers.rawEvidence")}</span><Button disabled size="sm" variant="secondary">{t("transfers.viewPayload")}</Button></div>
           </section>
         </div>
       </DetailPanel>}

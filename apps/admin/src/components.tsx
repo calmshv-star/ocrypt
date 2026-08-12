@@ -1,7 +1,7 @@
 import { useI18n, type MessageKey } from "@merchant/i18n";
-import { Avatar, Badge, Button, Card, InlineIdentity, StatusBadge, cn, shortenMiddle } from "@merchant/ui";
-import { ArrowUpRight, Blocks, CircleDollarSign, Clock3, Coins, ExternalLink, ShieldAlert } from "lucide-react";
-import type { ReactNode } from "react";
+import { Avatar, Badge, Button, InlineIdentity, StatusBadge, cn, shortenMiddle } from "@merchant/ui";
+import { ArrowUpRight, Blocks, CircleDollarSign, Clock3, Coins, ShieldAlert } from "lucide-react";
+import { type ReactNode, useEffect, useId, useRef } from "react";
 import type { IntentStatus, UnmatchedCase } from "./data";
 
 export function IntentIdentity({ id, orderId }: { id: string; orderId: string }) {
@@ -46,14 +46,61 @@ export function MetricCell({ value, detail }: { value: ReactNode; detail?: React
 
 export function DetailPanel({ title, subtitle, children, onClose }: { title: ReactNode; subtitle?: ReactNode; children: ReactNode; onClose?: () => void }) {
   const { t } = useI18n();
+  const titleId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    panelRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose?.();
+        return;
+      }
+      if (event.key !== "Tab" || !panelRef.current) return;
+      const focusable = Array.from(panelRef.current.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )).filter((item) => !item.hasAttribute("hidden"));
+      if (focusable.length === 0) {
+        event.preventDefault();
+        panelRef.current.focus();
+        return;
+      }
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      previousFocus?.focus();
+    };
+  }, [onClose]);
+
   return (
-    <Card className="domain-detail-panel">
-      <div className="domain-detail-panel__head">
-        <div><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div>
-        {onClose && <Button onClick={onClose} size="sm" variant="quiet">{t("common.close")}</Button>}
+    <>
+      <div aria-hidden="true" className="mp-dialog-overlay domain-detail-overlay" onMouseDown={onClose} />
+      <div
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className="mp-card domain-detail-panel"
+        ref={panelRef}
+        role="dialog"
+        tabIndex={-1}
+      >
+        <div className="domain-detail-panel__head">
+          <div><h2 id={titleId}>{title}</h2>{subtitle && <p>{subtitle}</p>}</div>
+          <Button onClick={onClose} size="sm" variant="secondary">{t("common.close")}</Button>
+        </div>
+        <div className="domain-detail-panel__body">{children}</div>
       </div>
-      <div className="domain-detail-panel__body">{children}</div>
-    </Card>
+    </>
   );
 }
 
@@ -70,7 +117,7 @@ export function EmptyPanel({ title, body }: { title: ReactNode; body: ReactNode 
 }
 
 export function ExplorerLink({ children }: { children: ReactNode }) {
-  return <a className="domain-explorer-link" href="#evidence" onClick={(event) => event.preventDefault()}>{children}<ExternalLink size={12} /></a>;
+  return <span className="domain-explorer-link">{children}</span>;
 }
 
 export function Freshness({ children }: { children: ReactNode }) {

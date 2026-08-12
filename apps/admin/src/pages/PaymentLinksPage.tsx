@@ -17,10 +17,10 @@ export function PaymentLinksPage() {
     { key: "visits", header: t("paymentLinks.visits"), render: (item) => item.visits.toLocaleString() },
     { key: "completion", header: t("paymentLinks.completion"), render: (item) => <span className="domain-metric-cell"><strong>{item.completion}%</strong><ProgressBar label={`${t("paymentLinks.completion")} ${item.completion}%`} tone="positive" value={item.completion} /></span> },
     { key: "status", header: t("common.status"), render: (item) => <StatusBadge status={item.status}>{t(item.status === "healthy" ? "status.healthy" : "status.paused")}</StatusBadge> },
-    { key: "open", header: "", render: () => <Button size="sm" variant="quiet">{t("common.open")}<ExternalLink size={13} /></Button> }
+    { key: "open", header: "", render: () => <Button disabled size="sm" variant="quiet">{t("common.open")}<ExternalLink size={13} /></Button> }
   ];
   return <div className="admin-page">
-    <PageHeader actions={<Button><Plus size={15} />{t("paymentLinks.create")}</Button>} description={t("page.paymentLinks.description")} eyebrow={<><Link2 size={13} />{t("common.previewData")}</>} title={t("page.paymentLinks.title")} />
+    <PageHeader actions={<Button disabled><Plus size={15} />{t("paymentLinks.create")}</Button>} description={t("page.paymentLinks.description")} eyebrow={<><Link2 size={13} />{t("common.previewData")}</>} title={t("page.paymentLinks.title")} />
     <DataTable columns={columns} data={links} empty={t("common.noResults")} getRowKey={(item) => item.id} nextLabel={t("common.next")} previousLabel={t("common.previous")} rowsLabel={t("common.rows")} />
   </div>;
 }

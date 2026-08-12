@@ -13,13 +13,13 @@ export function OverviewPage({ mode }: { mode: "platform" | "merchant" }) {
   return (
     <div className="admin-page">
       <PageHeader
-        actions={<><Button variant="secondary">{t("common.export")}</Button><Button>{t("common.viewAll")}</Button></>}
+        actions={<><Button disabled variant="secondary">{t("common.export")}</Button><Button disabled>{t("common.viewAll")}</Button></>}
         description={t("page.overview.description")}
         eyebrow={<><Activity size={13} />{mode === "platform" ? t("common.platform") : t("common.merchant")}</>}
         title={t("page.overview.title")}
       />
 
-      <AlertBanner action={<Button size="sm" variant="secondary">{t("overview.acknowledge")}</Button>} title={t("overview.alertTitle")}>
+      <AlertBanner action={<Button disabled size="sm" variant="secondary">{t("overview.acknowledge")}</Button>} title={t("overview.alertTitle")}>
         {t("overview.alertBody")}
       </AlertBanner>
 

@@ -18,7 +18,7 @@ export function TeamPage() {
     { key: "last", header: t("team.lastActive"), render: (member) => member.lastActive }
   ];
   return <div className="admin-page">
-    <PageHeader actions={<Button><UserPlus size={15} />{t("team.invite")}</Button>} description={t("page.team.description")} eyebrow={<><UsersRound size={13} />{t("common.previewData")}</>} title={t("page.team.title")} />
+    <PageHeader actions={<Button disabled><UserPlus size={15} />{t("team.invite")}</Button>} description={t("page.team.description")} eyebrow={<><UsersRound size={13} />{t("common.previewData")}</>} title={t("page.team.title")} />
     <div className="audit-integrity-banner"><span><ShieldCheck size={21} /></span><div><strong>{t("team.mfa")}</strong><p>{t("settings.dualControl")}</p></div></div>
     <DataTable columns={columns} data={members} empty={t("common.noResults")} getRowKey={(member) => member.id} nextLabel={t("common.next")} previousLabel={t("common.previous")} rowsLabel={t("common.rows")} />
   </div>;

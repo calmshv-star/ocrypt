@@ -16,6 +16,10 @@
   [Documentation](docs/README.md) · [API guide](docs/en/api-integration.md) · [SDKs](sdk/README.md) · [Examples](examples/README.md) · [Security](SECURITY.md)
 </div>
 
+<p align="center">
+  <img src="docs/assets/admin-overview.jpg" alt="ocrypt administration dashboard with settlement metrics, action queue, payment flow, and recent payments" width="1200" />
+</p>
+
 ---
 
 ocrypt is an open-source, multi-tenant payment platform for websites, bots,
