@@ -26,9 +26,13 @@ Redirects, proxies, private/link-local/loopback/reserved IPs, and mixed public/p
 
 ## Deployment contract
 
-The standalone bootstrap enables `RUB`, `USD`, `EUR`, `KZT`, `INR`, and `CNY`
-for `eth-ethereum`, `sol-solana`, `ton-ton`, `trx-tron`, and `usdt-tron`—30
-policy targets in total. The API’s bounded normalized-rate gateway batches and
+The standalone bootstrap admits `RUB`, `USD`, `EUR`, `KZT`, `INR`, and `CNY`,
+but the supplied worker enables only the 21 RUB targets by default. Other
+currencies cause no background or upstream traffic until a deployment adds
+their policy keys to `RATE_TARGETS_JSON`. A successful pair is collected once
+per 30 minutes. Route creation immediately reuses a tick younger than 30
+minutes; only a missing or stale pair queues one deduplicated on-demand
+collection. The API’s bounded normalized-rate gateway batches and
 caches the public upstream calls: CoinGecko and CoinPaprika remain the two
 crypto observations, while the official National Bank of Kazakhstan USD/KZT
 feed supplies the KZT cross-rate because neither crypto provider quotes KZT
@@ -36,7 +40,7 @@ directly. The legacy two-segment gateway path remains a RUB alias for rolling
 upgrades. `rate_gateway_origin` is mandatory during standalone bootstrap and
 must be the externally reachable HTTPS API origin.
 
-Required environment: `DATABASE_URL`, `RATE_WORKER_ID` (canonical UUID), and strict global `RATE_TARGETS_JSON`, for example `[{"policy_key":"eth-usd"}]`. Tenant-scoped targets are deliberately rejected while `PersistedPlanner` has a global asset/fiat rate contract; this prevents cross-tenant selection. `base_asset` must equal an existing active `assets.id`, and `quote_asset` must be a three-character fiat code. Optional: `RATE_SECRET_DIR`, `RATE_POLL_INTERVAL=5s`, `RATE_LEASE_DURATION=30s`, `RATE_MAX_ATTEMPTS=8`, `RATE_MAX_READY_AGE=2m`, and `RATE_HEALTH_ADDRESS=:9092`.
+Required environment: `DATABASE_URL`, `RATE_WORKER_ID` (canonical UUID), and strict global `RATE_TARGETS_JSON`, for example `[{"policy_key":"eth-usd"}]`. Tenant-scoped targets are deliberately rejected while `PersistedPlanner` has a global asset/fiat rate contract; this prevents cross-tenant selection. `base_asset` must equal an existing active `assets.id`, and `quote_asset` must be a three-character fiat code. Optional: `RATE_SECRET_DIR`, `RATE_POLL_INTERVAL=1s` (one cheap queue check, not an upstream request), `RATE_LEASE_DURATION=30s`, `RATE_MAX_ATTEMPTS=8`, `RATE_MAX_READY_AGE=35m`, and `RATE_HEALTH_ADDRESS=:9092`.
 
 Provision the NOLOGIN group role `rate_runtime_worker` before migration 000007 so conditional least-privilege grants are applied (or apply the documented grants after role creation). The workload login inherits that group. Insert one enabled `rate_runtime_identities` row as the migration/operations owner; its UUID is `RATE_WORKER_ID`. The role has read access only to active platform heads/snapshots and scoped DML on runtime rate tables. It has no merchant API, signing, wallet, or callback secrets.
 

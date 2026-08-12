@@ -140,8 +140,9 @@ ON CONFLICT(id) DO NOTHING;
 
 COMMIT;
 
--- The standalone install admits the complete default invoice-currency catalog
--- in the same invocation. Existing snapshots are left immutable on replay.
+-- The standalone install admits the complete rate catalog, but its worker
+-- targets only RUB by default. Each deployment opts into additional invoice
+-- currencies explicitly through RATE_TARGETS_JSON.
 \ir bootstrap-rates.sql
 
 SELECT 'wallets='||count(*) FROM wallets WHERE tenant_id='0198a100-0000-7000-8000-000000000001';

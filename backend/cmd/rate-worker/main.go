@@ -94,7 +94,13 @@ func main() {
 		}
 	}()
 	run := func() {
-		for _, target := range configuration.targets {
+		due, dueErr := store.DueTargets(ctx, configuration.workerID, configuration.targets, len(configuration.targets))
+		if dueErr != nil {
+			metrics.ObserveCycle("rates", "failure", 0, 0)
+			slog.Warn("rate due queue unavailable", "error_code", boundedErrorCode(dueErr))
+			return
+		}
+		for _, target := range due {
 			started := time.Now()
 			success, runErr := worker.RunTarget(ctx, target)
 			if runErr != nil {

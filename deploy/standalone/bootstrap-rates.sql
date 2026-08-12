@@ -54,7 +54,7 @@ SELECT pg_temp.activate_rate_snapshot(
   jsonb_build_object(
     'provider_ref','coingecko-keyless-public',
     'endpoint',(SELECT gateway_origin FROM rate_bootstrap_config)||'/v1/public/rates/coingecko/'||asset_id||'/'||currency,
-    'base_asset',asset_id,'quote_asset',currency,'max_age_seconds',900,
+    'base_asset',asset_id,'quote_asset',currency,'max_age_seconds',2100,
     'timeout_ms',10000,'max_response_bytes',4096
   )
 ) FROM
@@ -73,7 +73,7 @@ SELECT pg_temp.activate_rate_snapshot(
   jsonb_build_object(
     'provider_ref','coinpaprika-keyless-public',
     'endpoint',(SELECT gateway_origin FROM rate_bootstrap_config)||'/v1/public/rates/coinpaprika/'||asset_id||'/'||currency,
-    'base_asset',asset_id,'quote_asset',currency,'max_age_seconds',900,
+    'base_asset',asset_id,'quote_asset',currency,'max_age_seconds',2100,
     'timeout_ms',10000,'max_response_bytes',4096
   )
 ) FROM
@@ -92,8 +92,8 @@ SELECT pg_temp.activate_rate_snapshot(
   jsonb_build_object(
     'base_asset',asset_id,'quote_asset',currency,
     'sources',jsonb_build_array(asset_id||'-'||lower(currency)||'-coingecko',asset_id||'-'||lower(currency)||'-coinpaprika'),
-    'quorum',2,'max_age_seconds',900,'max_spread_bps',300,
-    'future_tolerance_seconds',10,'poll_interval_seconds',30
+    'quorum',2,'max_age_seconds',2100,'max_spread_bps',300,
+    'future_tolerance_seconds',10,'poll_interval_seconds',1800
   )
 ) FROM
   (VALUES

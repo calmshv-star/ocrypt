@@ -10,6 +10,10 @@ therefore starts with exact rate policies for every combination of:
 - payment assets: each network's native asset plus issuer-native USDC/USDT
   contracts admitted by `bootstrap-public-assets.sql`.
 
+Only the 21 `RUB` targets are enabled in the supplied worker configuration.
+The other admitted currencies cause no background or upstream traffic until a
+deployment explicitly adds their policy keys to `RATE_TARGETS_JSON`.
+
 The catalog intentionally excludes bridged and exchange-pegged lookalikes. In
 particular, BNB Smart Chain enables native BNB but does not label Binance-Peg
 tokens as USDT or USDC. The scanners use external public RPC endpoints, keep no
@@ -20,8 +24,10 @@ has a CPU, memory, and process limit in the supplied Compose definition.
 Pass `rate_gateway_origin` to `bootstrap.sql` along with its other documented
 psql variables. It must be the public HTTPS origin of the same API deployment,
 where `RATE_SOURCE_GATEWAY_ENABLED=true`. The supplied standalone Compose file
-already enables that gateway and starts the rate worker with all 126 policy
-targets.
+already enables that gateway and starts the rate worker with the 21 RUB policy
+targets. A successful pair is refreshed once per 30 minutes. Route creation
+uses the cached tick immediately when it is younger than 30 minutes; only a
+missing or stale tick wakes one deduplicated on-demand collection.
 
 For an existing standalone database, admit the missing catalog idempotently:
 

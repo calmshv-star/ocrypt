@@ -120,7 +120,8 @@ GRANT INSERT ON payment_intent_versions,callback_events,callback_deliveries TO m
 GRANT UPDATE ON webhook_endpoints TO merchant_api_runtime;
 GRANT SELECT,INSERT,DELETE ON auth_nonces TO merchant_api_runtime;
 GRANT SELECT ON wallets,asset_rate_ticks TO merchant_api_runtime;
-GRANT EXECUTE ON FUNCTION lookup_api_credential(text),lookup_checkout_session(bytea) TO merchant_api_runtime;
+GRANT EXECUTE ON FUNCTION lookup_api_credential(text),lookup_checkout_session(bytea),
+  request_rate_refresh_if_stale(text,text) TO merchant_api_runtime;
 
 -- Deterministic sandbox capability. Revoke first so every deployment repairs
 -- privilege drift to the exact matrix. Reset can delete only sandbox scenarios

@@ -23,6 +23,9 @@ func (s *Store) AllocateRoute(ctx context.Context, p application.Principal, inte
 	if p.TenantID == "" || p.MerchantID == "" || intent.ID == "" || chainID == "" || assetID == "" || len(idempotencyKey) < 8 || decodeErr != nil || len(requestDigest) != sha256.Size || !expiresAt.After(s.now()) {
 		return planned, fmt.Errorf("%w: invalid persisted route allocation request", domain.ErrValidation)
 	}
+	if err = s.ensureRateFreshForRoute(ctx, assetID, intent.Currency); err != nil {
+		return planned, err
+	}
 	err = s.db.WithinTenant(ctx, p.TenantID, func(tx pgx.Tx) error {
 		if err := lockIdempotency(ctx, tx, p.MerchantID, "create_route_plan", idempotencyKey); err != nil {
 			return err
@@ -54,6 +57,41 @@ func (s *Store) AllocateRoute(ctx context.Context, p application.Principal, inte
 		return err
 	})
 	return planned, err
+}
+
+// ensureRateFreshForRoute uses an admitted tick immediately when it is less
+// than thirty minutes old. Only a missing/stale pair wakes the collector, and
+// concurrent route attempts converge on the same fenced runtime job.
+func (s *Store) ensureRateFreshForRoute(ctx context.Context, assetID, currency string) error {
+	const waitForCollection = 8 * time.Second
+	deadline := time.Now().UTC().Add(waitForCollection)
+	for {
+		var fresh, accepted bool
+		if err := s.db.pool.QueryRow(ctx, `SELECT fresh,accepted FROM request_rate_refresh_if_stale($1,$2)`, assetID, currency).Scan(&fresh, &accepted); err != nil {
+			return fmt.Errorf("%w: request rate refresh", domain.ErrDependency)
+		}
+		if fresh {
+			return nil
+		}
+		if !accepted {
+			return fmt.Errorf("%w: no active rate collector for route", domain.ErrStateConflict)
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return fmt.Errorf("%w: fresh rate collection is pending", domain.ErrDependency)
+		}
+		pause := 200 * time.Millisecond
+		if remaining < pause {
+			pause = remaining
+		}
+		timer := time.NewTimer(pause)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 // ReleaseRoutePlan is the compensating half of production route creation. It
