@@ -84,6 +84,17 @@ use policy, data-processing terms, service limits, and network rules apply
 separately. The repository's tests and adapters do not create a warranty about
 third-party networks or services.
 
+The optional keyless standalone rate gateway requests current crypto market
+observations from CoinGecko and CoinPaprika and the official USD/KZT RSS feed
+from the National Bank of Kazakhstan. These are external data services, not
+software incorporated into this distribution. Operators remain responsible for
+the providers' current API terms, rate limits, required disclosures, permitted
+commercial use, and data methodology, and may replace them through admitted
+normalized rate-source snapshots. Provider names are factual interoperability
+references and do not imply endorsement. No provider response is redistributed
+as a standalone data feed; only exact, provenance-bound observations needed for
+the operator's own payment quote are retained.
+
 ## Security and production status
 
 The security policy is in [`../SECURITY.md`](../SECURITY.md). The implementation

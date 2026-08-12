@@ -51,13 +51,16 @@ of users, orders, entitlements, and fulfillment.
 | Operational control | Merchant cabinet, platform administration, four-eyes approvals, audit chains, reconciliation, retention, and migration controls |
 | Integration choices | Hosted checkout, payment links, direct API, six SDKs, framework examples, and a bounded JSON-MD5/Form-MD5 compatibility service |
 
-Invoice currency is not hard-coded to RUB. Merchant requests use an exact
-three-letter uppercase currency code plus an explicit minor-unit scale; common
-examples include `RUB`, `USD`, `EUR`, `KZT`, `INR`, and `CNY` with scale `2`.
-A usable crypto route is created only when the platform has a fresh admitted
-rate for the exact asset/currency pair. Missing, stale, non-quorate, or
-excessively divergent rates fail closed instead of producing an estimated
-amount.
+Invoice currency is not hard-coded to RUB. A fresh standalone installation
+admits the complete built-in invoice catalog—`RUB`, `USD`, `EUR`, `KZT`, `INR`,
+and `CNY`—for every bundled payment asset. Merchant requests still carry the
+exact three-letter code and explicit minor-unit scale (normally `2` for this
+catalog). More ISO 4217 currencies can be admitted by an operator without code
+changes. A usable crypto route is created only when two normalized market
+observations are fresh and within the configured spread; KZT uses the official
+daily USD/KZT rate published by the National Bank of Kazakhstan. Missing,
+stale, non-quorate, or divergent rates fail closed instead of producing an
+estimated amount.
 
 ## Payment lifecycle
 

@@ -119,10 +119,14 @@ end
 core_location = gateway.lines.find { |line| line.include?("location ~ ^/v1/(payment-intents") }.to_s
 abort("gateway core API allowlist is missing") if core_location.empty?
 abort("gateway core API regex captures a management capability") if core_location.match?(/payment-links|checkout-sessions/)
+rate_location = gateway.match(%r{location ~ \^/v1/public/rates/.*?(?<body>.*?)^    \}}m)
+abort("gateway does not expose the closed normalized rate catalog to core") unless rate_location && rate_location[:body].include?("proxy_pass http://api:8080")
+abort("gateway does not rate limit the normalized rate catalog") unless rate_location[:body].include?("limit_req zone=capability_per_ip") && rate_location[:body].include?("limit_conn capability_connections")
 abort("shared gateway must not silently expose the source-IP-sensitive legacy adapter") if gateway.match?(%r{/legacy/(json-md5|form-md5)|/pay/check-status|/pay/checkout-counter})
 helm_ingress = File.read("deploy/helm/merchant-platform/templates/ingress.yaml")
 capability_routes.each { |route| abort("Helm ingress misses management route #{route}") unless helm_ingress.include?("- path: #{route}\n") }
 values = load_yaml.call("deploy/helm/merchant-platform/values.yaml")
+abort("Helm core paths miss the normalized rate catalog") unless values.dig("ingress", "coreAPIPaths").include?("/v1/public/rates")
 helm_inventory = values.fetch("workloads").keys
 abort("Helm workload inventory differs from runtime contracts") unless helm_inventory.sort == expected.sort
 abort("chart may not claim platform outbox publication") unless values.dig("platformOutbox", "claimExternalPublication") == false

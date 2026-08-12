@@ -10,7 +10,7 @@ Use the API origin for merchant requests and the management/gateway origin for p
 
 Invoice currency is not hard-coded to RUB. `currency` is exactly three uppercase ASCII letters and should be an ISO 4217 code; `currency_scale` explicitly defines its minor units. `RUB`, `USD`, `EUR`, `KZT`, `INR`, and `CNY` normally use scale `2`, so `amount_minor: "3813"` means `38.13` in the selected currency. The API does not infer the scale from the code.
 
-Accepting a currency code does not make a crypto quote available by itself. Before creating an on-chain or hosted route, production must have a fresh admitted rate for the exact `asset_id`/currency pair. Missing, stale, non-quorate, future-dated, or excessively divergent rates fail closed; configure and admit independent normalized rate sources for every currency you sell in.
+The standalone installer pre-admits all six currencies above for every bundled payment asset. It compares CoinGecko and CoinPaprika observations; KZT additionally uses the official daily USD/KZT rate from the National Bank of Kazakhstan. Accepting any other three-letter code does not create a quote by itself: production still needs a fresh admitted exact `asset_id`/currency pair. Missing, stale, non-quorate, future-dated, or excessively divergent rates fail closed.
 
 ## Payment lifecycle
 

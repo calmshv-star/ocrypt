@@ -10,7 +10,7 @@ Las solicitudes merchant van al origen API; los aliases de payment-link/checkout
 
 La moneda de la factura no está fijada a RUB. `currency` contiene exactamente tres letras ASCII mayúsculas y debe usar un código ISO 4217; `currency_scale` declara de forma explícita los decimales. `RUB`, `USD`, `EUR`, `KZT`, `INR` y `CNY` suelen usar escala `2`, por lo que `amount_minor: "3813"` representa `38,13` en la moneda elegida. La API no deduce la escala del código.
 
-Aceptar un código no crea por sí solo una cotización cripto. Antes de crear una ruta on-chain o hosted, producción necesita un tipo admitido y reciente para el par exacto `asset_id`/moneda. Un tipo ausente, caducado, sin quorum, futuro o excesivamente divergente falla de forma cerrada; configure y admita fuentes normalizadas independientes para cada moneda de venta.
+La instalación standalone preadmite las seis monedas anteriores para cada activo de pago incluido. Compara observaciones de CoinGecko y CoinPaprika; KZT usa además el tipo oficial diario USD/KZT del Banco Nacional de Kazajistán. Cualquier otro código de tres letras no crea una cotización por sí solo: producción aún necesita un tipo reciente y admitido para el par exacto `asset_id`/moneda. Un tipo ausente, caducado, sin quorum, futuro o excesivamente divergente falla de forma cerrada.
 
 ## Ciclo del pago
 

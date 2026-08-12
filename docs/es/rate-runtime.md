@@ -8,6 +8,8 @@ La respuesta cumple `contracts/rate-provider-v1.schema.json`; el precio son uint
 
 Se bloquean redirects, proxies, IP privadas/loopback/link-local/reservadas y DNS mixto; el DNS queda fijado por conexión. TLS, timeout, content type y tamaño están acotados. Los secrets solo se leen desde `RATE_SECRET_DIR` de solo lectura y no aparecen en snapshots, BD, logs ni health.
 
+El bootstrap standalone habilita de inmediato `RUB`, `USD`, `EUR`, `KZT`, `INR` y `CNY` para `eth-ethereum`, `sol-solana`, `ton-ton`, `trx-tron` y `usdt-tron`: 30 policy targets. El gateway normalizado agrupa y almacena en caché las consultas. CoinGecko y CoinPaprika aportan las dos observaciones cripto; KZT usa el USD/KZT oficial diario del Banco Nacional de Kazajistán porque ambos proveedores no cotizan KZT directamente. `rate_gateway_origin` debe ser el origen HTTPS público durante el bootstrap standalone.
+
 Env obligatorias: `DATABASE_URL`, UUID `RATE_WORKER_ID`, `RATE_TARGETS_JSON` global estricto. Se rechazan targets tenant; `base_asset` debe ser un `assets.id` activo y `quote_asset` un fiat de tres caracteres. Opcionales: `RATE_SECRET_DIR`, `RATE_POLL_INTERVAL=5s`, `RATE_LEASE_DURATION=30s`, `RATE_MAX_ATTEMPTS=8`, `RATE_MAX_READY_AGE=2m`, `RATE_HEALTH_ADDRESS=:9092`. Cree el rol NOLOGIN `rate_runtime_worker` antes de 000007 (o aplique grants después), haga que el login lo herede y cree la identity enabled.
 
 `/healthz` comprueba BD; `/readyz` exige ticks recientes no vencidos para todos los targets y cero dead-letter. El commit guarda provenance inmutable y proyecta el mismo tick en `asset_rate_ticks`, leído por `PersistedPlanner`; unique pair y policy binding evitan ambigüedad. Un stale/divergent nunca es seleccionable.

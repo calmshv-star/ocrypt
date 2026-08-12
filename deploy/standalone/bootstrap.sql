@@ -1,8 +1,9 @@
 \set ON_ERROR_STOP on
 
--- Required psql variables include api credentials plus one operator-owned
--- deposit address per enabled chain. This template intentionally ships no
--- real wallet addresses and must never be used with placeholder recipients.
+-- Required psql variables include api credentials, rate_gateway_origin (the
+-- public HTTPS API origin), plus one operator-owned deposit address per enabled
+-- chain. This template intentionally ships no real wallet addresses and must
+-- never be used with placeholder recipients.
 
 BEGIN;
 
@@ -163,6 +164,10 @@ VALUES('0198a100-0000-7000-8000-000000000041','0198a100-0000-7000-8000-000000000
 ON CONFLICT(id) DO NOTHING;
 
 COMMIT;
+
+-- The standalone install admits the complete default invoice-currency catalog
+-- in the same invocation. Existing snapshots are left immutable on replay.
+\ir bootstrap-rates.sql
 
 SELECT 'wallets='||count(*) FROM wallets WHERE tenant_id='0198a100-0000-7000-8000-000000000001';
 SELECT 'addresses='||count(*) FROM addresses WHERE tenant_id='0198a100-0000-7000-8000-000000000001';

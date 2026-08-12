@@ -17,7 +17,7 @@ services:
       DATABASE_URL: ${API_DATABASE_URL:?}
       API_CREDENTIAL_ENVELOPE_KEY: ${API_CREDENTIAL_ENVELOPE_KEY:?}
       HTTP_ADDRESS: ":8080"
-      PUBLIC_BASE_URL: https://api.pay.example.com
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?}
       RATE_SOURCE_GATEWAY_ENABLED: "true"
     ports: ["127.0.0.1:8084:8080"]
     networks: [data, core]
@@ -141,7 +141,7 @@ services:
       DATABASE_URL: ${RATE_DATABASE_URL:?}
       RATE_WORKER_ID: 0198a100-0000-7000-8000-000000000050
       RATE_TARGETS_JSON: >-
-        [{"policy_key":"rate-eth-ethereum-rub"},{"policy_key":"rate-sol-solana-rub"},{"policy_key":"rate-ton-ton-rub"},{"policy_key":"rate-trx-tron-rub"},{"policy_key":"rate-usdt-tron-rub"}]
+        [{"policy_key":"rate-eth-ethereum-rub"},{"policy_key":"rate-eth-ethereum-usd"},{"policy_key":"rate-eth-ethereum-eur"},{"policy_key":"rate-eth-ethereum-kzt"},{"policy_key":"rate-eth-ethereum-inr"},{"policy_key":"rate-eth-ethereum-cny"},{"policy_key":"rate-sol-solana-rub"},{"policy_key":"rate-sol-solana-usd"},{"policy_key":"rate-sol-solana-eur"},{"policy_key":"rate-sol-solana-kzt"},{"policy_key":"rate-sol-solana-inr"},{"policy_key":"rate-sol-solana-cny"},{"policy_key":"rate-ton-ton-rub"},{"policy_key":"rate-ton-ton-usd"},{"policy_key":"rate-ton-ton-eur"},{"policy_key":"rate-ton-ton-kzt"},{"policy_key":"rate-ton-ton-inr"},{"policy_key":"rate-ton-ton-cny"},{"policy_key":"rate-trx-tron-rub"},{"policy_key":"rate-trx-tron-usd"},{"policy_key":"rate-trx-tron-eur"},{"policy_key":"rate-trx-tron-kzt"},{"policy_key":"rate-trx-tron-inr"},{"policy_key":"rate-trx-tron-cny"},{"policy_key":"rate-usdt-tron-rub"},{"policy_key":"rate-usdt-tron-usd"},{"policy_key":"rate-usdt-tron-eur"},{"policy_key":"rate-usdt-tron-kzt"},{"policy_key":"rate-usdt-tron-inr"},{"policy_key":"rate-usdt-tron-cny"}]
       RATE_POLL_INTERVAL: 15s
       RATE_LEASE_DURATION: 30s
       RATE_MAX_READY_AGE: 2m

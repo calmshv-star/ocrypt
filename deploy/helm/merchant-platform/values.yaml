@@ -81,6 +81,7 @@ workloads:
       APP_ENV: production
       HTTP_ADDRESS: ":8080"
       PUBLIC_BASE_URL: "https://api.example.invalid"
+      RATE_SOURCE_GATEWAY_ENABLED: "true"
       RECONCILIATION_OBJECT_STORE: s3
       RECONCILIATION_S3_ENDPOINT: "https://s3.example.invalid"
       RECONCILIATION_S3_REGION: us-east-1
@@ -764,6 +765,7 @@ ingress:
   adminHost: admin.example.invalid
   tls: []
   coreAPIPaths:
+    - /v1/public/rates
     - /v1/payment-intents
     - /v1/payment-proofs
     - /v1/assets

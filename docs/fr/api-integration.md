@@ -10,7 +10,7 @@ Les requêtes merchant utilisent l’origine API; les aliases payment-link/check
 
 La devise de facturation n’est pas limitée à RUB. `currency` contient exactement trois lettres ASCII majuscules et doit utiliser un code ISO 4217 ; `currency_scale` déclare explicitement le nombre de décimales. `RUB`, `USD`, `EUR`, `KZT`, `INR` et `CNY` utilisent normalement l’échelle `2` : `amount_minor: "3813"` signifie donc `38,13` dans la devise choisie. L’API ne déduit pas l’échelle du code.
 
-Accepter un code devise ne rend pas automatiquement une cotation crypto disponible. Avant de créer une route on-chain ou hosted, la production exige un taux récent et admis pour la paire exacte `asset_id`/devise. Un taux absent, périmé, sans quorum, daté du futur ou trop divergent échoue en mode fermé ; configurez et admettez des sources normalisées indépendantes pour chaque devise vendue.
+L’installation standalone pré-admet les six devises ci-dessus pour chaque actif de paiement fourni. Elle compare les observations CoinGecko et CoinPaprika ; KZT utilise aussi le taux officiel quotidien USD/KZT de la Banque nationale du Kazakhstan. Tout autre code à trois lettres ne crée pas une cotation à lui seul : la production exige encore un taux récent et admis pour la paire exacte `asset_id`/devise. Un taux absent, périmé, sans quorum, futur ou trop divergent échoue en mode fermé.
 
 ## Cycle du paiement
 

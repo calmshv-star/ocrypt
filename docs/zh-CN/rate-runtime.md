@@ -8,6 +8,8 @@ Policy 必须包含 `base_asset`、`quote_asset`、至少两个不重复的 `sou
 
 禁止 redirect、proxy、私网/loopback/link-local/reserved 及公私混合 DNS；每次连接固定 DNS，限制 TLS、timeout、content type 和响应大小。Secret 仅从只读 `RATE_SECRET_DIR` 按 `credential_ref` 读取，禁止路径/符号链接逃逸和多行内容。
 
+Standalone bootstrap 会立即为 `eth-ethereum`、`sol-solana`、`ton-ton`、`trx-tron` 和 `usdt-tron` 启用 `RUB`、`USD`、`EUR`、`KZT`、`INR`、`CNY`，共 30 个 policy target。内置标准化 gateway 会批量请求并缓存数据：CoinGecko 与 CoinPaprika 提供两份独立加密市场观测；由于它们不直接提供 KZT，KZT 采用哈萨克斯坦国家银行发布的每日官方 USD/KZT。Standalone bootstrap 必须传入外部可访问的 HTTPS `rate_gateway_origin`。
+
 必需 env：`DATABASE_URL`、UUID `RATE_WORKER_ID`、严格的全局 `RATE_TARGETS_JSON`；当前拒绝 tenant target，`base_asset` 必须是 active `assets.id`，`quote_asset` 必须是三字符 fiat。可选：`RATE_SECRET_DIR`、`RATE_POLL_INTERVAL=5s`、`RATE_LEASE_DURATION=30s`、`RATE_MAX_ATTEMPTS=8`、`RATE_MAX_READY_AGE=2m`、`RATE_HEALTH_ADDRESS=:9092`。迁移 000007 前创建 NOLOGIN `rate_runtime_worker` 角色（否则之后补发 grants），workload login 继承它，并由运维创建同 UUID 的 enabled identity。
 
 `/healthz` 检查数据库；`/readyz` 仅在所有目标均有未过期的新 tick 且无 dead-letter 时就绪。成功事务同时保存不可变 admission/provenance，并将同一 tick 投影到 `PersistedPlanner` 读取的旧 `asset_rate_ticks`；unique pair 与稳定 policy binding 防止歧义，stale/divergent 数据不可选择。

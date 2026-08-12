@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,9 +23,22 @@ import (
 )
 
 const (
-	coinGeckoURL   = "https://api.coingecko.com/api/v3/simple/price?ids=%s&vs_currencies=rub&include_last_updated_at=true"
-	coinPaprikaURL = "https://api.coinpaprika.com/v1/tickers/%s?quotes=RUB"
+	coinGeckoURL       = "https://api.coingecko.com/api/v3/simple/price?ids=%s&vs_currencies=%s&include_last_updated_at=true"
+	coinPaprikaURL     = "https://api.coinpaprika.com/v1/tickers/%s?quotes=%s"
+	kazakhstanRatesURL = "https://nationalbank.kz/rss/rates_all.xml"
 )
+
+// defaultFiatCurrencies is the closed, ready-to-use invoice-currency catalog.
+// Keep deploy/standalone/bootstrap-rates.sql and RATE_TARGETS_JSON in sync.
+var defaultFiatCurrencies = []string{"RUB", "USD", "EUR", "KZT", "INR", "CNY"}
+
+var supportedFiat = func() map[string]struct{} {
+	result := make(map[string]struct{}, len(defaultFiatCurrencies))
+	for _, currency := range defaultFiatCurrencies {
+		result[currency] = struct{}{}
+	}
+	return result
+}()
 
 type asset struct {
 	ID            string
@@ -40,7 +55,7 @@ var assets = map[string]asset{
 }
 
 type Fetcher interface {
-	Fetch(context.Context, string, asset) (rates.ProviderResult, error)
+	Fetch(context.Context, string, string, asset) (rates.ProviderResult, error)
 }
 
 type cached struct {
@@ -57,9 +72,11 @@ type Gateway struct {
 
 func New() *Gateway {
 	transport := &http.Transport{
-		Proxy:               nil,
-		DialContext:         (&net.Dialer{Timeout: 4 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS13},
+		Proxy:       nil,
+		DialContext: (&net.Dialer{Timeout: 4 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		// Public market-data sources include an official central-bank endpoint
+		// that currently negotiates TLS 1.2. Older protocol versions stay blocked.
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
 		TLSHandshakeTimeout: 4 * time.Second,
 		IdleConnTimeout:     30 * time.Second,
 		ForceAttemptHTTP2:   true,
@@ -67,7 +84,12 @@ func New() *Gateway {
 	client := &http.Client{Transport: transport, Timeout: 6 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return errors.New("rate source redirects are disabled")
 	}}
-	return NewWithFetcher(&upstream{client: client, coinGeckoCache: make(map[string]rates.ProviderResult)}, func() time.Time { return time.Now().UTC() })
+	return NewWithFetcher(&upstream{
+		client:           client,
+		coinGeckoCache:   make(map[string]map[string]rates.ProviderResult),
+		coinGeckoExpires: make(map[string]time.Time),
+		coinPaprikaCache: make(map[string]upstreamQuote),
+	}, func() time.Time { return time.Now().UTC() })
 }
 
 func NewWithFetcher(fetcher Fetcher, now func() time.Time) *Gateway {
@@ -76,6 +98,9 @@ func NewWithFetcher(fetcher Fetcher, now func() time.Time) *Gateway {
 
 func (g *Gateway) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/public/rates/{provider}/{asset}/{currency}", g.get)
+	// The original endpoint remains a RUB alias so existing admitted snapshots
+	// keep working during a rolling upgrade.
 	mux.HandleFunc("GET /v1/public/rates/{provider}/{asset}", g.get)
 	return mux
 }
@@ -83,18 +108,23 @@ func (g *Gateway) Handler() http.Handler {
 func (g *Gateway) get(response http.ResponseWriter, request *http.Request) {
 	provider := request.PathValue("provider")
 	configured, ok := assets[request.PathValue("asset")]
-	if !ok || provider != "coingecko" && provider != "coinpaprika" || g.fetcher == nil || g.now == nil {
+	currency := request.PathValue("currency")
+	if currency == "" {
+		currency = "RUB"
+	}
+	_, currencyOK := supportedFiat[currency]
+	if !ok || !currencyOK || provider != "coingecko" && provider != "coinpaprika" || g.fetcher == nil || g.now == nil {
 		http.NotFound(response, request)
 		return
 	}
-	key := provider + "\x00" + configured.ID
+	key := provider + "\x00" + configured.ID + "\x00" + currency
 	now := g.now().UTC()
 	g.mu.Lock()
 	entry, fresh := g.cache[key]
 	fresh = fresh && entry.ExpiresAt.After(now)
 	g.mu.Unlock()
 	if !fresh {
-		value, err := g.fetcher.Fetch(request.Context(), provider, configured)
+		value, err := g.fetcher.Fetch(request.Context(), provider, currency, configured)
 		if err != nil {
 			writeError(response, http.StatusBadGateway)
 			return
@@ -119,66 +149,186 @@ func writeError(response http.ResponseWriter, status int) {
 	_, _ = io.WriteString(response, `{"error":{"code":"rate_source_unavailable"}}`+"\n")
 }
 
-type upstream struct {
-	client           *http.Client
-	mu               sync.Mutex
-	coinGeckoCache   map[string]rates.ProviderResult
-	coinGeckoExpires time.Time
+type upstreamQuote struct {
+	Price      *big.Rat
+	ObservedAt time.Time
+	Raw        []byte
+	ExpiresAt  time.Time
 }
 
-func (u *upstream) Fetch(ctx context.Context, provider string, configured asset) (rates.ProviderResult, error) {
+type upstream struct {
+	client *http.Client
+
+	coinGeckoMu      sync.Mutex
+	coinGeckoCache   map[string]map[string]rates.ProviderResult
+	coinGeckoExpires map[string]time.Time
+
+	coinPaprikaMu    sync.Mutex
+	coinPaprikaCache map[string]upstreamQuote
+
+	kazakhstanMu     sync.Mutex
+	kazakhstanFactor upstreamQuote
+}
+
+func (u *upstream) Fetch(ctx context.Context, provider, currency string, configured asset) (rates.ProviderResult, error) {
+	if _, ok := supportedFiat[currency]; !ok {
+		return rates.ProviderResult{}, errors.New("unsupported invoice currency")
+	}
 	switch provider {
 	case "coingecko":
-		return u.coinGecko(ctx, configured)
+		return u.coinGecko(ctx, currency, configured)
 	case "coinpaprika":
-		return u.coinPaprika(ctx, configured)
+		return u.coinPaprika(ctx, currency, configured)
 	default:
 		return rates.ProviderResult{}, errors.New("unknown rate provider")
 	}
 }
 
-func (u *upstream) coinGecko(ctx context.Context, configured asset) (rates.ProviderResult, error) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	if value, ok := u.coinGeckoCache[configured.ID]; ok && u.coinGeckoExpires.After(time.Now()) {
-		return value, nil
+func (u *upstream) coinGecko(ctx context.Context, currency string, configured asset) (rates.ProviderResult, error) {
+	u.coinGeckoMu.Lock()
+	defer u.coinGeckoMu.Unlock()
+	if batch, ok := u.coinGeckoCache[currency]; ok && u.coinGeckoExpires[currency].After(time.Now()) {
+		if value, found := batch[configured.ID]; found {
+			return value, nil
+		}
 	}
-	raw, err := u.get(ctx, fmt.Sprintf(coinGeckoURL, "ethereum,solana,the-open-network,tron,tether"))
+	ids := sortedCoinGeckoIDs()
+	raw, err := u.get(ctx, fmt.Sprintf(coinGeckoURL, strings.Join(ids, ","), "rub,usd,eur,inr,cny"))
 	if err != nil {
 		return rates.ProviderResult{}, err
 	}
 	var envelope map[string]struct {
-		RUB           json.Number `json:"rub"`
+		USD           json.Number `json:"usd,omitempty"`
+		RUB           json.Number `json:"rub,omitempty"`
+		EUR           json.Number `json:"eur,omitempty"`
+		INR           json.Number `json:"inr,omitempty"`
+		CNY           json.Number `json:"cny,omitempty"`
 		LastUpdatedAt int64       `json:"last_updated_at"`
 	}
 	if strictDecode(raw, &envelope) != nil {
 		return rates.ProviderResult{}, errors.New("invalid CoinGecko response")
 	}
-	batch := make(map[string]rates.ProviderResult, len(assets))
-	for _, candidate := range assets {
-		quote, ok := envelope[candidate.CoinGeckoID]
-		if !ok || quote.LastUpdatedAt <= 0 {
-			continue
+	now := time.Now()
+	for _, targetCurrency := range defaultFiatCurrencies {
+		upstreamCurrency := targetCurrency
+		factor := big.NewRat(1, 1)
+		evidence := raw
+		if targetCurrency == "KZT" {
+			upstreamCurrency = "USD"
+			factor, evidence, err = u.kazakhstanCross(ctx, raw)
+			if err != nil {
+				if currency == "KZT" {
+					return rates.ProviderResult{}, err
+				}
+				continue
+			}
 		}
-		value, normalizeErr := normalized(candidate.ID, "RUB", "coingecko", quote.RUB.String(), time.Unix(quote.LastUpdatedAt, 0).UTC(), raw)
-		if normalizeErr == nil {
-			batch[candidate.ID] = value
+		batch := make(map[string]rates.ProviderResult, len(assets))
+		for _, candidate := range assets {
+			quote, ok := envelope[candidate.CoinGeckoID]
+			if !ok || quote.LastUpdatedAt <= 0 {
+				continue
+			}
+			decimal := coinGeckoDecimal(quote, upstreamCurrency)
+			price, priceOK := new(big.Rat).SetString(decimal)
+			if !priceOK {
+				continue
+			}
+			price.Mul(price, factor)
+			value, normalizeErr := normalizedRational(candidate.ID, targetCurrency, "coingecko", price, time.Unix(quote.LastUpdatedAt, 0).UTC(), evidence)
+			if normalizeErr == nil {
+				batch[candidate.ID] = value
+			}
 		}
+		u.coinGeckoCache[targetCurrency] = batch
+		u.coinGeckoExpires[targetCurrency] = now.Add(30 * time.Second)
 	}
-	value, ok := batch[configured.ID]
+	value, ok := u.coinGeckoCache[currency][configured.ID]
 	if !ok {
 		return rates.ProviderResult{}, errors.New("CoinGecko rate is missing")
 	}
-	u.coinGeckoCache = batch
-	u.coinGeckoExpires = time.Now().Add(30 * time.Second)
 	return value, nil
 }
 
-func (u *upstream) coinPaprika(ctx context.Context, configured asset) (rates.ProviderResult, error) {
-	raw, err := u.get(ctx, fmt.Sprintf(coinPaprikaURL, configured.CoinPaprikaID))
-	if err != nil {
-		return rates.ProviderResult{}, err
+func coinGeckoDecimal(quote struct {
+	USD           json.Number `json:"usd,omitempty"`
+	RUB           json.Number `json:"rub,omitempty"`
+	EUR           json.Number `json:"eur,omitempty"`
+	INR           json.Number `json:"inr,omitempty"`
+	CNY           json.Number `json:"cny,omitempty"`
+	LastUpdatedAt int64       `json:"last_updated_at"`
+}, currency string) string {
+	switch currency {
+	case "USD":
+		return quote.USD.String()
+	case "RUB":
+		return quote.RUB.String()
+	case "EUR":
+		return quote.EUR.String()
+	case "INR":
+		return quote.INR.String()
+	case "CNY":
+		return quote.CNY.String()
+	default:
+		return ""
 	}
+}
+
+func sortedCoinGeckoIDs() []string {
+	result := make([]string, 0, len(assets))
+	for _, configured := range assets {
+		result = append(result, configured.CoinGeckoID)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func (u *upstream) coinPaprika(ctx context.Context, currency string, configured asset) (rates.ProviderResult, error) {
+	u.coinPaprikaMu.Lock()
+	defer u.coinPaprikaMu.Unlock()
+	upstreamCurrency := currency
+	if currency == "KZT" {
+		upstreamCurrency = "USD"
+	}
+	cacheKey := configured.ID + "\x00" + upstreamCurrency
+	quote, fresh := u.coinPaprikaCache[cacheKey]
+	fresh = fresh && quote.ExpiresAt.After(time.Now())
+	if !fresh {
+		group := []string{"RUB", "USD", "EUR"}
+		if upstreamCurrency == "INR" || upstreamCurrency == "CNY" {
+			group = []string{"INR", "CNY"}
+		}
+		raw, err := u.get(ctx, fmt.Sprintf(coinPaprikaURL, configured.CoinPaprikaID, strings.Join(group, ",")))
+		if err != nil {
+			return rates.ProviderResult{}, err
+		}
+		parsed, parseErr := parseCoinPaprika(raw, configured, group)
+		if parseErr != nil {
+			return rates.ProviderResult{}, parseErr
+		}
+		for parsedCurrency, parsedQuote := range parsed {
+			parsedQuote.ExpiresAt = time.Now().Add(2 * time.Minute)
+			u.coinPaprikaCache[configured.ID+"\x00"+parsedCurrency] = parsedQuote
+		}
+		quote, fresh = u.coinPaprikaCache[cacheKey]
+		if !fresh {
+			return rates.ProviderResult{}, errors.New("CoinPaprika rate is missing")
+		}
+	}
+	price := new(big.Rat).Set(quote.Price)
+	combined := quote.Raw
+	if currency == "KZT" {
+		factor, joined, err := u.kazakhstanCross(ctx, quote.Raw)
+		if err != nil {
+			return rates.ProviderResult{}, err
+		}
+		price.Mul(price, factor)
+		combined = joined
+	}
+	return normalizedRational(configured.ID, currency, "coinpaprika", price, quote.ObservedAt, combined)
+}
+
+func parseCoinPaprika(raw []byte, configured asset, currencies []string) (map[string]upstreamQuote, error) {
 	var envelope struct {
 		ID          string          `json:"id"`
 		Name        json.RawMessage `json:"name"`
@@ -210,17 +360,95 @@ func (u *upstream) coinPaprika(ctx context.Context, configured asset) (rates.Pro
 		} `json:"quotes"`
 	}
 	if strictDecode(raw, &envelope) != nil {
-		return rates.ProviderResult{}, errors.New("invalid CoinPaprika response")
+		return nil, errors.New("invalid CoinPaprika response")
 	}
-	quote, found := envelope.Quotes["RUB"]
 	observedAt, timeErr := time.Parse(time.RFC3339, envelope.LastUpdated)
-	if envelope.ID != configured.CoinPaprikaID || !found || timeErr != nil {
-		return rates.ProviderResult{}, errors.New("CoinPaprika rate is missing")
+	if envelope.ID != configured.CoinPaprikaID || timeErr != nil || len(envelope.Quotes) != len(currencies) {
+		return nil, errors.New("CoinPaprika rate is missing")
 	}
-	return normalized(configured.ID, "RUB", "coinpaprika", quote.Price.String(), observedAt.UTC(), raw)
+	result := make(map[string]upstreamQuote, len(currencies))
+	for _, currency := range currencies {
+		value, found := envelope.Quotes[currency]
+		price, priceOK := new(big.Rat).SetString(value.Price.String())
+		if !found || !priceOK || price.Sign() <= 0 {
+			return nil, errors.New("CoinPaprika rate is missing")
+		}
+		result[currency] = upstreamQuote{Price: price, ObservedAt: observedAt.UTC(), Raw: raw}
+	}
+	return result, nil
+}
+
+func (u *upstream) kazakhstanCross(ctx context.Context, cryptoRaw []byte) (*big.Rat, []byte, error) {
+	u.kazakhstanMu.Lock()
+	defer u.kazakhstanMu.Unlock()
+	if u.kazakhstanFactor.Price == nil || !u.kazakhstanFactor.ExpiresAt.After(time.Now()) {
+		raw, err := u.getXML(ctx, kazakhstanRatesURL)
+		if err != nil {
+			return nil, nil, err
+		}
+		factor, observedAt, parseErr := parseKazakhstanUSD(raw, time.Now().UTC())
+		if parseErr != nil {
+			return nil, nil, parseErr
+		}
+		u.kazakhstanFactor = upstreamQuote{
+			Price: factor, ObservedAt: observedAt, Raw: raw,
+			ExpiresAt: time.Now().Add(6 * time.Hour),
+		}
+	}
+	return new(big.Rat).Set(u.kazakhstanFactor.Price), joinEvidence(cryptoRaw, u.kazakhstanFactor.Raw), nil
+}
+
+func parseKazakhstanUSD(raw []byte, now time.Time) (*big.Rat, time.Time, error) {
+	var feed struct {
+		Channel struct {
+			Items []struct {
+				Title       string `xml:"title"`
+				Published   string `xml:"pubDate"`
+				Description string `xml:"description"`
+				Quantity    string `xml:"quant"`
+			} `xml:"item"`
+		} `xml:"channel"`
+	}
+	if err := xml.Unmarshal(raw, &feed); err != nil {
+		return nil, time.Time{}, errors.New("invalid National Bank of Kazakhstan response")
+	}
+	for _, item := range feed.Channel.Items {
+		if item.Title != "USD" {
+			continue
+		}
+		price, priceOK := new(big.Rat).SetString(item.Description)
+		quantity, quantityOK := new(big.Rat).SetString(item.Quantity)
+		observedAt, timeErr := time.ParseInLocation("02.01.2006", item.Published, time.FixedZone("Asia/Almaty", 5*60*60))
+		if !priceOK || !quantityOK || price.Sign() <= 0 || quantity.Sign() <= 0 || timeErr != nil {
+			break
+		}
+		age := now.Sub(observedAt.UTC())
+		if age < -12*time.Hour || age > 72*time.Hour {
+			return nil, time.Time{}, errors.New("National Bank of Kazakhstan rate is stale")
+		}
+		return price.Quo(price, quantity), observedAt.UTC(), nil
+	}
+	return nil, time.Time{}, errors.New("National Bank of Kazakhstan USD/KZT rate is missing")
+}
+
+func joinEvidence(parts ...[]byte) []byte {
+	result := make([]byte, 0)
+	for _, part := range parts {
+		result = append(result, fmt.Sprintf("%d:", len(part))...)
+		result = append(result, part...)
+	}
+	return result
 }
 
 func (u *upstream) get(ctx context.Context, endpoint string) ([]byte, error) {
+	return u.getTyped(ctx, endpoint, "application/json")
+}
+
+func (u *upstream) getXML(ctx context.Context, endpoint string) ([]byte, error) {
+	return u.getTyped(ctx, endpoint, "application/xml")
+}
+
+func (u *upstream) getTyped(ctx context.Context, endpoint, expectedType string) ([]byte, error) {
 	if u == nil || u.client == nil {
 		return nil, errors.New("rate HTTP client is missing")
 	}
@@ -228,7 +456,7 @@ func (u *upstream) get(ctx context.Context, endpoint string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Accept", expectedType)
 	request.Header.Set("User-Agent", "ocrypt-rate-gateway/1")
 	result, err := u.client.Do(request)
 	if err != nil {
@@ -237,7 +465,8 @@ func (u *upstream) get(ctx context.Context, endpoint string) ([]byte, error) {
 	defer result.Body.Close()
 	contentTypes := result.Header.Values("Content-Type")
 	mediaType, _, typeErr := mime.ParseMediaType(result.Header.Get("Content-Type"))
-	if result.StatusCode != http.StatusOK || len(contentTypes) != 1 || typeErr != nil || mediaType != "application/json" {
+	validType := mediaType == expectedType || expectedType == "application/xml" && (mediaType == "text/xml" || mediaType == "application/rss+xml")
+	if result.StatusCode != http.StatusOK || len(contentTypes) != 1 || typeErr != nil || !validType {
 		return nil, errors.New("rate provider returned an invalid response")
 	}
 	raw, err := io.ReadAll(io.LimitReader(result.Body, (256<<10)+1))
@@ -249,7 +478,14 @@ func (u *upstream) get(ctx context.Context, endpoint string) ([]byte, error) {
 
 func normalized(base, quote, provider, decimal string, observedAt time.Time, raw []byte) (rates.ProviderResult, error) {
 	value, ok := new(big.Rat).SetString(decimal)
-	if !ok || value.Sign() <= 0 || observedAt.IsZero() {
+	if !ok {
+		return rates.ProviderResult{}, errors.New("rate provider returned an invalid price")
+	}
+	return normalizedRational(base, quote, provider, value, observedAt, raw)
+}
+
+func normalizedRational(base, quote, provider string, value *big.Rat, observedAt time.Time, raw []byte) (rates.ProviderResult, error) {
+	if value == nil || value.Sign() <= 0 || observedAt.IsZero() {
 		return rates.ProviderResult{}, errors.New("rate provider returned an invalid price")
 	}
 	digest := sha256.Sum256(raw)

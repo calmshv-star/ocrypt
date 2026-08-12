@@ -10,7 +10,7 @@ Merchant-Anfragen gehen an den API-Origin, Payment-Link-/Checkout-Aliases an den
 
 Die Rechnungswährung ist nicht auf RUB festgelegt. `currency` besteht aus genau drei ASCII-Großbuchstaben und sollte einen ISO-4217-Code enthalten; `currency_scale` gibt die Nachkommastellen ausdrücklich an. `RUB`, `USD`, `EUR`, `KZT`, `INR` und `CNY` verwenden normalerweise Scale `2`, sodass `amount_minor: "3813"` den Betrag `38,13` in der gewählten Währung bedeutet. Die API leitet den Scale nicht aus dem Code ab.
 
-Ein akzeptierter Währungscode allein stellt noch keine Krypto-Quote bereit. Vor dem Erstellen einer On-Chain- oder Hosted-Route benötigt Production einen frischen zugelassenen Kurs für das exakte Paar `asset_id`/Währung. Fehlende, veraltete, nicht quorate, zukünftige oder zu stark abweichende Kurse schlagen fail-closed fehl; für jede Verkaufswährung müssen unabhängige normalisierte Kursquellen konfiguriert und zugelassen werden.
+Die Standalone-Installation lässt alle sechs oben genannten Währungen für jedes mitgelieferte Zahlungs-Asset zu. Sie vergleicht Beobachtungen von CoinGecko und CoinPaprika; KZT nutzt zusätzlich den täglichen offiziellen USD/KZT-Kurs der Nationalbank Kasachstans. Ein anderer dreistelliger Code erzeugt allein noch keine Quote: Production benötigt weiterhin einen frischen zugelassenen Kurs für das exakte Paar `asset_id`/Währung. Fehlende, veraltete, nicht quorate, zukünftige oder zu stark abweichende Kurse schlagen fail-closed fehl.
 
 ## Zahlungsablauf
 
