@@ -298,12 +298,18 @@ func (q *QuorumSource) Heads(ctx context.Context) ([]scanner.ProviderHead, error
 	var wait sync.WaitGroup
 	var heads []scanner.ProviderHead
 	successfulSources := 0
+	var firstErr error
 	for _, source := range q.sources {
 		wait.Add(1)
 		go func(source scanner.Source) {
 			defer wait.Done()
 			values, err := source.Heads(ctx)
 			if err != nil {
+				lock.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				lock.Unlock()
 				return
 			}
 			lock.Lock()
@@ -314,7 +320,11 @@ func (q *QuorumSource) Heads(ctx context.Context) ([]scanner.ProviderHead, error
 	}
 	wait.Wait()
 	if successfulSources < q.quorum {
-		return nil, &ProviderError{Kind: ErrorDisagreement, Operation: "head quorum", Cause: errors.New("insufficient provider responses")}
+		cause := error(errors.New("insufficient provider responses"))
+		if firstErr != nil {
+			cause = fmt.Errorf("insufficient provider responses: %w", firstErr)
+		}
+		return nil, &ProviderError{Kind: ErrorDisagreement, Operation: "head quorum", Cause: cause}
 	}
 	return heads, nil
 }
@@ -379,7 +389,11 @@ func (q *QuorumSource) ScanRange(ctx context.Context, from, to uint64) (scanner.
 	if q.quorum == 1 && firstErr != nil {
 		return scanner.RangeBatch{}, firstErr
 	}
-	return scanner.RangeBatch{}, &ProviderError{Kind: ErrorDisagreement, Operation: "range quorum", Cause: errors.New("providers returned different canonical ranges")}
+	cause := error(errors.New("providers returned different canonical ranges"))
+	if firstErr != nil {
+		cause = fmt.Errorf("providers did not reach canonical range quorum: %w", firstErr)
+	}
+	return scanner.RangeBatch{}, &ProviderError{Kind: ErrorDisagreement, Operation: "range quorum", Cause: cause}
 }
 
 var _ scanner.Source = (*QuorumSource)(nil)
