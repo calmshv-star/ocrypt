@@ -291,9 +291,13 @@ func coinGeckoDecimal(quote struct {
 }
 
 func sortedCoinGeckoIDs() []string {
-	result := make([]string, 0, len(assets))
+	unique := make(map[string]struct{}, len(assets))
 	for _, configured := range assets {
-		result = append(result, configured.CoinGeckoID)
+		unique[configured.CoinGeckoID] = struct{}{}
+	}
+	result := make([]string, 0, len(unique))
+	for id := range unique {
+		result = append(result, id)
 	}
 	sort.Strings(result)
 	return result
@@ -306,7 +310,11 @@ func (u *upstream) coinPaprika(ctx context.Context, currency string, configured 
 	if currency == "KZT" {
 		upstreamCurrency = "USD"
 	}
-	cacheKey := configured.ID + "\x00" + upstreamCurrency
+	// Several chain-specific assets intentionally share one market quote (for
+	// example native USDC on Base and Arbitrum). Cache the raw upstream quote by
+	// the provider's identity so aliases cannot fan out into duplicate public API
+	// calls and hit the provider's free-tier rate limit.
+	cacheKey := configured.CoinPaprikaID + "\x00" + upstreamCurrency
 	quote, fresh := u.coinPaprikaCache[cacheKey]
 	fresh = fresh && quote.ExpiresAt.After(time.Now())
 	if !fresh {
@@ -324,7 +332,7 @@ func (u *upstream) coinPaprika(ctx context.Context, currency string, configured 
 		}
 		for parsedCurrency, parsedQuote := range parsed {
 			parsedQuote.ExpiresAt = time.Now().Add(2 * time.Minute)
-			u.coinPaprikaCache[configured.ID+"\x00"+parsedCurrency] = parsedQuote
+			u.coinPaprikaCache[configured.CoinPaprikaID+"\x00"+parsedCurrency] = parsedQuote
 		}
 		quote, fresh = u.coinPaprikaCache[cacheKey]
 		if !fresh {
