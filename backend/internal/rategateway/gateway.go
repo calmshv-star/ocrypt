@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/big"
 	"mime"
 	"net"
@@ -143,6 +144,9 @@ func (g *Gateway) get(response http.ResponseWriter, request *http.Request) {
 	if !fresh {
 		value, err := g.fetcher.Fetch(request.Context(), provider, currency, configured)
 		if err != nil {
+			// Asset and provider identifiers are public catalog values; raw bodies,
+			// endpoints, credentials, and response evidence are intentionally omitted.
+			slog.Warn("rate gateway upstream rejected", "provider", provider, "asset", configured.ID, "currency", currency, "reason", boundedUpstreamReason(err))
 			writeError(response, http.StatusBadGateway)
 			return
 		}
@@ -156,6 +160,31 @@ func (g *Gateway) get(response http.ResponseWriter, request *http.Request) {
 	response.Header().Set("X-Content-Type-Options", "nosniff")
 	if err := json.NewEncoder(response).Encode(entry.Value); err != nil {
 		return
+	}
+}
+
+func boundedUpstreamReason(err error) string {
+	if err == nil {
+		return "unknown"
+	}
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "invalid CoinPaprika response"):
+		return "coinpaprika_schema"
+	case strings.Contains(message, "CoinPaprika rate is missing"):
+		return "coinpaprika_missing"
+	case strings.Contains(message, "invalid CoinGecko response"):
+		return "coingecko_schema"
+	case strings.Contains(message, "CoinGecko rate is missing"):
+		return "coingecko_missing"
+	case strings.Contains(message, "invalid response"):
+		return "http_response"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return "unavailable"
 	}
 }
 

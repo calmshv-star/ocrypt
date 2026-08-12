@@ -149,6 +149,15 @@ func TestCoinGeckoRequestIDsAreDeduplicated(t *testing.T) {
 	}
 }
 
+func TestBoundedUpstreamReasonDoesNotEchoErrors(t *testing.T) {
+	if got := boundedUpstreamReason(context.DeadlineExceeded); got != "timeout" {
+		t.Fatalf("deadline classified as %q", got)
+	}
+	if got := boundedUpstreamReason(io.ErrUnexpectedEOF); got != "unavailable" {
+		t.Fatalf("unexpected error classified as %q", got)
+	}
+}
+
 func TestParseKazakhstanUSDRequiresFreshOfficialValue(t *testing.T) {
 	raw := []byte(`<?xml version="1.0"?><rss><channel><item><title>USD</title><pubDate>12.08.2026</pubDate><description>465.74</description><quant>1</quant></item></channel></rss>`)
 	rate, observedAt, err := parseKazakhstanUSD(raw, time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC))
