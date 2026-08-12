@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,10 +26,10 @@ import (
 )
 
 type config struct {
-	databaseURL, workerID, secretDir, healthAddress string
-	targets                                         []rates.Target
-	pollInterval, leaseDuration, maxReadyAge        time.Duration
-	maxAttempts                                     int
+	databaseURL, workerID, secretDir, healthAddress             string
+	targets                                                     []rates.Target
+	pollInterval, leaseDuration, maxReadyAge, sourceMinInterval time.Duration
+	maxAttempts                                                 int
 }
 
 func main() {
@@ -73,7 +74,7 @@ func main() {
 		slog.Error("rate provider initialization failed", "error", err)
 		os.Exit(1)
 	}
-	worker := rates.Worker{Owner: configuration.workerID, Loader: loader, Fetcher: observedFetcher{next: provider}, Store: store, NewID: ids.New,
+	worker := rates.Worker{Owner: configuration.workerID, Loader: loader, Fetcher: &observedFetcher{next: provider, minimumInterval: configuration.sourceMinInterval}, Store: store, NewID: ids.New,
 		Now: func() time.Time { return time.Now().UTC() }, LeaseDuration: configuration.leaseDuration, MaxAttempts: configuration.maxAttempts}
 	if err = worker.Validate(); err != nil {
 		slog.Error("rate worker initialization failed", "error", err)
@@ -129,11 +130,29 @@ func main() {
 	}
 }
 
-type observedFetcher struct{ next rates.Fetcher }
+type observedFetcher struct {
+	next            rates.Fetcher
+	minimumInterval time.Duration
+	mu              sync.Mutex
+	lastStarted     time.Time
+}
 
 var providerStatusPattern = regexp.MustCompile(`provider status ([1-5][0-9][0-9])(?:\D|$)`)
 
-func (f observedFetcher) Fetch(ctx context.Context, source rates.SourceConfig) (rates.ProviderResult, error) {
+func (f *observedFetcher) Fetch(ctx context.Context, source rates.SourceConfig) (rates.ProviderResult, error) {
+	f.mu.Lock()
+	if wait := time.Until(f.lastStarted.Add(f.minimumInterval)); wait > 0 {
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			f.mu.Unlock()
+			return rates.ProviderResult{}, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	f.lastStarted = time.Now()
+	f.mu.Unlock()
 	result, err := f.next.Fetch(ctx, source)
 	if err != nil {
 		code := "rejected"
@@ -226,6 +245,9 @@ func loadConfig() (config, error) {
 	if result.maxReadyAge, err = durationEnv("RATE_MAX_READY_AGE", 2*time.Minute); err != nil {
 		return result, err
 	}
+	if result.sourceMinInterval, err = durationEnv("RATE_SOURCE_MIN_INTERVAL", 150*time.Millisecond); err != nil {
+		return result, err
+	}
 	if result.maxAttempts, err = intEnv("RATE_MAX_ATTEMPTS", 8, 1, 100); err != nil {
 		return result, err
 	}
@@ -255,7 +277,7 @@ func loadConfig() (config, error) {
 		seen[target] = true
 	}
 	result.targets = rates.SortedTargets(result.targets)
-	if result.pollInterval < time.Second || result.pollInterval > time.Minute || result.leaseDuration < time.Second || result.leaseDuration > 5*time.Minute || result.maxReadyAge < time.Second || result.maxReadyAge > 24*time.Hour {
+	if result.pollInterval < time.Second || result.pollInterval > time.Minute || result.leaseDuration < time.Second || result.leaseDuration > 5*time.Minute || result.maxReadyAge < time.Second || result.maxReadyAge > 24*time.Hour || result.sourceMinInterval < 10*time.Millisecond || result.sourceMinInterval > 2*time.Second {
 		return result, errors.New("rate durations outside allowed range")
 	}
 	return result, nil
