@@ -52,6 +52,7 @@ func (s *PostgresRepository) Ping(ctx context.Context) error {
   AND has_table_privilege(current_user,'public.hosted_provider_create_attempts','SELECT,INSERT')
   AND has_table_privilege(current_user,'public.payment_match_aggregates','SELECT')
   AND has_table_privilege(current_user,'public.payment_route_policy_bindings','SELECT')
+  AND has_table_privilege(current_user,'public.merchants','SELECT')
   AND has_table_privilege(current_user,'public.payment_matches','SELECT')
   AND has_table_privilege(current_user,'public.payment_receipt_evidence','SELECT,INSERT')
   AND has_table_privilege(current_user,'public.transfer_events','SELECT')

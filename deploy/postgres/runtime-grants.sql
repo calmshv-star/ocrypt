@@ -102,6 +102,7 @@ GRANT EXECUTE ON FUNCTION approve_legacy_compat_config_admission(uuid,jsonb)
 TO legacy_compat_admission_approver;
 
 GRANT SELECT ON tenants,chains,assets TO merchant_api_runtime,merchant_management_runtime,merchant_admin_runtime;
+GRANT SELECT ON merchants TO merchant_management_runtime;
 GRANT SELECT,INSERT,UPDATE ON
   payment_intents,checkout_sessions,payment_routes,rate_quotes,address_assignments,
   addresses,amount_reservations,payment_proofs,idempotency_records
