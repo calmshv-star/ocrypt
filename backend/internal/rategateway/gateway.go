@@ -330,7 +330,10 @@ func (u *upstream) coinPaprika(ctx context.Context, currency string, configured 
 			}
 		}
 		u.coinPaprikaLast = time.Now()
-		group := []string{"RUB", "USD", "EUR", "INR", "CNY"}
+		group := []string{"RUB", "USD", "EUR"}
+		if upstreamCurrency == "INR" || upstreamCurrency == "CNY" {
+			group = []string{"INR", "CNY"}
+		}
 		raw, err := u.get(ctx, fmt.Sprintf(coinPaprikaURL, configured.CoinPaprikaID, strings.Join(group, ",")))
 		if err != nil {
 			return rates.ProviderResult{}, err

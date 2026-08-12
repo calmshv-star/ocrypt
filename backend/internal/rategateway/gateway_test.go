@@ -100,7 +100,7 @@ func TestCoinPaprikaSharesOneUpstreamRequestAcrossChainAliases(t *testing.T) {
 	calls := 0
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		calls++
-		if request.URL.String() != "https://api.coinpaprika.com/v1/tickers/usdc-usd-coin?quotes=RUB,USD,EUR,INR,CNY" {
+		if request.URL.String() != "https://api.coinpaprika.com/v1/tickers/usdc-usd-coin?quotes=RUB,USD,EUR" {
 			t.Fatalf("unexpected upstream request %s", request.URL)
 		}
 		return &http.Response{
@@ -112,9 +112,7 @@ func TestCoinPaprikaSharesOneUpstreamRequestAcrossChainAliases(t *testing.T) {
 				"quotes":{
 					"RUB":{"price":80},
 					"USD":{"price":1},
-					"EUR":{"price":0.9},
-					"INR":{"price":87},
-					"CNY":{"price":7.2}
+					"EUR":{"price":0.9}
 				}
 			}`)),
 		}, nil
@@ -129,15 +127,11 @@ func TestCoinPaprikaSharesOneUpstreamRequestAcrossChainAliases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	india, err := source.coinPaprika(context.Background(), "INR", assets["usdc-base"])
-	if err != nil {
-		t.Fatal(err)
-	}
 	if calls != 1 {
 		t.Fatalf("chain aliases made %d upstream requests, want 1", calls)
 	}
-	if base.BaseAsset != "usdc-base" || arbitrum.BaseAsset != "usdc-arbitrum" || india.QuoteAsset != "INR" {
-		t.Fatalf("aliases or batched fiat rates lost their identities: %#v, %#v, %#v", base, arbitrum, india)
+	if base.BaseAsset != "usdc-base" || arbitrum.BaseAsset != "usdc-arbitrum" {
+		t.Fatalf("aliases lost their public IDs: %#v, %#v", base, arbitrum)
 	}
 }
 
