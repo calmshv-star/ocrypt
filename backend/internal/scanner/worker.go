@@ -218,7 +218,7 @@ func quorumSafeHeightAt(heads []ProviderHead, chainID, genesis string, quorum in
 	return heights[quorum-1], nil
 }
 func validateRange(batch RangeBatch, from, to uint64, lease Lease, overlap uint64) error {
-	if batch.IdleCheckpoint && (!batch.SparseBlocks || len(batch.Events) != 0 || len(batch.Blocks) > 2) {
+	if batch.IdleCheckpoint && (!batch.SparseBlocks || len(batch.Events) != 0 || len(batch.Blocks) > 3) {
 		return fmt.Errorf("invalid idle checkpoint range")
 	}
 	if batch.From != from || batch.To > to || batch.To < from || len(batch.Blocks) == 0 {

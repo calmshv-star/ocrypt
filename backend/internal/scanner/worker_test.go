@@ -64,7 +64,8 @@ func TestSparseRangeBindsOverlapCursorWithoutInventingIntermediateParents(t *tes
 	batch := RangeBatch{
 		From: 10, To: 100, SparseBlocks: true, IdleCheckpoint: true,
 		Blocks: []Block{
-			{Height: 11, Hash: "cursor-hash", ParentHash: "parent-10", Time: time.Unix(11, 0)},
+			{Height: 10, Hash: "from-hash", ParentHash: "parent-9", Time: time.Unix(10, 0)},
+			{Height: 11, Hash: "cursor-hash", ParentHash: "from-hash", Time: time.Unix(11, 0)},
 			{Height: 100, Hash: "head-hash", ParentHash: "parent-99", Time: time.Unix(100, 0)},
 		},
 	}

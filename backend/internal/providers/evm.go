@@ -283,7 +283,10 @@ func (s *EVMSource) scanWatchedRange(ctx context.Context, from, to uint64) (scan
 		if cursorHeight > to {
 			cursorHeight = to
 		}
-		heights := []uint64{cursorHeight}
+		heights := []uint64{from}
+		if cursorHeight != from {
+			heights = append(heights, cursorHeight)
+		}
 		if to != cursorHeight {
 			heights = append(heights, to)
 		}
