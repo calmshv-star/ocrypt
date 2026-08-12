@@ -478,9 +478,6 @@ func NewDestinationFilterSource(source scanner.Source, addresses []string) (*Des
 		}
 		watched[address] = struct{}{}
 	}
-	if len(watched) == 0 {
-		return nil, errors.New("destination filter requires at least one address")
-	}
 	return &DestinationFilterSource{source: source, watched: watched}, nil
 }
 

@@ -47,8 +47,13 @@ type ScannerRuntime struct {
 type ScannerLoader struct {
 	Reader            platformadmin.RuntimeStateReader
 	ProviderAdmission providerops.AdmissionReader
+	WatchAddresses    WatchAddressReader
 	SecretDir         string
 	UnsafeTestBypass  bool
+}
+
+type WatchAddressReader interface {
+	ScannerWatchAddresses(context.Context, string, time.Time) ([]string, error)
 }
 
 type chainPayload struct {
@@ -152,6 +157,20 @@ func (l ScannerLoader) Load(ctx context.Context, keys ScannerKeys, now time.Time
 	if chain.PageSize > 1000 || len(chain.GasFreeContracts) > 128 || len(chain.GasFreeFeeCollectors) > 128 || !safeStrings(chain.GasFreeContracts) || !safeStrings(chain.GasFreeFeeCollectors) {
 		return ScannerRuntime{}, errors.New("active chain provider options are outside admitted bounds")
 	}
+	var watchedAddresses []string
+	if l.WatchAddresses == nil {
+		if !l.UnsafeTestBypass {
+			return ScannerRuntime{}, errors.New("scanner watch-address reader is required")
+		}
+	} else {
+		watchedAddresses, err = l.WatchAddresses.ScannerWatchAddresses(ctx, keys.Chain, now)
+		if err != nil {
+			return ScannerRuntime{}, fmt.Errorf("load scanner watch addresses: %w", err)
+		}
+		if len(watchedAddresses) > 2048 || !safeStrings(watchedAddresses) {
+			return ScannerRuntime{}, errors.New("scanner watch-address set is outside admitted bounds")
+		}
+	}
 	finalitySnapshot := byKey[platformadmin.RuntimeSnapshotKey{Kind: platformadmin.KindFinalityPolicy, LogicalKey: keys.Finality}]
 	var finality finalityPayload
 	if strictDecode(finalitySnapshot.Payload, &finality) != nil || finality.ChainRef != keys.Chain || finality.ReorgDepth < 1 || finality.ReorgDepth > 100000 || finality.Confirmations > 100000 || chain.Overlap < finality.ReorgDepth {
@@ -237,9 +256,13 @@ func (l ScannerLoader) Load(ctx context.Context, keys ScannerKeys, now time.Time
 		if rangePolicy.Timeout < timeout {
 			timeout = rangePolicy.Timeout
 		}
-		source, err := providers.NewSource(providers.Config{Kind: providers.Kind(rpc.ProviderKind), HTTP: providers.HTTPConfig{Endpoint: rpc.Endpoint, Headers: headers, Timeout: timeout}, ProviderID: rpc.ProviderID, ChainID: keys.Chain, NativeAssetID: nativeAssetID, NativeDecimals: nativeDecimals, Assets: assets, IncludeInternal: chain.IncludeInternal, GasFreeContracts: chain.GasFreeContracts, GasFreeFeeCollectors: chain.GasFreeFeeCollectors, PageSize: chain.PageSize})
+		source, err := providers.NewSource(providers.Config{Kind: providers.Kind(rpc.ProviderKind), HTTP: providers.HTTPConfig{Endpoint: rpc.Endpoint, Headers: headers, Timeout: timeout}, ProviderID: rpc.ProviderID, ChainID: keys.Chain, NativeAssetID: nativeAssetID, NativeDecimals: nativeDecimals, Assets: assets, IncludeInternal: chain.IncludeInternal, GasFreeContracts: chain.GasFreeContracts, GasFreeFeeCollectors: chain.GasFreeFeeCollectors, WatchedAddresses: watchedAddresses, AddressFiltered: true, PageSize: chain.PageSize})
 		if err != nil {
 			return ScannerRuntime{}, fmt.Errorf("initialize admitted RPC provider %s: %w", key, err)
+		}
+		source, err = providers.NewDestinationFilterSource(source, watchedAddresses)
+		if err != nil {
+			return ScannerRuntime{}, fmt.Errorf("initialize destination filter for %s: %w", key, err)
 		}
 		sources = append(sources, newPolicySource(source, headPolicy, rangePolicy, now))
 	}

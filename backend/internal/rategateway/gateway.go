@@ -47,11 +47,27 @@ type asset struct {
 }
 
 var assets = map[string]asset{
-	"eth-ethereum": {ID: "eth-ethereum", CoinGeckoID: "ethereum", CoinPaprikaID: "eth-ethereum"},
-	"sol-solana":   {ID: "sol-solana", CoinGeckoID: "solana", CoinPaprikaID: "sol-solana"},
-	"ton-ton":      {ID: "ton-ton", CoinGeckoID: "the-open-network", CoinPaprikaID: "toncoin-the-open-network"},
-	"trx-tron":     {ID: "trx-tron", CoinGeckoID: "tron", CoinPaprikaID: "trx-tron"},
-	"usdt-tron":    {ID: "usdt-tron", CoinGeckoID: "tether", CoinPaprikaID: "usdt-tether"},
+	"eth-ethereum":   {ID: "eth-ethereum", CoinGeckoID: "ethereum", CoinPaprikaID: "eth-ethereum"},
+	"usdc-ethereum":  {ID: "usdc-ethereum", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
+	"usdt-ethereum":  {ID: "usdt-ethereum", CoinGeckoID: "tether", CoinPaprikaID: "usdt-tether"},
+	"sol-solana":     {ID: "sol-solana", CoinGeckoID: "solana", CoinPaprikaID: "sol-solana"},
+	"usdc-solana":    {ID: "usdc-solana", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
+	"usdt-solana":    {ID: "usdt-solana", CoinGeckoID: "tether", CoinPaprikaID: "usdt-tether"},
+	"ton-ton":        {ID: "ton-ton", CoinGeckoID: "the-open-network", CoinPaprikaID: "toncoin-the-open-network"},
+	"usdt-ton":       {ID: "usdt-ton", CoinGeckoID: "tether", CoinPaprikaID: "usdt-tether"},
+	"trx-tron":       {ID: "trx-tron", CoinGeckoID: "tron", CoinPaprikaID: "trx-tron"},
+	"usdt-tron":      {ID: "usdt-tron", CoinGeckoID: "tether", CoinPaprikaID: "usdt-tether"},
+	"eth-base":       {ID: "eth-base", CoinGeckoID: "ethereum", CoinPaprikaID: "eth-ethereum"},
+	"usdc-base":      {ID: "usdc-base", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
+	"eth-arbitrum":   {ID: "eth-arbitrum", CoinGeckoID: "ethereum", CoinPaprikaID: "eth-ethereum"},
+	"usdc-arbitrum":  {ID: "usdc-arbitrum", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
+	"eth-optimism":   {ID: "eth-optimism", CoinGeckoID: "ethereum", CoinPaprikaID: "eth-ethereum"},
+	"usdc-optimism":  {ID: "usdc-optimism", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
+	"avax-avalanche": {ID: "avax-avalanche", CoinGeckoID: "avalanche-2", CoinPaprikaID: "avax-avalanche"},
+	"usdc-avalanche": {ID: "usdc-avalanche", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
+	"pol-polygon":    {ID: "pol-polygon", CoinGeckoID: "polygon-ecosystem-token", CoinPaprikaID: "pol-polygon-ecosystem-token"},
+	"usdc-polygon":   {ID: "usdc-polygon", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
+	"bnb-bsc":        {ID: "bnb-bsc", CoinGeckoID: "binancecoin", CoinPaprikaID: "bnb-binance-coin"},
 }
 
 type Fetcher interface {

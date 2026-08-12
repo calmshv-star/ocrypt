@@ -407,10 +407,18 @@ func parseTRONDirectTokenTransfer(value map[string]any, asset TRONAsset, index u
 func canonicalTRONABIAddress(value string) (string, error) {
 	value = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "0x"))
 	if len(value) == 64 {
-		if value[:24] != strings.Repeat("0", 24) {
+		switch {
+		case value[:24] == strings.Repeat("0", 24):
+			// Solidity's address type contains the 20-byte account payload.
+			value = value[24:]
+		case value[:22] == strings.Repeat("0", 22) && value[22:24] == "41":
+			// Some exchanges encode the complete 21-byte TRON address, including
+			// its 0x41 mainnet prefix, in the ABI word. Both encodings resolve to
+			// the same Base58Check destination and must be accepted canonically.
+			value = value[22:]
+		default:
 			return "", errors.New("invalid TRON ABI address")
 		}
-		value = value[24:]
 	}
 	return canonicalTRONAddress(value)
 }

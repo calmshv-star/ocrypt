@@ -1,0 +1,71 @@
+[
+  {
+    "name": "ethereum",
+    "chain_id": "eip155:1",
+    "genesis_hash": "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
+    "native_asset_id": "eth-ethereum",
+    "endpoints": ["https://ethereum.publicnode.com", "https://eth.drpc.org"],
+    "tokens": {
+      "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48": {"asset_id": "usdc-ethereum", "decimals": 6},
+      "0xdAC17F958D2ee523a2206206994597C13D831ec7": {"asset_id": "usdt-ethereum", "decimals": 6}
+    }
+  },
+  {
+    "name": "base",
+    "chain_id": "eip155:8453",
+    "genesis_hash": "0xf712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd",
+    "native_asset_id": "eth-base",
+    "endpoints": ["https://mainnet.base.org", "https://base.drpc.org"],
+    "tokens": {
+      "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913": {"asset_id": "usdc-base", "decimals": 6}
+    }
+  },
+  {
+    "name": "arbitrum",
+    "chain_id": "eip155:42161",
+    "genesis_hash": "0x7ee576b35482195fc49205cec9af72ce14f003b9ae69f6ba0faef4514be8b442",
+    "native_asset_id": "eth-arbitrum",
+    "endpoints": ["https://arbitrum.gateway.tenderly.co", "https://arbitrum.drpc.org"],
+    "tokens": {
+      "0xaf88d065e77c8cC2239327C5EDb3A432268e5831": {"asset_id": "usdc-arbitrum", "decimals": 6}
+    }
+  },
+  {
+    "name": "optimism",
+    "chain_id": "eip155:10",
+    "genesis_hash": "0x7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b",
+    "native_asset_id": "eth-optimism",
+    "endpoints": ["https://mainnet.optimism.io", "https://optimism.drpc.org"],
+    "tokens": {
+      "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85": {"asset_id": "usdc-optimism", "decimals": 6}
+    }
+  },
+  {
+    "name": "avalanche",
+    "chain_id": "eip155:43114",
+    "genesis_hash": "0x31ced5b9beb7f8782b014660da0cb18cc409f121f408186886e1ca3e8eeca96b",
+    "native_asset_id": "avax-avalanche",
+    "endpoints": ["https://avalanche-c-chain-rpc.publicnode.com", "https://avalanche.drpc.org"],
+    "tokens": {
+      "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E": {"asset_id": "usdc-avalanche", "decimals": 6}
+    }
+  },
+  {
+    "name": "polygon",
+    "chain_id": "eip155:137",
+    "genesis_hash": "0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b",
+    "native_asset_id": "pol-polygon",
+    "endpoints": ["https://tenderly.rpc.polygon.community", "https://polygon.publicnode.com"],
+    "tokens": {
+      "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359": {"asset_id": "usdc-polygon", "decimals": 6}
+    }
+  },
+  {
+    "name": "bsc",
+    "chain_id": "eip155:56",
+    "genesis_hash": "0x0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b",
+    "native_asset_id": "bnb-bsc",
+    "endpoints": ["https://bsc-rpc.publicnode.com", "https://bsc-dataseed.binance.org"],
+    "tokens": {}
+  }
+]

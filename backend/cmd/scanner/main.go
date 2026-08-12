@@ -74,7 +74,7 @@ func main() {
 			slog.Error("provider operations service initialization failed", "error", createErr)
 			os.Exit(1)
 		}
-		runtimeLoader = &platformruntime.ScannerLoader{Reader: platformRepository, ProviderAdmission: providerService, SecretDir: config.platformSecretDir}
+		runtimeLoader = &platformruntime.ScannerLoader{Reader: platformRepository, ProviderAdmission: providerService, WatchAddresses: platformRepository, SecretDir: config.platformSecretDir}
 	}
 	metrics := telemetry.New("scanner")
 	worker := scanner.Worker{
@@ -277,7 +277,7 @@ func scannerSource(config scannerConfig) (scanner.Source, error) {
 			Kind: providers.Kind(config.providerKind), HTTP: providers.HTTPConfig{Endpoint: endpoint, Headers: headers, Timeout: 20 * time.Second, MinInterval: config.providerMinInterval},
 			ProviderID: providerID, ChainID: config.chainID, NativeAssetID: config.nativeAssetID, NativeDecimals: config.nativeDecimals,
 			Assets: config.assets, IncludeInternal: config.includeInternal, GasFreeContracts: config.gasFreeContracts,
-			GasFreeFeeCollectors: config.gasFreeFeeCollectors, WatchedAddresses: config.watchedAddresses, PageSize: config.pageSize,
+			GasFreeFeeCollectors: config.gasFreeFeeCollectors, WatchedAddresses: config.watchedAddresses, AddressFiltered: len(config.watchedAddresses) > 0, PageSize: config.pageSize,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("initialize %s: %w", providerID, err)

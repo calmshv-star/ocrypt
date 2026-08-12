@@ -230,6 +230,8 @@ GRANT EXECUTE ON FUNCTION provider_operation_binding_policy_current(uuid)
 TO merchant_scanner_worker;
 GRANT SELECT,INSERT ON scanner_runtime_config_evidence TO merchant_scanner_worker;
 REVOKE UPDATE,DELETE,TRUNCATE ON scanner_runtime_config_evidence FROM merchant_scanner_worker;
+REVOKE ALL ON FUNCTION scanner_active_watch_addresses(text,timestamptz) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION scanner_active_watch_addresses(text,timestamptz) TO merchant_scanner_worker;
 
 -- Provider health is a private, cross-scope reader only for active platform
 -- snapshots. All circuit/rate/observation mutation remains behind fenced

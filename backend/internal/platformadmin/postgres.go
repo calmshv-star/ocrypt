@@ -34,6 +34,23 @@ func (r *PostgresRepository) Ping(ctx context.Context) error {
 	}
 	return nil
 }
+
+func (r *PostgresRepository) ScannerWatchAddresses(ctx context.Context, chainID string, observedAt time.Time) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `SELECT address FROM scanner_active_watch_addresses($1,$2)`, chainID, observedAt)
+	if err != nil {
+		return nil, classify(err)
+	}
+	defer rows.Close()
+	addresses := make([]string, 0)
+	for rows.Next() {
+		var address string
+		if err = rows.Scan(&address); err != nil {
+			return nil, classify(err)
+		}
+		addresses = append(addresses, address)
+	}
+	return addresses, classify(rows.Err())
+}
 func (r *PostgresRepository) ConsumePlatformAdminAssertion(ctx context.Context, audience, nonce string, expires time.Time) (bool, error) {
 	var ok bool
 	err := r.pool.QueryRow(ctx, `SELECT consume_platform_admin_assertion($1,NULLIF($2,'')::uuid,$3)`, audience, nonce, expires).Scan(&ok)

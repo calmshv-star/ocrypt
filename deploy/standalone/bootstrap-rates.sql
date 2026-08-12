@@ -58,7 +58,14 @@ SELECT pg_temp.activate_rate_snapshot(
     'timeout_ms',10000,'max_response_bytes',4096
   )
 ) FROM
-  (VALUES('eth-ethereum'),('sol-solana'),('ton-ton'),('trx-tron'),('usdt-tron')) AS assets(asset_id)
+  (VALUES
+    ('eth-ethereum'),('usdc-ethereum'),('usdt-ethereum'),
+    ('sol-solana'),('usdc-solana'),('usdt-solana'),
+    ('ton-ton'),('usdt-ton'),('trx-tron'),('usdt-tron'),
+    ('eth-base'),('usdc-base'),('eth-arbitrum'),('usdc-arbitrum'),
+    ('eth-optimism'),('usdc-optimism'),('avax-avalanche'),('usdc-avalanche'),
+    ('pol-polygon'),('usdc-polygon'),('bnb-bsc')
+  ) AS assets(asset_id)
   CROSS JOIN (VALUES('RUB'),('USD'),('EUR'),('KZT'),('INR'),('CNY')) AS currencies(currency);
 
 SELECT pg_temp.activate_rate_snapshot(
@@ -70,7 +77,14 @@ SELECT pg_temp.activate_rate_snapshot(
     'timeout_ms',10000,'max_response_bytes',4096
   )
 ) FROM
-  (VALUES('eth-ethereum'),('sol-solana'),('ton-ton'),('trx-tron'),('usdt-tron')) AS assets(asset_id)
+  (VALUES
+    ('eth-ethereum'),('usdc-ethereum'),('usdt-ethereum'),
+    ('sol-solana'),('usdc-solana'),('usdt-solana'),
+    ('ton-ton'),('usdt-ton'),('trx-tron'),('usdt-tron'),
+    ('eth-base'),('usdc-base'),('eth-arbitrum'),('usdc-arbitrum'),
+    ('eth-optimism'),('usdc-optimism'),('avax-avalanche'),('usdc-avalanche'),
+    ('pol-polygon'),('usdc-polygon'),('bnb-bsc')
+  ) AS assets(asset_id)
   CROSS JOIN (VALUES('RUB'),('USD'),('EUR'),('KZT'),('INR'),('CNY')) AS currencies(currency);
 
 SELECT pg_temp.activate_rate_snapshot(
@@ -82,7 +96,14 @@ SELECT pg_temp.activate_rate_snapshot(
     'future_tolerance_seconds',10,'poll_interval_seconds',30
   )
 ) FROM
-  (VALUES('eth-ethereum'),('sol-solana'),('ton-ton'),('trx-tron'),('usdt-tron')) AS assets(asset_id)
+  (VALUES
+    ('eth-ethereum'),('usdc-ethereum'),('usdt-ethereum'),
+    ('sol-solana'),('usdc-solana'),('usdt-solana'),
+    ('ton-ton'),('usdt-ton'),('trx-tron'),('usdt-tron'),
+    ('eth-base'),('usdc-base'),('eth-arbitrum'),('usdc-arbitrum'),
+    ('eth-optimism'),('usdc-optimism'),('avax-avalanche'),('usdc-avalanche'),
+    ('pol-polygon'),('usdc-polygon'),('bnb-bsc')
+  ) AS assets(asset_id)
   CROSS JOIN (VALUES('RUB'),('USD'),('EUR'),('KZT'),('INR'),('CNY')) AS currencies(currency);
 
 COMMIT;

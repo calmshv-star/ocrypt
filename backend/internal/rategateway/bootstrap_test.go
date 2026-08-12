@@ -42,6 +42,20 @@ func TestStandaloneBootstrapAndRuntimeTargetsCoverDefaultCatalog(t *testing.T) {
 	for id := range assets {
 		assetIDs = append(assetIDs, id)
 	}
+	sort.Strings(assetIDs)
+	assetBlock := regexp.MustCompile(`(?s)\(VALUES\s+(.*?)\)\s+AS assets\(asset_id\)`).FindStringSubmatch(bootstrap)
+	if len(assetBlock) != 2 {
+		t.Fatal("default asset VALUES list is missing from rate bootstrap")
+	}
+	assetMatches := regexp.MustCompile(`'([a-z0-9-]+)'`).FindAllStringSubmatch(assetBlock[1], -1)
+	gotAssets := make([]string, 0, len(assetMatches))
+	for _, match := range assetMatches {
+		gotAssets = append(gotAssets, match[1])
+	}
+	sort.Strings(gotAssets)
+	if strings.Join(gotAssets, ",") != strings.Join(assetIDs, ",") {
+		t.Fatalf("bootstrap assets %v do not match gateway %v", gotAssets, assetIDs)
+	}
 	for _, id := range assetIDs {
 		for _, currency := range defaultFiatCurrencies {
 			policy := `{"policy_key":"rate-` + id + `-` + strings.ToLower(currency) + `"}`
