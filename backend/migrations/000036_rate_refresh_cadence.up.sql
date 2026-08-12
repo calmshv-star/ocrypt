@@ -100,6 +100,8 @@ DECLARE
   new_request_id uuid;
   new_snapshot_id uuid;
   new_activation_id uuid;
+  requester uuid := '0198a100-0000-7000-8000-000000000003';
+  approver uuid := '0198a100-0000-7000-8000-000000000004';
   now_at timestamptz;
 BEGIN
   FOR item IN
@@ -135,19 +137,19 @@ BEGIN
     VALUES(new_request_id,item.scope_id,item.kind,item.logical_key,next_version,item.version,
       next_payload,digest(next_payload::text,'sha256'),'active',
       'Thirty minute background rate cadence with stale-only checkout wakeup',
-      item.activated_by,item.activated_by,item.activated_by,item.activated_by,
+      requester,approver,approver,approver,
       now_at,now_at,now_at,now_at,now_at,now_at,4);
     INSERT INTO platform_config_snapshots(
       id,scope_id,change_request_id,kind,logical_key,version,payload,payload_hash,activated_by,activated_at)
     VALUES(new_snapshot_id,item.scope_id,new_request_id,item.kind,item.logical_key,next_version,
-      next_payload,digest(next_payload::text,'sha256'),item.activated_by,now_at);
+      next_payload,digest(next_payload::text,'sha256'),approver,now_at);
     UPDATE platform_config_heads
     SET snapshot_id=new_snapshot_id,fence_token=item.fence_token+1,updated_at=now_at
     WHERE scope_id=item.scope_id AND kind=item.kind AND logical_key=item.logical_key;
     INSERT INTO platform_config_activations(
       id,scope_id,kind,logical_key,snapshot_id,fence_token,activation_type,actor_id,occurred_at)
     VALUES(new_activation_id,item.scope_id,item.kind,item.logical_key,new_snapshot_id,item.fence_token+1,
-      'activate',item.activated_by,now_at);
+      'activate',approver,now_at);
   END LOOP;
 END $$;
 
