@@ -29,6 +29,9 @@ type RangeBatch struct {
 	Blocks          []Block                `json:"blocks"`
 	Events          []domain.TransferEvent `json:"events"`
 	RuntimeEvidence []ConfigEvidence       `json:"-"`
+	// SparseBlocks is used by chains such as Solana whose consensus can skip
+	// numbered slots. Blocks must still be strictly ordered and parent-linked.
+	SparseBlocks bool `json:"-"`
 }
 type ConfigEvidence struct {
 	Kind        string `json:"kind"`
@@ -211,16 +214,31 @@ func quorumSafeHeightAt(heads []ProviderHead, chainID, genesis string, quorum in
 	return heights[quorum-1], nil
 }
 func validateRange(batch RangeBatch, from, to uint64, lease Lease, overlap uint64) error {
-	if batch.From != from || batch.To != to || len(batch.Blocks) != int(to-from+1) {
+	if batch.From != from || batch.To > to || batch.To < from || len(batch.Blocks) == 0 {
+		return fmt.Errorf("range coverage mismatch")
+	}
+	if !batch.SparseBlocks && (batch.To != to || len(batch.Blocks) != int(to-from+1)) {
 		return fmt.Errorf("range coverage mismatch")
 	}
 	for i, block := range batch.Blocks {
-		if block.Height != from+uint64(i) || block.Hash == "" || block.Time.IsZero() {
+		expectedHeight := from + uint64(i)
+		if batch.SparseBlocks {
+			expectedHeight = block.Height
+		}
+		if block.Height != expectedHeight || block.Height < from || block.Height > batch.To || block.Hash == "" || block.Time.IsZero() {
 			return fmt.Errorf("block gap at offset %d", i)
 		}
-		if i > 0 && block.ParentHash != batch.Blocks[i-1].Hash {
-			return fmt.Errorf("parent hash mismatch at %d", block.Height)
+		if i > 0 {
+			if block.Height <= batch.Blocks[i-1].Height {
+				return fmt.Errorf("block order mismatch at %d", block.Height)
+			}
+			if block.ParentHash != batch.Blocks[i-1].Hash {
+				return fmt.Errorf("parent hash mismatch at %d", block.Height)
+			}
 		}
+	}
+	if batch.Blocks[len(batch.Blocks)-1].Height != batch.To {
+		return fmt.Errorf("range cursor is not bound to the final block")
 	}
 	blocks := make(map[uint64]string, len(batch.Blocks))
 	for _, block := range batch.Blocks {

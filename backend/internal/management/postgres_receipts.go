@@ -15,8 +15,23 @@ import (
 )
 
 func (s *PostgresRepository) FindReceiptTransferCandidate(ctx context.Context, target ReceiptTarget, amountAtomic string, occurredAt time.Time, window time.Duration) (candidate ReceiptTransferCandidate, err error) {
-	if amountAtomic == "" || occurredAt.IsZero() || window <= 0 || window > 10*time.Minute {
+	if amountAtomic == "" || target.StartsAt.IsZero() || target.GraceEndsAt.IsZero() || !target.StartsAt.Before(target.GraceEndsAt) {
 		return candidate, ErrInvalid
+	}
+	from, until := target.StartsAt.UTC(), target.GraceEndsAt.UTC()
+	if !occurredAt.IsZero() {
+		if window <= 0 || window > 10*time.Minute {
+			return candidate, ErrInvalid
+		}
+		if narrowed := occurredAt.UTC().Add(-window); narrowed.After(from) {
+			from = narrowed
+		}
+		if narrowed := occurredAt.UTC().Add(window); narrowed.Before(until) {
+			until = narrowed
+		}
+	}
+	if from.After(until) {
+		return candidate, nil
 	}
 	err = s.withinTenant(ctx, target.TenantID, func(tx pgx.Tx) error {
 		if _, e := tx.Exec(ctx, `SELECT set_config('app.merchant_id',$1,true)`, target.MerchantID); e != nil {
@@ -28,7 +43,7 @@ func (s *PostgresRepository) FindReceiptTransferCandidate(ctx context.Context, t
 			  AND te.amount_atomic=$4::numeric AND te.event_kind<>'gasfree_fee'
 			  AND te.status<>'reorged' AND te.on_chain_time BETWEEN $5 AND $6
 			  AND NOT EXISTS(SELECT 1 FROM payment_matches pm WHERE pm.event_id=te.id AND pm.state<>'reversed' AND pm.intent_id<>$7)
-			ORDER BY te.on_chain_time,te.id LIMIT 2`, target.ChainID, target.AssetID, target.Address, amountAtomic, occurredAt.Add(-window), occurredAt.Add(window), target.IntentID)
+			ORDER BY te.on_chain_time,te.id LIMIT 2`, target.ChainID, target.AssetID, target.Address, amountAtomic, from, until, target.IntentID)
 		if e != nil {
 			return e
 		}
@@ -84,12 +99,12 @@ func (s *PostgresRepository) ResolveReceiptTarget(ctx context.Context, hash [32]
 			return ErrNotFound
 		}
 		var decimals int16
-		e = tx.QueryRow(ctx, `SELECT r.id::text,r.chain_id,r.asset_id,r.receiving_address,r.expected_amount_atomic::text,r.asset_decimals
+		e = tx.QueryRow(ctx, `SELECT r.id::text,r.chain_id,r.asset_id,r.receiving_address,r.expected_amount_atomic::text,r.asset_decimals,r.starts_at,r.grace_ends_at
 			FROM payment_routes r
 			WHERE r.intent_id=$1 AND r.tenant_id=$2 AND r.merchant_id=$3 AND r.provider='on_chain'
 			  AND r.status IN('active','expired') AND ($4='' OR r.id=NULLIF($4,'')::uuid)
 			  AND ($4<>'' OR (SELECT count(*) FROM payment_routes candidate WHERE candidate.intent_id=$1 AND candidate.tenant_id=$2 AND candidate.merchant_id=$3 AND candidate.provider='on_chain' AND candidate.status IN('active','expired'))=1)
-			LIMIT 1`, target.IntentID, target.TenantID, target.MerchantID, selected).Scan(&target.RouteID, &target.ChainID, &target.AssetID, &target.Address, &target.ExpectedAmount, &decimals)
+			LIMIT 1`, target.IntentID, target.TenantID, target.MerchantID, selected).Scan(&target.RouteID, &target.ChainID, &target.AssetID, &target.Address, &target.ExpectedAmount, &decimals, &target.StartsAt, &target.GraceEndsAt)
 		if e != nil {
 			return e
 		}

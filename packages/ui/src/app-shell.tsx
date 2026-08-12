@@ -59,7 +59,6 @@ export type ShellLabels = {
   signOut: string;
   signingOut?: string;
   primaryNavigation: string;
-  platformOperational: string;
   searchResults: string;
 };
 
@@ -133,10 +132,6 @@ function SidebarContent({
           return <div className="mp-nav-group" key={group.label}>{!collapsed && <p className="mp-nav-group__label">{group.label}</p>}{items}</div>;
         })}
       </nav>
-      <div className="mp-sidebar__foot">
-        <span className="mp-health-dot" />
-        {!collapsed && <span>{labels.platformOperational}</span>}
-      </div>
     </>
   );
 }

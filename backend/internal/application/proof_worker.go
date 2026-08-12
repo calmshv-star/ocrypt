@@ -58,9 +58,13 @@ func (w ProofWorker) RunBatch(ctx context.Context, workerID, chainID string, lim
 	for _, job := range jobs {
 		events, verifyErr := w.Verifier.LookupTransaction(ctx, job.Proof.ChainID, job.Proof.TransactionID)
 		if verifyErr == nil && len(events) == 0 {
-			verifyErr = w.Queue.RetryProof(ctx, job, now, "transaction contains no supported transfer events", domain.ProofNotFound)
-			if verifyErr != nil {
-				failures = append(failures, fmt.Errorf("proof %s not-found acknowledgement: %w", job.Proof.ID, verifyErr))
+			status := domain.ProofQueued
+			if job.Attempt >= maxAttempts {
+				status = domain.ProofNotFound
+			}
+			next := now.Add(time.Duration(job.Attempt*job.Attempt) * time.Second)
+			if retryErr := w.Queue.RetryProof(ctx, job, next, "transaction contains no supported transfer events", status); retryErr != nil {
+				failures = append(failures, fmt.Errorf("proof %s not-found acknowledgement: %w", job.Proof.ID, retryErr))
 			}
 			continue
 		}

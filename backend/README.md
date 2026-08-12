@@ -128,7 +128,9 @@ leases left by a process crash. Relevant role configuration is:
 - resolutions: `VERIFIER_CHAIN_ID`, `VERIFIER_PROVIDER_URLS`,
   `VERIFIER_QUORUM`, and optional `VERIFIER_PROVIDER_TOKEN`;
 - proofs: `PROOF_VERIFIER_CHAIN_ID`, `PROOF_VERIFIER_PROVIDER_URLS`,
-  `PROOF_VERIFIER_QUORUM`, and optional `PROOF_VERIFIER_PROVIDER_TOKEN`.
+  `PROOF_VERIFIER_QUORUM`, and optional `PROOF_VERIFIER_PROVIDER_TOKEN`. Set
+  `PROOF_VERIFIER_DATABASE_ONLY=true` when persistent chain scanners already
+  ingest canonical transfers and proofs should resolve from that trusted store.
 
 The outbox uses `event_id` as the stable downstream message/idempotency key and
 emits one canonical JSON envelope. JetStream fixes the stream/subject and sets
@@ -147,6 +149,10 @@ confidential OIDC clients also set `ADMIN_OIDC_CLIENT_SECRET`. Session timing,
 body limit, and listen address use the `ADMIN_*_TTL`,
 `ADMIN_ROTATION_INTERVAL`, `ADMIN_BODY_LIMIT_BYTES`, and
 `ADMIN_HTTP_ADDRESS` settings defined by `cmd/admin-api/config.go`. The BFF
+uses a persistent ten-year browser session by default; explicit logout,
+identity disablement, or role removal still revokes access immediately. Passive
+requests never replace the shared browser cookie, so parallel page loads cannot
+race and clear a newly issued session.
 also requires `MANAGEMENT_INTERNAL_URL`, `MANAGEMENT_INTERNAL_CA_FILE`,
 `MANAGEMENT_ADMIN_ASSERTION_KEY_FILE`, `PLATFORM_ADMIN_INTERNAL_URL`,
 `PLATFORM_ADMIN_CA_FILE`, `PLATFORM_ADMIN_ASSERTION_KEY_FILE`,

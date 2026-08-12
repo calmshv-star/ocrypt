@@ -35,7 +35,7 @@ func TestReceiptEvidenceIsDigestOnlyImmutableAndQueuesIndependentProof(t *testin
 		t.Fatal(err)
 	}
 	implementation := string(repository)
-	for _, required := range []string{"CreatePaymentProof", "receipt-proof-v1", "imageDigest[:]", "ResolveReceiptTarget", "unique_amount_time_transfer", "LIMIT 2"} {
+	for _, required := range []string{"CreatePaymentProof", "receipt-proof-v1", "imageDigest[:]", "ResolveReceiptTarget", "unique_amount_time_transfer", "target.StartsAt.UTC()", "target.GraceEndsAt.UTC()", "LIMIT 2"} {
 		if !strings.Contains(implementation, required) {
 			t.Fatalf("receipt verification boundary missing: %s", required)
 		}

@@ -15,6 +15,8 @@
   --mp-primary-contrast: #ffffff;
   --mp-info: #555550;
   --mp-info-soft: #eeeeeb;
+  --mp-violet: #5d5d58;
+  --mp-violet-soft: #eeeeeb;
   --mp-negative: #a62543;
   --mp-negative-soft: #fff0f3;
   --mp-shadow-xs: 0 1px 2px rgba(0, 0, 0, .04);
@@ -44,8 +46,8 @@
   --mp-warning-soft: #382a17;
   --mp-negative: #ed8295;
   --mp-negative-soft: #3c2127;
-  --mp-violet: #b9a1ea;
-  --mp-violet-soft: #2d2540;
+  --mp-violet: #bebeb6;
+  --mp-violet-soft: #242422;
 }
 
 :root .checkout-page .mp-button--primary,

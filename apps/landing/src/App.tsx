@@ -13,11 +13,9 @@ import {
   ArrowRight,
   Blocks,
   Check,
-  CheckCircle2,
   ChevronRight,
   CircleDollarSign,
   Clipboard,
-  Code2,
   DatabaseZap,
   Fingerprint,
   Gauge,
@@ -55,12 +53,12 @@ const SANDBOX_URL = import.meta.env.VITE_SANDBOX_URL || "#developers";
 const DOCS_URL = import.meta.env.VITE_DOCS_URL || "#developers";
 const SALES_URL = import.meta.env.VITE_SALES_URL || "#contact";
 
-const networks: Array<{ name: string; mark: string; detailKey: MessageKey; tone: string }> = [
-  { name: "Tron", mark: "TRX", detailKey: "landing.network.tronDetail", tone: "cyan" },
-  { name: "Ethereum", mark: "ETH", detailKey: "landing.network.ethereumDetail", tone: "violet" },
-  { name: "Solana", mark: "SOL", detailKey: "landing.network.solanaDetail", tone: "green" },
-  { name: "TON", mark: "TON", detailKey: "landing.network.tonDetail", tone: "blue" },
-  { name: "Aptos", mark: "APT", detailKey: "landing.network.aptosDetail", tone: "orange" }
+const networks: Array<{ name: string; mark: string; detailKey: MessageKey }> = [
+  { name: "Tron", mark: "TRX", detailKey: "landing.network.tronDetail" },
+  { name: "Ethereum", mark: "ETH", detailKey: "landing.network.ethereumDetail" },
+  { name: "Solana", mark: "SOL", detailKey: "landing.network.solanaDetail" },
+  { name: "TON", mark: "TON", detailKey: "landing.network.tonDetail" },
+  { name: "Aptos", mark: "APT", detailKey: "landing.network.aptosDetail" }
 ] as const;
 
 function Brand() {
@@ -99,8 +97,8 @@ function ActionLink({
   );
 }
 
-function SectionIntro({ eyebrow, title, body, align = "left" }: { eyebrow: string; title: string; body: string; align?: "left" | "center" }) {
-  return <header className={`landing-section-intro is-${align}`}><span>{eyebrow}</span><h2>{title}</h2><p>{body}</p></header>;
+function SectionIntro({ title, body, align = "left" }: { title: string; body: string; align?: "left" | "center" }) {
+  return <header className={`landing-section-intro is-${align}`}><h2>{title}</h2><p>{body}</p></header>;
 }
 
 function FeatureCard({ icon, title, body, index }: { icon: ReactNode; title: string; body: string; index: string }) {
@@ -167,14 +165,12 @@ export function App() {
           <div className="landing-hero__glow" />
           <div className="landing-container landing-hero__grid">
             <div className="landing-hero__copy">
-              <span className="landing-eyebrow"><span className="landing-live-dot" />{t("landing.eyebrow")}</span>
               <h1>{t("landing.hero.title")}</h1>
               <p>{t("landing.hero.body")}</p>
               <div className="landing-hero__actions"><ActionLink href={SANDBOX_URL} size="lg">{t("landing.hero.primary")}<ArrowRight size={17} /></ActionLink><ActionLink href={DOCS_URL} size="lg" variant="secondary">{t("landing.hero.secondary")}<ChevronRight size={17} /></ActionLink></div>
-              <small><ShieldCheck size={14} />{t("landing.hero.note")}</small>
             </div>
             <div className="settlement-card">
-              <div className="settlement-card__head"><span><span className="landing-live-dot" />{t("common.sandbox")} · {t("landing.signal.live")}</span><code>pi_01JQ8H6G2PE3</code></div>
+              <div className="settlement-card__head"><span>{t("common.sandbox")}</span><code>pi_01JQ8H6G2PE3</code></div>
               <div className="settlement-card__amount"><span>1,280.00</span><strong>USDT</strong><small>≈ 1,280.00 USD</small></div>
               <div className="settlement-card__route"><span className="network-orb">TRX</span><div><strong>Tron · USDT</strong><small>TWb4…19Vp</small></div><span>22 / 20</span></div>
               <ol className="settlement-steps">
@@ -183,22 +179,18 @@ export function App() {
               <div className="settlement-card__foot"><span><KeyRound size={14} />HMAC-SHA256 · kv_4</span><span>trace_9M42</span></div>
             </div>
           </div>
-          <div className="landing-container landing-preview-label"><span>{t("common.previewData")}</span></div>
-          <div className="landing-container landing-metrics">
-            {[['99.99%', 'landing.metric.uptime'], ['0', 'landing.metric.doubleCredit'], ['100%', 'landing.metric.trace'], ['5', 'landing.metric.networks']].map(([value, key]) => <div key={key}><strong>{value}</strong><span>{t(key as MessageKey)}</span></div>)}
-          </div>
         </section>
 
         <section className="landing-section" id="product">
           <div className="landing-container">
-            <SectionIntro body={t("landing.capabilities.body")} eyebrow={t("landing.capabilities.eyebrow")} title={t("landing.capabilities.title")} />
+            <SectionIntro body={t("landing.capabilities.body")} title={t("landing.capabilities.title")} />
             <div className="landing-feature-grid">{capabilityKeys.map(([title, body, icon], index) => <FeatureCard body={t(body)} icon={icon} index={`0${index + 1}`} key={title} title={t(title)} />)}</div>
           </div>
         </section>
 
         <section className="landing-section landing-section--ink">
           <div className="landing-container landing-pipeline-layout">
-            <SectionIntro body={t("landing.pipeline.body")} eyebrow={t("landing.pipeline.eyebrow")} title={t("landing.pipeline.title")} />
+            <SectionIntro body={t("landing.pipeline.body")} title={t("landing.pipeline.title")} />
             <div className="landing-pipeline">
               {pipelineKeys.map(([key, icon], index) => <div className="landing-pipeline__step" key={key}><span>{icon}</span><div><small>{String(index + 1).padStart(2, "0")}</small><strong>{t(key)}</strong></div>{index < pipelineKeys.length - 1 && <i />}</div>)}
             </div>
@@ -207,15 +199,14 @@ export function App() {
 
         <section className="landing-section" id="networks">
           <div className="landing-container">
-            <SectionIntro align="center" body={t("landing.networks.body")} eyebrow={t("landing.nav.networks")} title={t("landing.networks.title")} />
-            <div className="landing-preview-label landing-preview-label--center"><span>{t("common.previewData")}</span></div>
-            <div className="landing-network-grid">{networks.map((network) => <article className="landing-network-card" key={network.name}><span className={`network-mark is-${network.tone}`}>{network.mark}</span><h3>{network.name}</h3><p>{t(network.detailKey)}</p><span><CheckCircle2 size={14} />{t("status.healthy")}</span></article>)}</div>
+            <SectionIntro align="center" body={t("landing.networks.body")} title={t("landing.networks.title")} />
+            <div className="landing-network-grid">{networks.map((network) => <article className="landing-network-card" key={network.name}><span className="network-mark">{network.mark}</span><h3>{network.name}</h3><p>{t(network.detailKey)}</p></article>)}</div>
           </div>
         </section>
 
         <section className="landing-section landing-reliability" id="reliability">
           <div className="landing-container landing-reliability__layout">
-            <div><SectionIntro body={t("landing.reliability.body")} eyebrow={t("landing.reliability.eyebrow")} title={t("landing.reliability.title")} /><div className="reliability-list">{[
+            <div><SectionIntro body={t("landing.reliability.body")} title={t("landing.reliability.title")} /><div className="reliability-list">{[
               ["landing.reliability.scanners", "landing.reliability.scannersBody", <RadioTower size={18} />],
               ["landing.reliability.callbacks", "landing.reliability.callbacksBody", <RotateCcw size={18} />],
               ["landing.reliability.audit", "landing.reliability.auditBody", <ShieldCheck size={18} />]
@@ -231,17 +222,17 @@ export function App() {
 
         <section className="landing-section landing-developer" id="developers">
           <div className="landing-container landing-developer__layout">
-            <div><SectionIntro body={t("landing.developer.body")} eyebrow={t("landing.developer.eyebrow")} title={t("landing.developer.title")} /><ActionLink href={DOCS_URL} size="lg" variant="secondary">{t("common.documentation")}<ArrowRight size={16} /></ActionLink></div>
+            <div><SectionIntro body={t("landing.developer.body")} title={t("landing.developer.title")} /><ActionLink href={DOCS_URL} size="lg" variant="secondary">{t("common.documentation")}<ArrowRight size={16} /></ActionLink></div>
             <div className="code-window"><div className="code-window__bar"><span><i /><i /><i /></span><button aria-label={t("landing.developer.copy")} onClick={copyRequest}>{copied ? <Check size={14} /> : <Clipboard size={14} />}{copied ? t("common.copied") : t("landing.developer.copy")}</button></div><pre tabIndex={0}><code>{API_EXAMPLE}</code></pre><div className="code-window__response"><Zap size={14} /><span>201 · 84 ms</span><code>pi_01JQ8H6G2PE3</code></div></div>
           </div>
         </section>
 
         <section className="landing-cta" id="contact">
-          <div className="landing-container landing-cta__inner"><div><span><Code2 size={17} />{t("landing.developer.eyebrow")}</span><h2>{t("landing.cta.title")}</h2><p>{t("landing.cta.body")}</p></div><div><ActionLink href={SANDBOX_URL} size="lg">{t("landing.cta.primary")}<ArrowRight size={17} /></ActionLink><ActionLink href={SALES_URL} size="lg" variant="secondary">{t("landing.cta.secondary")}</ActionLink></div></div>
+          <div className="landing-container landing-cta__inner"><div><h2>{t("landing.cta.title")}</h2><p>{t("landing.cta.body")}</p></div><div><ActionLink href={SANDBOX_URL} size="lg">{t("landing.cta.primary")}<ArrowRight size={17} /></ActionLink><ActionLink href={SALES_URL} size="lg" variant="secondary">{t("landing.cta.secondary")}</ActionLink></div></div>
         </section>
       </main>
 
-      <footer className="landing-footer"><div className="landing-container landing-footer__grid"><div><Brand /><p>{t("landing.footer.rights")}</p><span><i />{t("common.previewData")}</span></div><div><strong>{t("landing.footer.product")}</strong><a href="#product">{t("landing.nav.product")}</a><a href="#networks">{t("landing.nav.networks")}</a><a href="#reliability">{t("landing.nav.reliability")}</a></div><div><strong>{t("landing.footer.resources")}</strong><a href="#developers">{t("common.documentation")}</a><a href="#developers">{t("common.developers")}</a><a href="#top">{t("common.security")}</a></div><div><strong>{t("landing.footer.company")}</strong><a href={SALES_URL}>{t("common.contactSales")}</a><a href="#top">{t("common.pricing")}</a></div></div></footer>
+      <footer className="landing-footer"><div className="landing-container landing-footer__grid"><div><Brand /><p>{t("landing.footer.rights")}</p></div><div><strong>{t("landing.footer.product")}</strong><a href="#product">{t("landing.nav.product")}</a><a href="#networks">{t("landing.nav.networks")}</a><a href="#reliability">{t("landing.nav.reliability")}</a></div><div><strong>{t("landing.footer.resources")}</strong><a href="#developers">{t("common.documentation")}</a><a href="#developers">{t("common.developers")}</a></div><div><strong>{t("landing.footer.company")}</strong><a href={SALES_URL}>{t("common.contactSales")}</a></div></div></footer>
     </div>
   );
 }

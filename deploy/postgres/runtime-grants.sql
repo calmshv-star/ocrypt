@@ -378,6 +378,7 @@ REVOKE UPDATE,DELETE,TRUNCATE ON rate_runtime_pair_bindings,rate_source_observat
 -- can reverse posted rows and enqueue replacement work, but cannot delete any
 -- immutable ledger/event evidence.
 GRANT SELECT,INSERT,UPDATE ON scanner_cursors,scanner_gaps,scanner_transfer_queue,chain_blocks TO merchant_scanner_worker;
+GRANT DELETE ON chain_blocks,scanner_gaps TO merchant_scanner_worker;
 GRANT SELECT,UPDATE ON
   transfer_events,payment_matches,payment_intents,
   payment_routes,payment_match_aggregates,amount_reservations,webhook_endpoints
@@ -392,19 +393,21 @@ GRANT INSERT ON callback_deliveries,outbox_events TO merchant_scanner_worker;
 -- The staged settlement worker owns canonical transfer ingestion and the full
 -- deterministic settlement transaction, including exception job enqueueing.
 GRANT SELECT,UPDATE ON scanner_transfer_queue,payment_intents,payment_routes TO merchant_settlement_worker;
+GRANT DELETE ON scanner_transfer_queue TO merchant_settlement_worker;
+GRANT SELECT ON merchants TO merchant_settlement_worker;
 GRANT INSERT ON payment_intent_versions TO merchant_settlement_worker;
 GRANT SELECT,INSERT,UPDATE ON transfer_events,unmatched_payments,automated_matching_jobs TO merchant_settlement_worker;
-GRANT SELECT,INSERT ON payment_matches,ledger_accounts,callback_events TO merchant_settlement_worker;
-GRANT INSERT ON match_candidates,ledger_transactions,ledger_entries,callback_deliveries,outbox_events TO merchant_settlement_worker;
-GRANT UPDATE ON amount_reservations TO merchant_settlement_worker;
+GRANT SELECT,INSERT ON payment_matches,ledger_accounts,ledger_entries,callback_events TO merchant_settlement_worker;
+GRANT INSERT ON match_candidates,ledger_transactions,callback_deliveries,outbox_events TO merchant_settlement_worker;
+GRANT SELECT,UPDATE ON amount_reservations,provider_orders TO merchant_settlement_worker;
 GRANT SELECT,UPDATE ON webhook_endpoints TO merchant_settlement_worker;
 GRANT SELECT ON payment_route_policy_bindings TO merchant_settlement_worker;
 
 GRANT SELECT,UPDATE ON automated_matching_jobs,payment_intents,payment_routes,transfer_events,unmatched_payments TO merchant_matching_worker;
 GRANT INSERT ON payment_intent_versions TO merchant_matching_worker;
 GRANT SELECT,INSERT,UPDATE ON payment_match_aggregates,payment_matches TO merchant_matching_worker;
-GRANT SELECT,INSERT ON ledger_accounts,callback_events TO merchant_matching_worker;
-GRANT INSERT ON automated_matching_decisions,ledger_transactions,ledger_entries,callback_deliveries,outbox_events TO merchant_matching_worker;
+GRANT SELECT,INSERT ON ledger_accounts,ledger_entries,callback_events TO merchant_matching_worker;
+GRANT INSERT ON automated_matching_decisions,ledger_transactions,callback_deliveries,outbox_events TO merchant_matching_worker;
 GRANT UPDATE ON amount_reservations TO merchant_matching_worker;
 GRANT SELECT ON payment_route_policy_bindings,automated_matching_policies TO merchant_matching_worker;
 GRANT SELECT,UPDATE ON webhook_endpoints TO merchant_matching_worker;
@@ -416,20 +419,20 @@ GRANT INSERT ON event_history TO merchant_outbox_worker;
 GRANT SELECT,UPDATE ON manual_resolutions,transfer_events,payment_intents,payment_routes TO merchant_resolution_worker;
 GRANT INSERT ON payment_intent_versions TO merchant_resolution_worker;
 GRANT UPDATE ON unmatched_payments,amount_reservations TO merchant_resolution_worker;
-GRANT SELECT,INSERT ON payment_matches,ledger_accounts,callback_events TO merchant_resolution_worker;
-GRANT INSERT ON ledger_transactions,ledger_entries,callback_deliveries,outbox_events TO merchant_resolution_worker;
+GRANT SELECT,INSERT ON payment_matches,ledger_accounts,ledger_entries,callback_events TO merchant_resolution_worker;
+GRANT INSERT ON ledger_transactions,callback_deliveries,outbox_events TO merchant_resolution_worker;
 GRANT SELECT ON match_candidates TO merchant_resolution_worker;
 GRANT SELECT,UPDATE ON webhook_endpoints TO merchant_resolution_worker;
 
 -- Proof verification feeds independently verified transfers through the same
 -- direct settlement store. Its role therefore needs that exact composite
 -- transaction plus the proof lease, not merely the proof queue tables.
-GRANT SELECT,UPDATE ON payment_proofs,payment_intents,payment_routes,webhook_endpoints TO merchant_proof_worker;
+GRANT SELECT,UPDATE ON payment_proofs,payment_intents,payment_routes,webhook_endpoints,amount_reservations,provider_orders TO merchant_proof_worker;
+GRANT SELECT ON merchants TO merchant_proof_worker;
 GRANT INSERT ON payment_intent_versions TO merchant_proof_worker;
 GRANT SELECT,INSERT,UPDATE ON transfer_events,unmatched_payments,automated_matching_jobs TO merchant_proof_worker;
-GRANT SELECT,INSERT ON payment_matches,ledger_accounts,callback_events TO merchant_proof_worker;
-GRANT INSERT ON match_candidates,ledger_transactions,ledger_entries,callback_deliveries,outbox_events TO merchant_proof_worker;
-GRANT UPDATE ON amount_reservations TO merchant_proof_worker;
+GRANT SELECT,INSERT ON payment_matches,ledger_accounts,ledger_entries,callback_events TO merchant_proof_worker;
+GRANT INSERT ON match_candidates,ledger_transactions,callback_deliveries,outbox_events TO merchant_proof_worker;
 GRANT SELECT ON payment_route_policy_bindings TO merchant_proof_worker;
 GRANT SELECT,UPDATE ON payment_intents,payment_routes,checkout_sessions,rate_quotes,
   address_assignments,addresses,amount_reservations TO merchant_plan_worker;

@@ -161,6 +161,8 @@ type ReceiptTarget struct {
 	Address        string
 	ExpectedAmount string
 	AssetDecimals  uint8
+	StartsAt       time.Time
+	GraceEndsAt    time.Time
 }
 
 type ReceiptAnalysisInput struct {

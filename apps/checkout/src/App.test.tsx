@@ -239,7 +239,7 @@ describe("hosted checkout", () => {
     window.history.replaceState({}, "", `/pay?token=${plToken}`);
     renderCheckout();
     expect(await screen.findByTestId("payment-link-amount")).toHaveTextContent("38.13 USD");
-    fireEvent.click(screen.getByRole("button", { name: "Continue to secure checkout" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to payment" }));
     expect(await screen.findByRole("heading", { name: "Complete your payment" })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/checkout");
     expect(window.location.search).toBe(`?token=${nextCsToken}`);
@@ -267,7 +267,7 @@ describe("hosted checkout", () => {
     window.history.replaceState({}, "", `/pay?token=${plToken}`);
     renderCheckout();
     expect(await screen.findByText("provider-account-1 · usdt-tron")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Continue to secure checkout" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to payment" }));
     expect(await screen.findByTestId("payment-route-preparation")).toHaveTextContent("Preparing your payment route");
     expect(screen.queryByTestId("payment-address")).not.toBeInTheDocument();
     expect(screen.queryByTestId("provider-payment-link")).not.toBeInTheDocument();
@@ -295,7 +295,7 @@ describe("hosted checkout", () => {
       .mockResolvedValueOnce(response({ error: { code: "conflict", message: "conflict" }, request_id: "req" }, 409)));
     window.history.replaceState({}, "", `/pay?token=${plToken}`);
     renderCheckout();
-    fireEvent.click(await screen.findByRole("button", { name: "Continue to secure checkout" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Continue to payment" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("reached its usage limit");
     expect(window.location.pathname).toBe("/pay");
   });

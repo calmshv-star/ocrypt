@@ -1,5 +1,5 @@
 import { useI18n } from "@merchant/i18n";
-import { AppShell, Badge, Button, PRODUCT_NAME, Select, WorkspaceSwitcher, type ShellNavGroup } from "@merchant/ui";
+import { AppShell, Badge, Button, PRODUCT_NAME, Select, ThemeToggle, WorkspaceSwitcher, type ShellNavGroup } from "@merchant/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { Activity, Archive, Blocks, CircleDollarSign, FileClock, Fingerprint, GitCompareArrows, KeyRound, Landmark, LayoutDashboard, Link2, RadioTower, ReceiptText, RefreshCw, Scale, Settings2, ShieldCheck, UsersRound, Webhook } from "lucide-react";
 import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react";
@@ -50,7 +50,7 @@ function AccessScreen({ state }: { state: "loading" | "unauthenticated" | "error
   const { client } = useAdmin();
   const title = state === "loading" ? t("admin.sessionLoading") : state === "unauthenticated" ? t("admin.signInTitle") : state === "scope" ? t("admin.noScopeTitle") : t("admin.sessionErrorTitle");
   const body = state === "unauthenticated" ? t("admin.signInBody") : state === "scope" ? t("admin.noScopeBody") : state === "error" ? t("admin.sessionErrorBody") : "";
-  return <main className="admin-access"><Select aria-label={t("common.locale")} onChange={(event) => setLocale(event.target.value as typeof locale)} value={locale}>{locales.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}</Select><section aria-busy={state === "loading" || undefined} role={state === "error" ? "alert" : "status"}><div className="admin-access__brand"><span aria-hidden="true" className="mp-brand__mark"><span/><span/></span><strong>{PRODUCT_NAME}</strong></div><div className="admin-access__content"><span aria-hidden="true" className="admin-access__shield"><ShieldCheck size={24}/></span><div><h1>{title}</h1>{body && <p>{body}</p>}</div></div>{state === "unauthenticated" && client && <a className="mp-button mp-button--primary mp-button--md" href={client.loginURL(safeReturnPath())}>{t("common.signIn")}</a>}{state === "error" && <Button onClick={() => window.location.reload()}>{t("common.retry")}</Button>}</section></main>;
+  return <main className="admin-access"><div className="admin-access__controls"><Select aria-label={t("common.locale")} onChange={(event) => setLocale(event.target.value as typeof locale)} value={locale}>{locales.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}</Select><ThemeToggle label={t("common.theme")} /></div><section aria-busy={state === "loading" || undefined} role={state === "error" ? "alert" : "status"}><div className="admin-access__brand"><span aria-hidden="true" className="mp-brand__mark"><span/><span/></span><strong>{PRODUCT_NAME}</strong></div><div className="admin-access__content"><span aria-hidden="true" className="admin-access__shield"><ShieldCheck size={24}/></span><div><h1>{title}</h1>{body && <p>{body}</p>}</div></div>{state === "unauthenticated" && client && <a className="mp-button mp-button--primary mp-button--md" href={client.loginURL(safeReturnPath())}>{t("common.signIn")}</a>}{state === "error" && <Button onClick={() => window.location.reload()}>{t("common.retry")}</Button>}</section></main>;
 }
 
 function PreviewRoutes() {
@@ -177,9 +177,9 @@ function AdminApplication() {
   const userEmail = admin.preview ? "demo@merchant.local" : admin.principal.email ?? admin.principal.user_id;
   const initials = userName.split(/\s+/).filter(Boolean).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "?";
   return <AppShell
-    environment={<Badge tone={admin.preview ? "violet" : "info"}><span className="mp-badge__dot" />{t(admin.preview ? "common.previewData" : "admin.connected")}</Badge>}
+    environment={<Badge tone="neutral">{t(admin.preview ? "common.previewData" : "common.production")}</Badge>}
     headerEnd={<Select aria-label={t("common.locale")} onChange={(event) => setLocale(event.target.value as typeof locale)} value={locale}>{locales.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}</Select>}
-    labels={{ skipContent: t("common.skipContent"), openNavigation: t("common.openNavigation"), closeNavigation: t("common.closeNavigation"), commandMenu: t("common.commandMenu"), searchPlaceholder: t("common.searchPlaceholder"), noResults: t("common.noResults"), theme: t("common.theme"), notifications: t("common.notifications"), account: t("common.account"), signOut: t("common.signOut"), signingOut: t("admin.signingOut"), primaryNavigation: t("common.primaryNavigation"), platformOperational: t("admin.connected"), searchResults: t("common.searchResults") }}
+    labels={{ skipContent: t("common.skipContent"), openNavigation: t("common.openNavigation"), closeNavigation: t("common.closeNavigation"), commandMenu: t("common.commandMenu"), searchPlaceholder: t("common.searchPlaceholder"), noResults: t("common.noResults"), theme: t("common.theme"), notifications: t("common.notifications"), account: t("common.account"), signOut: t("common.signOut"), signingOut: t("admin.signingOut"), primaryNavigation: t("common.primaryNavigation"), searchResults: t("common.searchResults") }}
     navGroups={navGroups}
     onSignOut={admin.preview ? undefined : async () => { await admin.signOut(); queryClient.clear(); }}
     user={{ name: userName, email: userEmail, initials }}

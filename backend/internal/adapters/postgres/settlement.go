@@ -172,24 +172,24 @@ func (s *Store) IngestAndSettle(ctx context.Context, event domain.TransferEvent)
 		if err != nil {
 			return err
 		}
-		command, err := tx.Exec(ctx, `UPDATE payment_intents SET status='settled',status_reason='exact_finalized_transfer',settled_at=$1,updated_at=$1,version=version+1 WHERE id=$2 AND tenant_id=$3 AND version=$4 AND status IN ('pending','observed','confirmed','reorg_review')`, now, candidate.IntentID, candidate.TenantID, candidate.IntentVersion)
+		command, err := tx.Exec(ctx, `UPDATE payment_intents SET status='settled',status_reason='exact_finalized_transfer',settled_at=$1,updated_at=$1,version=version+1 WHERE id=$2 AND tenant_id=$3 AND version=$4 AND status IN ('pending','observed','partially_paid','confirmed','expired','needs_review','reorg_review')`, now, candidate.IntentID, candidate.TenantID, candidate.IntentVersion)
 		if err != nil {
 			return err
 		}
 		if command.RowsAffected() != 1 {
 			return domain.ErrVersionConflict
 		}
-		_, err = tx.Exec(ctx, `UPDATE payment_routes SET status='settled',updated_at=$1,version=version+1 WHERE id=$2 AND tenant_id=$3 AND status='active'`, now, candidate.RouteID, candidate.TenantID)
+		_, err = tx.Exec(ctx, `UPDATE payment_routes SET status='settled',updated_at=$1,version=version+1 WHERE id=$2 AND tenant_id=$3 AND status IN ('active','expired')`, now, candidate.RouteID, candidate.TenantID)
 		if err != nil {
 			return err
 		}
 		if _, err = tx.Exec(ctx, `UPDATE payment_routes SET status='superseded',updated_at=$1,version=version+1 WHERE intent_id=$2 AND tenant_id=$3 AND id<>$4 AND status IN ('active','expired')`, now, candidate.IntentID, candidate.TenantID, candidate.RouteID); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, `UPDATE amount_reservations ar SET state='released',release_reason='sibling_settled',updated_at=$1,version=version+1 FROM payment_routes r WHERE ar.route_id=r.id AND ar.tenant_id=r.tenant_id AND r.intent_id=$2 AND r.id<>$3 AND r.tenant_id=$4 AND ar.state='active'`, now, candidate.IntentID, candidate.RouteID, candidate.TenantID); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE amount_reservations ar SET state='released',release_reason='sibling_settled',updated_at=$1,version=ar.version+1 FROM payment_routes r WHERE ar.route_id=r.id AND ar.tenant_id=r.tenant_id AND r.intent_id=$2 AND r.id<>$3 AND r.tenant_id=$4 AND ar.state='active'`, now, candidate.IntentID, candidate.RouteID, candidate.TenantID); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, `UPDATE provider_orders po SET provider_status='superseded',updated_at=$1,version=version+1 FROM payment_routes r WHERE po.route_id=r.id AND po.tenant_id=r.tenant_id AND r.intent_id=$2 AND r.id<>$3 AND r.tenant_id=$4 AND po.provider_status IN ('pending','authorized','cancel_requested')`, now, candidate.IntentID, candidate.RouteID, candidate.TenantID); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE provider_orders po SET provider_status='superseded',updated_at=$1,version=po.version+1 FROM payment_routes r WHERE po.route_id=r.id AND po.tenant_id=r.tenant_id AND r.intent_id=$2 AND r.id<>$3 AND r.tenant_id=$4 AND po.provider_status IN ('pending','authorized','cancel_requested')`, now, candidate.IntentID, candidate.RouteID, candidate.TenantID); err != nil {
 			return err
 		}
 		_, err = tx.Exec(ctx, `UPDATE amount_reservations SET state='consumed',release_reason='settled',updated_at=$1,version=version+1 WHERE route_id=$2 AND tenant_id=$3 AND state='active'`, now, candidate.RouteID, candidate.TenantID)
@@ -359,7 +359,7 @@ func recordExceptionIntent(ctx context.Context, tx pgx.Tx, tenantID string, cand
 	}
 	var merchantID, orderID, currency, amount string
 	var version int64
-	err := tx.QueryRow(ctx, `UPDATE payment_intents i SET status=$1,status_reason=$2,updated_at=$3,version=version+1
+	err := tx.QueryRow(ctx, `UPDATE payment_intents i SET status=$1,status_reason=$2,updated_at=$3,version=i.version+1
 FROM payment_routes r WHERE i.id=$4 AND i.tenant_id=$5 AND r.id=$6 AND r.intent_id=i.id AND r.tenant_id=i.tenant_id
 AND i.status IN ('pending','observed','partially_paid','confirmed','expired','needs_review')
 RETURNING i.merchant_id::text,i.merchant_order_id,i.currency,i.amount_minor::text,i.version`, status, string(candidate.Class), now, candidate.IntentID, tenantID, candidate.RouteID).Scan(&merchantID, &orderID, &currency, &amount, &version)
@@ -435,7 +435,7 @@ RETURNING i.merchant_id::text,i.merchant_order_id,i.currency,i.amount_minor::tex
 func findSettlementCandidates(ctx context.Context, tx pgx.Tx, event domain.TransferEvent) ([]settlementCandidate, error) {
 	// Financial matching must wait for a briefly locked exact route. SKIP LOCKED
 	// would misclassify a valid payment as permanently unmatched.
-	rows, err := tx.Query(ctx, `SELECT r.tenant_id::text,r.merchant_id::text,r.intent_id::text,r.id::text,i.merchant_order_id,i.amount_minor::text,i.currency,(m.environment='live'),i.version,r.expected_amount_atomic::text,r.required_finality FROM payment_routes r JOIN payment_intents i ON i.id=r.intent_id AND i.tenant_id=r.tenant_id JOIN merchants m ON m.id=r.merchant_id AND m.tenant_id=r.tenant_id WHERE r.provider='on_chain' AND r.chain_id=$1 AND r.asset_id=$2 AND r.receiving_address=$3 AND r.expected_amount_atomic=$4::numeric AND r.status='active' AND i.status IN ('pending','observed','confirmed','reorg_review') AND ($5 BETWEEN r.starts_at AND r.expires_at OR EXISTS(SELECT 1 FROM payment_observations o WHERE o.transfer_event_id=$6 AND o.tenant_id=r.tenant_id AND o.route_id=r.id AND o.finality='reorged')) ORDER BY r.created_at,r.id LIMIT 2 FOR UPDATE OF r,i`, event.Identity.ChainID, event.Identity.AssetID, event.Identity.ToAddress, event.Amount.String(), event.OnChainTime, event.ID)
+	rows, err := tx.Query(ctx, `SELECT r.tenant_id::text,r.merchant_id::text,r.intent_id::text,r.id::text,i.merchant_order_id,i.amount_minor::text,i.currency,(m.environment='live'),i.version,r.expected_amount_atomic::text,r.required_finality FROM payment_routes r JOIN payment_intents i ON i.id=r.intent_id AND i.tenant_id=r.tenant_id JOIN merchants m ON m.id=r.merchant_id AND m.tenant_id=r.tenant_id WHERE r.provider='on_chain' AND r.chain_id=$1 AND r.asset_id=$2 AND r.receiving_address=$3 AND r.expected_amount_atomic=$4::numeric AND r.status IN ('active','expired') AND i.status IN ('pending','observed','partially_paid','confirmed','expired','needs_review','reorg_review') AND ($5 BETWEEN r.starts_at AND r.expires_at OR EXISTS(SELECT 1 FROM payment_observations o WHERE o.transfer_event_id=$6 AND o.tenant_id=r.tenant_id AND o.route_id=r.id AND o.finality='reorged')) ORDER BY r.created_at,r.id LIMIT 2 FOR UPDATE OF r,i`, event.Identity.ChainID, event.Identity.AssetID, event.Identity.ToAddress, event.Amount.String(), event.OnChainTime, event.ID)
 	if err != nil {
 		return nil, err
 	}

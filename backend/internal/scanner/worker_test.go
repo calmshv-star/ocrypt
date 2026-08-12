@@ -97,6 +97,21 @@ func TestScannerFailsClosedOnWrongGenesisOrBrokenParent(t *testing.T) {
 	}
 }
 
+func TestScannerAcceptsExplicitParentLinkedSparseSlots(t *testing.T) {
+	now := time.Now().UTC()
+	batch := RangeBatch{From: 10, To: 13, SparseBlocks: true, Blocks: []Block{
+		{Height: 10, Hash: "h10", ParentHash: "h9", Time: now},
+		{Height: 13, Hash: "h13", ParentHash: "h10", Time: now},
+	}}
+	if err := validateRange(batch, 10, 14, Lease{Height: 10, Hash: "h10"}, 1); err != nil {
+		t.Fatalf("valid skipped slots rejected: %v", err)
+	}
+	batch.Blocks[1].ParentHash = "wrong"
+	if err := validateRange(batch, 10, 14, Lease{Height: 10, Hash: "h10"}, 1); err == nil {
+		t.Fatal("sparse range without canonical parent linkage passed")
+	}
+}
+
 func TestScannerRejectsStaleQuorumAndInsufficientOverlap(t *testing.T) {
 	now := time.Now().UTC()
 	heads := []ProviderHead{

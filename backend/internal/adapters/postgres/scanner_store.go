@@ -23,6 +23,8 @@ type ScannerStore struct {
 	capability string
 }
 
+const scannerBlockHistory = uint64(512)
+
 func NewScannerStore(pool *pgxpool.Pool, capability string) (*ScannerStore, error) {
 	if pool == nil || capability == "" {
 		return nil, errors.New("scanner store requires PostgreSQL and a capability")
@@ -73,58 +75,86 @@ func (s *ScannerStore) Commit(ctx context.Context, lease scanner.Lease, batch sc
 			return fmt.Errorf("%w: invalid scanner runtime evidence", domain.ErrInvariantViolation)
 		}
 	}
-	return pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.Serializable}, func(tx pgx.Tx) error {
-		for _, block := range batch.Blocks {
-			_, err := tx.Exec(ctx, `UPDATE chain_blocks SET canonical_status='reorged',last_observed_at=clock_timestamp() WHERE chain_id=$1 AND height=$2::numeric AND block_hash<>$3 AND canonical_status<>'reorged'`, lease.ChainID, strconv.FormatUint(block.Height, 10), block.Hash)
+	commit := func() error {
+		return pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.Serializable}, func(tx pgx.Tx) error {
+			for _, block := range batch.Blocks {
+				_, err := tx.Exec(ctx, `UPDATE chain_blocks SET canonical_status='reorged',last_observed_at=clock_timestamp() WHERE chain_id=$1 AND height=$2::numeric AND block_hash<>$3 AND canonical_status<>'reorged'`, lease.ChainID, strconv.FormatUint(block.Height, 10), block.Hash)
+				if err != nil {
+					return err
+				}
+				_, err = tx.Exec(ctx, `INSERT INTO chain_blocks (chain_id,height,block_hash,parent_hash,block_time,canonical_status,first_observed_at,last_observed_at) VALUES ($1,$2::numeric,$3,NULLIF($4,''),$5,'safe',clock_timestamp(),clock_timestamp()) ON CONFLICT (chain_id,block_hash) DO UPDATE SET last_observed_at=clock_timestamp(),canonical_status=CASE WHEN chain_blocks.canonical_status='finalized' THEN 'finalized' ELSE 'safe' END`, lease.ChainID, strconv.FormatUint(block.Height, 10), block.Hash, block.ParentHash, block.Time.UTC())
+				if err != nil {
+					return err
+				}
+			}
+			for _, event := range batch.Events {
+				if event.Identity.ChainID != lease.ChainID {
+					return fmt.Errorf("%w: queued transfer belongs to another chain", domain.ErrInvariantViolation)
+				}
+				identityKey, err := event.Identity.Key()
+				if err != nil {
+					return err
+				}
+				payload, err := json.Marshal(event)
+				if err != nil {
+					return err
+				}
+				_, err = tx.Exec(ctx, `INSERT INTO scanner_transfer_queue (event_id,chain_id,identity_key,canonical_event,status,attempt_count,next_attempt_at,created_at,updated_at) VALUES ($1,$2,$3,$4::jsonb,'pending',0,clock_timestamp(),clock_timestamp(),clock_timestamp()) ON CONFLICT (chain_id,identity_key) DO UPDATE SET canonical_event=EXCLUDED.canonical_event,status='pending',attempt_count=0,next_attempt_at=clock_timestamp(),locked_by=NULL,locked_until=NULL,last_error=NULL,updated_at=clock_timestamp() WHERE scanner_transfer_queue.status='reorged'`, event.ID, lease.ChainID, identityKey, payload)
+				if err != nil {
+					return err
+				}
+			}
+			last := batch.Blocks[len(batch.Blocks)-1]
+			command, err := tx.Exec(ctx, `UPDATE scanner_cursors SET cursor_height=$1::numeric,cursor_hash=$2,locked_by=NULL,locked_until=NULL,heartbeat_at=clock_timestamp(),version=version+1,updated_at=clock_timestamp() WHERE chain_id=$3 AND scanner_shard=$4 AND capability=$5 AND locked_by=$6 AND version=$7 AND locked_until>clock_timestamp()`, strconv.FormatUint(batch.To, 10), last.Hash, lease.ChainID, lease.Shard, s.capability, lease.Owner, lease.Version)
 			if err != nil {
 				return err
 			}
-			_, err = tx.Exec(ctx, `INSERT INTO chain_blocks (chain_id,height,block_hash,parent_hash,block_time,canonical_status,first_observed_at,last_observed_at) VALUES ($1,$2::numeric,$3,NULLIF($4,''),$5,'safe',clock_timestamp(),clock_timestamp()) ON CONFLICT (chain_id,block_hash) DO UPDATE SET last_observed_at=clock_timestamp(),canonical_status=CASE WHEN chain_blocks.canonical_status='finalized' THEN 'finalized' ELSE 'safe' END`, lease.ChainID, strconv.FormatUint(block.Height, 10), block.Hash, block.ParentHash, block.Time.UTC())
-			if err != nil {
+			if command.RowsAffected() != 1 {
+				return fmt.Errorf("%w: scanner lease was lost", domain.ErrVersionConflict)
+			}
+			if batch.To > scannerBlockHistory {
+				cutoff := batch.To - scannerBlockHistory
+				if _, err := tx.Exec(ctx, `DELETE FROM chain_blocks WHERE chain_id=$1 AND height<$2::numeric`, lease.ChainID, strconv.FormatUint(cutoff, 10)); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `DELETE FROM scanner_gaps WHERE chain_id=$1 AND status='healed' AND to_height<$2::numeric`, lease.ChainID, strconv.FormatUint(cutoff, 10)); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.Exec(ctx, `UPDATE scanner_gaps SET status='healed',healed_at=clock_timestamp(),last_seen_at=clock_timestamp() WHERE chain_id=$1 AND status='open' AND to_height<=$2::numeric`, lease.ChainID, strconv.FormatUint(batch.To, 10)); err != nil {
 				return err
 			}
-		}
-		for _, event := range batch.Events {
-			if event.Identity.ChainID != lease.ChainID {
-				return fmt.Errorf("%w: queued transfer belongs to another chain", domain.ErrInvariantViolation)
+			if len(batch.RuntimeEvidence) > 0 {
+				evidenceID, err := ids.New()
+				if err != nil {
+					return err
+				}
+				encoded, err := json.Marshal(batch.RuntimeEvidence)
+				if err != nil {
+					return err
+				}
+				_, err = tx.Exec(ctx, `INSERT INTO scanner_runtime_config_evidence(id,chain_id,scanner_shard,capability,from_height,to_height,config_evidence,evidence_hash,committed_at) VALUES($1,$2,$3,$4,$5::numeric,$6::numeric,$7::jsonb,digest(($7::jsonb)::text,'sha256'),clock_timestamp())`, evidenceID, lease.ChainID, lease.Shard, s.capability, strconv.FormatUint(batch.From, 10), strconv.FormatUint(batch.To, 10), encoded)
+				if err != nil {
+					return err
+				}
 			}
-			identityKey, err := event.Identity.Key()
-			if err != nil {
-				return err
-			}
-			payload, err := json.Marshal(event)
-			if err != nil {
-				return err
-			}
-			_, err = tx.Exec(ctx, `INSERT INTO scanner_transfer_queue (event_id,chain_id,identity_key,canonical_event,status,attempt_count,next_attempt_at,created_at,updated_at) VALUES ($1,$2,$3,$4::jsonb,'pending',0,clock_timestamp(),clock_timestamp(),clock_timestamp()) ON CONFLICT (chain_id,identity_key) DO UPDATE SET canonical_event=EXCLUDED.canonical_event,status='pending',attempt_count=0,next_attempt_at=clock_timestamp(),locked_by=NULL,locked_until=NULL,last_error=NULL,updated_at=clock_timestamp() WHERE scanner_transfer_queue.status='reorged'`, event.ID, lease.ChainID, identityKey, payload)
-			if err != nil {
-				return err
-			}
-		}
-		last := batch.Blocks[len(batch.Blocks)-1]
-		command, err := tx.Exec(ctx, `UPDATE scanner_cursors SET cursor_height=$1::numeric,cursor_hash=$2,locked_by=NULL,locked_until=NULL,heartbeat_at=clock_timestamp(),version=version+1,updated_at=clock_timestamp() WHERE chain_id=$3 AND scanner_shard=$4 AND capability=$5 AND locked_by=$6 AND version=$7 AND locked_until>clock_timestamp()`, strconv.FormatUint(batch.To, 10), last.Hash, lease.ChainID, lease.Shard, s.capability, lease.Owner, lease.Version)
-		if err != nil {
+			return nil
+		})
+	}
+	for attempt := 0; attempt < 3; attempt++ {
+		err := commit()
+		if !isSerializationFailure(err) || attempt == 2 {
 			return err
 		}
-		if command.RowsAffected() != 1 {
-			return fmt.Errorf("%w: scanner lease was lost", domain.ErrVersionConflict)
+		timer := time.NewTimer(time.Duration(5*(1<<attempt)) * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
 		}
-		if len(batch.RuntimeEvidence) > 0 {
-			evidenceID, err := ids.New()
-			if err != nil {
-				return err
-			}
-			encoded, err := json.Marshal(batch.RuntimeEvidence)
-			if err != nil {
-				return err
-			}
-			_, err = tx.Exec(ctx, `INSERT INTO scanner_runtime_config_evidence(id,chain_id,scanner_shard,capability,from_height,to_height,config_evidence,evidence_hash,committed_at) VALUES($1,$2,$3,$4,$5::numeric,$6::numeric,$7::jsonb,digest(($7::jsonb)::text,'sha256'),clock_timestamp())`, evidenceID, lease.ChainID, lease.Shard, s.capability, strconv.FormatUint(batch.From, 10), strconv.FormatUint(batch.To, 10), encoded)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	}
+	return errors.New("unreachable scanner transaction retry state")
 }
 
 func (s *ScannerStore) Release(ctx context.Context, lease scanner.Lease) error {
@@ -213,7 +243,11 @@ func (s *ScannerStore) ClaimTransfers(ctx context.Context, worker string, now ti
 }
 
 func (s *ScannerStore) CompleteTransfer(ctx context.Context, worker, eventID string) error {
-	command, err := s.pool.Exec(ctx, `UPDATE scanner_transfer_queue SET status='completed',locked_by=NULL,locked_until=NULL,last_error=NULL,updated_at=clock_timestamp() WHERE event_id=$1 AND status='leased' AND locked_by=$2`, eventID, worker)
+	// The queue is transport state, not financial evidence. The canonical
+	// transfer and all settlement evidence live in their dedicated immutable
+	// tables, so retaining a second JSON copy after acknowledgement only causes
+	// unbounded storage growth.
+	command, err := s.pool.Exec(ctx, `DELETE FROM scanner_transfer_queue WHERE event_id=$1 AND status='leased' AND locked_by=$2`, eventID, worker)
 	if err != nil {
 		return err
 	}

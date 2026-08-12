@@ -232,16 +232,16 @@ func TestAdminMutationsRequireExactOriginAndCSRF(t *testing.T) {
 	}
 }
 
-func TestMutationAtRotationBoundaryKeepsExistingCSRF(t *testing.T) {
+func TestMutationAtFormerRotationBoundaryKeepsCookieStable(t *testing.T) {
 	handler, repo, raw, csrf, _ := serverFixture(t, true)
 	request := mutationRequest(http.MethodPost, "/admin/v1/session/logout", `{}`, raw, csrf)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusNoContent {
-		t.Fatalf("rotation mutation failed: %d %s", response.Code, response.Body.String())
+		t.Fatalf("mutation failed: %d %s", response.Code, response.Body.String())
 	}
-	if repo.rotated.CSRFHash != tokenHash(csrf) {
-		t.Fatal("passive rotation changed CSRF hash")
+	if repo.rotated.ID != "" {
+		t.Fatal("passive authentication rotated the browser session")
 	}
 	activeCSRF, activeSession := 0, 0
 	for _, cookie := range response.Result().Cookies() {
@@ -252,8 +252,8 @@ func TestMutationAtRotationBoundaryKeepsExistingCSRF(t *testing.T) {
 			activeSession++
 		}
 	}
-	if activeSession != 1 || activeCSRF != 0 {
-		t.Fatalf("rotation cookies session=%d csrf=%d", activeSession, activeCSRF)
+	if activeSession != 0 || activeCSRF != 0 {
+		t.Fatalf("logout unexpectedly installed replacement cookies session=%d csrf=%d", activeSession, activeCSRF)
 	}
 }
 

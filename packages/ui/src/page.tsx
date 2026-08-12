@@ -4,7 +4,6 @@ import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, type 
 import { cn } from "./utils";
 
 export function PageHeader({
-  eyebrow,
   title,
   description,
   actions
@@ -12,7 +11,6 @@ export function PageHeader({
   return (
     <div className="mp-page-header">
       <div>
-        {eyebrow && <div className="mp-page-header__eyebrow">{eyebrow}</div>}
         <h1>{title}</h1>
         {description && <p>{description}</p>}
       </div>
@@ -88,7 +86,7 @@ export function StatusBadge({ status, children }: { status: string; children?: R
   const tones: Record<string, StatusTone> = {
     settled: "positive", finalized: "positive", healthy: "positive", delivered: "positive", matched: "positive", balanced: "positive",
     pending: "neutral", observed: "info", confirming: "info", confirmed: "info", retrying: "warning", degraded: "warning", partially_paid: "warning",
-    needs_review: "violet", unmatched: "violet", investigating: "violet", expired: "neutral", paused: "neutral", failed: "negative", dead_letter: "negative"
+    needs_review: "warning", unmatched: "warning", investigating: "warning", expired: "neutral", paused: "neutral", failed: "negative", dead_letter: "negative"
   };
   return <Badge tone={tones[status] ?? "neutral"}><span aria-hidden="true" className="mp-badge__dot" />{children ?? status.replaceAll("_", " ")}</Badge>;
 }
