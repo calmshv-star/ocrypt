@@ -1058,7 +1058,7 @@ components:
         order_id: { type: string, minLength: 1, maxLength: 128 }
         customer_id: { type: string, maxLength: 256 }
         amount: { type: string, pattern: '^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$', maxLength: 89 }
-        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: 'Three uppercase ASCII letters; use ISO 4217 for fiat, for example RUB, USD, EUR, KZT, INR, or CNY. Route creation also requires a fresh admitted rate for the exact asset/currency pair.' }
         currency_scale: { type: integer, minimum: 0, maximum: 9, default: 2 }
         network: { type: string, description: Canonical chain ID or admitted alias such as tron, ethereum, solana, or ton. }
         asset: { type: string, description: Active asset ID or unambiguous symbol on the selected network. }
@@ -1094,7 +1094,7 @@ components:
         status: { $ref: '#/components/schemas/PaymentIntentStatus' }
         status_reason: { type: string }
         amount: { type: string }
-        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: 'Invoice currency copied from the request; availability of a payment route depends on a fresh admitted rate for its exact asset/currency pair.' }
         payment: { $ref: '#/components/schemas/MerchantPayment' }
         checkout_url: { type: string, format: uri, pattern: '^https://' }
         receipt_url: { type: string, format: uri, pattern: '^https://' }
@@ -1158,7 +1158,7 @@ components:
       properties:
         merchant_order_id: { type: string, minLength: 1, maxLength: 128 }
         amount_minor: { $ref: '#/components/schemas/PositiveAtomicAmount' }
-        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: 'Three uppercase ASCII letters; use ISO 4217 for fiat, for example RUB, USD, EUR, KZT, INR, or CNY. Creating a usable route also requires a fresh admitted rate for the exact asset/currency pair.' }
         currency_scale: { type: integer, minimum: 0, maximum: 9 }
         description: { type: string, maxLength: 2048 }
         customer_reference: { type: string, maxLength: 256 }
@@ -1304,7 +1304,7 @@ components:
         merchant_order_id: { type: string }
         customer_reference: { type: string }
         amount_minor: { $ref: '#/components/schemas/PositiveAtomicAmount' }
-        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: 'Invoice currency copied from the create request.' }
         currency_scale: { type: integer, minimum: 0, maximum: 9 }
         description: { type: string }
         status: { $ref: '#/components/schemas/PaymentIntentStatus' }

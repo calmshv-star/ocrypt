@@ -14,7 +14,7 @@
   ],
   "properties": {
     "base_asset": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$", "description": "Exact platform assets.id." },
-    "quote_asset": { "type": "string", "pattern": "^[A-Z]{3}$", "description": "Three-letter fiat currency used by PersistedPlanner." },
+    "quote_asset": { "type": "string", "pattern": "^[A-Z]{3}$", "description": "Three-letter uppercase fiat currency used by PersistedPlanner, for example RUB, USD, EUR, KZT, INR, or CNY." },
     "price_numerator": { "type": "string", "pattern": "^[1-9][0-9]{0,77}$", "description": "Numerator of quote-fiat units per one whole base asset; positive uint256." },
     "price_denominator": { "type": "string", "pattern": "^[1-9][0-9]{0,77}$", "description": "Denominator of quote-fiat units per one whole base asset; positive uint256." },
     "observed_at": { "type": "string", "format": "date-time" },

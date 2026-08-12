@@ -6,6 +6,12 @@ Verwenden Sie pro Dienst und Umgebung einen eigenen HMAC-Client. Ein Payment-Bac
 
 Merchant-Anfragen gehen an den API-Origin, Payment-Link-/Checkout-Aliases an den Management-/Gateway-Origin. Öffentliche `pl_…`- und `cs_…`-Werte sind hochentropische Bearer-Capabilities mit Zeit-, Aktions- oder Nutzungslimit.
 
+## Rechnungswährungen und Kurse
+
+Die Rechnungswährung ist nicht auf RUB festgelegt. `currency` besteht aus genau drei ASCII-Großbuchstaben und sollte einen ISO-4217-Code enthalten; `currency_scale` gibt die Nachkommastellen ausdrücklich an. `RUB`, `USD`, `EUR`, `KZT`, `INR` und `CNY` verwenden normalerweise Scale `2`, sodass `amount_minor: "3813"` den Betrag `38,13` in der gewählten Währung bedeutet. Die API leitet den Scale nicht aus dem Code ab.
+
+Ein akzeptierter Währungscode allein stellt noch keine Krypto-Quote bereit. Vor dem Erstellen einer On-Chain- oder Hosted-Route benötigt Production einen frischen zugelassenen Kurs für das exakte Paar `asset_id`/Währung. Fehlende, veraltete, nicht quorate, zukünftige oder zu stark abweichende Kurse schlagen fail-closed fehl; für jede Verkaufswährung müssen unabhängige normalisierte Kursquellen konfiguriert und zugelassen werden.
+
 ## Zahlungsablauf
 
 1. Erstellen Sie einen Intent mit eindeutiger `merchant_order_id`, exaktem String `amount_minor`, Währungsscale, Ablaufzeit und erlaubten Routen.

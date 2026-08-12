@@ -51,6 +51,14 @@ of users, orders, entitlements, and fulfillment.
 | Operational control | Merchant cabinet, platform administration, four-eyes approvals, audit chains, reconciliation, retention, and migration controls |
 | Integration choices | Hosted checkout, payment links, direct API, six SDKs, framework examples, and a bounded JSON-MD5/Form-MD5 compatibility service |
 
+Invoice currency is not hard-coded to RUB. Merchant requests use an exact
+three-letter uppercase currency code plus an explicit minor-unit scale; common
+examples include `RUB`, `USD`, `EUR`, `KZT`, `INR`, and `CNY` with scale `2`.
+A usable crypto route is created only when the platform has a fresh admitted
+rate for the exact asset/currency pair. Missing, stale, non-quorate, or
+excessively divergent rates fail closed instead of producing an estimated
+amount.
+
 ## Payment lifecycle
 
 ```mermaid

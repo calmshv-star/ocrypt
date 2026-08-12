@@ -6,6 +6,12 @@ Create a separate HMAC client per workload and environment. A typical payment ba
 
 Use the API origin for merchant requests and the management/gateway origin for payment-link and checkout aliases. Public `pl_…` and `cs_…` capabilities are intentionally unauthenticated, high entropy, short-lived or use-limited bearer secrets.
 
+## Invoice currencies and rates
+
+Invoice currency is not hard-coded to RUB. `currency` is exactly three uppercase ASCII letters and should be an ISO 4217 code; `currency_scale` explicitly defines its minor units. `RUB`, `USD`, `EUR`, `KZT`, `INR`, and `CNY` normally use scale `2`, so `amount_minor: "3813"` means `38.13` in the selected currency. The API does not infer the scale from the code.
+
+Accepting a currency code does not make a crypto quote available by itself. Before creating an on-chain or hosted route, production must have a fresh admitted rate for the exact `asset_id`/currency pair. Missing, stale, non-quorate, future-dated, or excessively divergent rates fail closed; configure and admit independent normalized rate sources for every currency you sell in.
+
 ## Payment lifecycle
 
 1. Create one intent with a unique `merchant_order_id`, exact `amount_minor`, currency scale, expiry, and allowed routes.

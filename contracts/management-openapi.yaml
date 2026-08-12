@@ -604,7 +604,7 @@ components:
       properties:
         name: { type: string }
         amount_minor: { type: string, pattern: '^[1-9][0-9]{0,77}$' }
-        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: 'Three uppercase ASCII letters; use ISO 4217 for fiat, for example RUB, USD, EUR, KZT, INR, or CNY. Redemption requires a fresh admitted rate for the selected asset/currency pair.' }
         currency_scale: { type: integer, minimum: 0, maximum: 9 }
         description: { type: string, maxLength: 1000 }
         allowed_routes: { type: array, minItems: 1, maxItems: 1, items: { $ref: '#/components/schemas/RouteSelector' } }
@@ -704,7 +704,7 @@ components:
       properties:
         name: { type: string, minLength: 1, maxLength: 120 }
         amount_minor: { type: string, pattern: '^[1-9][0-9]{0,77}$' }
-        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: 'Three uppercase ASCII letters; use ISO 4217 for fiat. A usable route requires a fresh admitted rate for the exact asset/currency pair.' }
         currency_scale: { type: integer, minimum: 0, maximum: 9 }
         description: { type: string, maxLength: 1000 }
         allowed_routes: { type: array, minItems: 1, maxItems: 1, items: { $ref: '#/components/schemas/RouteSelector' } }
@@ -723,7 +723,7 @@ components:
         name: { type: string, minLength: 1, maxLength: 120 }
         public_url: { type: string, format: uri, description: Present only on create idempotency response }
         amount_minor: { type: string, pattern: '^[1-9][0-9]{0,77}$' }
-        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: 'Invoice currency copied from the create request.' }
         currency_scale: { type: integer, minimum: 0, maximum: 9 }
         description: { type: string, maxLength: 1000 }
         allowed_routes: { type: array, minItems: 1, maxItems: 1, items: { $ref: '#/components/schemas/RouteSelector' } }

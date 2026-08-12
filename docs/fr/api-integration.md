@@ -6,6 +6,12 @@ Utilisez un client HMAC distinct par service et environnement. Un backend de pai
 
 Les requêtes merchant utilisent l’origine API; les aliases payment-link/checkout utilisent l’origine management/gateway. Les jetons publics `pl_…` et `cs_…` sont des capabilities bearer à forte entropie, limitées dans le temps, les actions ou le nombre d’usages.
 
+## Devises de facturation et taux
+
+La devise de facturation n’est pas limitée à RUB. `currency` contient exactement trois lettres ASCII majuscules et doit utiliser un code ISO 4217 ; `currency_scale` déclare explicitement le nombre de décimales. `RUB`, `USD`, `EUR`, `KZT`, `INR` et `CNY` utilisent normalement l’échelle `2` : `amount_minor: "3813"` signifie donc `38,13` dans la devise choisie. L’API ne déduit pas l’échelle du code.
+
+Accepter un code devise ne rend pas automatiquement une cotation crypto disponible. Avant de créer une route on-chain ou hosted, la production exige un taux récent et admis pour la paire exacte `asset_id`/devise. Un taux absent, périmé, sans quorum, daté du futur ou trop divergent échoue en mode fermé ; configurez et admettez des sources normalisées indépendantes pour chaque devise vendue.
+
 ## Cycle du paiement
 
 1. Créez un intent avec `merchant_order_id` unique, `amount_minor` exact sous forme de chaîne, scale, expiration et routes autorisées.

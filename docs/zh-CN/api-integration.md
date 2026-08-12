@@ -6,6 +6,12 @@
 
 商户请求发送到 API origin，payment-link/checkout alias 发送到 management/gateway origin。公开的 `pl_…` 与 `cs_…` 是高熵 bearer capability，并受有效期、动作或使用次数限制。
 
+## 账单币种与汇率
+
+账单币种并未写死为 RUB。`currency` 必须是三个大写 ASCII 字母，并应使用 ISO 4217 代码；`currency_scale` 明确指定小数位。`RUB`、`USD`、`EUR`、`KZT`、`INR` 和 `CNY` 通常使用 scale `2`，因此 `amount_minor: "3813"` 表示所选币种的 `38.13`。API 不会根据代码自动推断 scale。
+
+接受币种代码本身并不代表已有可用的加密货币报价。创建 on-chain 或 hosted route 前，生产环境必须为精确的 `asset_id`/币种对提供新鲜且已准入的汇率。缺失、过期、未达到 quorum、来自未来或价差过大的汇率都会 fail closed；每个销售币种都必须配置并准入独立的标准化汇率源。
+
 ## 支付流程
 
 1. 以唯一 `merchant_order_id`、字符串 `amount_minor`、币种 scale、过期时间和允许路线创建 intent。
