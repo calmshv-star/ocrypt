@@ -26,6 +26,7 @@ const (
 	coinGeckoURL       = "https://api.coingecko.com/api/v3/simple/price?ids=%s&vs_currencies=%s&include_last_updated_at=true"
 	coinPaprikaURL     = "https://api.coinpaprika.com/v1/tickers/%s?quotes=%s"
 	kazakhstanRatesURL = "https://nationalbank.kz/rss/rates_all.xml"
+	coinPaprikaSpacing = 300 * time.Millisecond
 )
 
 // defaultFiatCurrencies is the closed, ready-to-use invoice-currency catalog.
@@ -181,6 +182,7 @@ type upstream struct {
 
 	coinPaprikaMu    sync.Mutex
 	coinPaprikaCache map[string]upstreamQuote
+	coinPaprikaLast  time.Time
 
 	kazakhstanMu     sync.Mutex
 	kazakhstanFactor upstreamQuote
@@ -318,10 +320,17 @@ func (u *upstream) coinPaprika(ctx context.Context, currency string, configured 
 	quote, fresh := u.coinPaprikaCache[cacheKey]
 	fresh = fresh && quote.ExpiresAt.After(time.Now())
 	if !fresh {
-		group := []string{"RUB", "USD", "EUR"}
-		if upstreamCurrency == "INR" || upstreamCurrency == "CNY" {
-			group = []string{"INR", "CNY"}
+		if wait := time.Until(u.coinPaprikaLast.Add(coinPaprikaSpacing)); wait > 0 {
+			timer := time.NewTimer(wait)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return rates.ProviderResult{}, ctx.Err()
+			case <-timer.C:
+			}
 		}
+		u.coinPaprikaLast = time.Now()
+		group := []string{"RUB", "USD", "EUR", "INR", "CNY"}
 		raw, err := u.get(ctx, fmt.Sprintf(coinPaprikaURL, configured.CoinPaprikaID, strings.Join(group, ",")))
 		if err != nil {
 			return rates.ProviderResult{}, err
