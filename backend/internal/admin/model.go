@@ -240,6 +240,8 @@ type TransferRow struct {
 	ChainID       string    `json:"chain_id"`
 	TransactionID string    `json:"transaction_id"`
 	AssetID       string    `json:"asset_id"`
+	AssetSymbol   string    `json:"asset_symbol"`
+	AssetDecimals int16     `json:"asset_decimals"`
 	AmountAtomic  string    `json:"amount_atomic"`
 	Status        string    `json:"status"`
 	Confirmations int64     `json:"confirmations"`

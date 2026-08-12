@@ -643,7 +643,7 @@ func (r *PostgresRepository) ListTransfers(ctx context.Context, p Principal, s S
 		}
 		args = append(args, cursorArgs...)
 		args = append(args, limit+1)
-		query := `SELECT e.id::text,e.chain_id,e.transaction_id,e.asset_id,e.amount_atomic::text,e.status::text,e.confirmations,e.on_chain_time FROM transfer_events e WHERE (EXISTS(SELECT 1 FROM payment_matches pm WHERE pm.event_id=e.id) OR EXISTS(SELECT 1 FROM unmatched_payments u WHERE u.event_id=e.id))` + merchantCondition + clause + fmt.Sprintf(" ORDER BY e.id DESC LIMIT $%d", len(args))
+		query := `SELECT e.id::text,e.chain_id,e.transaction_id,e.asset_id,a.symbol,a.decimals,e.amount_atomic::text,e.status::text,e.confirmations,e.on_chain_time FROM transfer_events e JOIN assets a ON a.id=e.asset_id AND a.chain_id=e.chain_id WHERE (EXISTS(SELECT 1 FROM payment_matches pm WHERE pm.event_id=e.id) OR EXISTS(SELECT 1 FROM unmatched_payments u WHERE u.event_id=e.id))` + merchantCondition + clause + fmt.Sprintf(" ORDER BY e.id DESC LIMIT $%d", len(args))
 		rows, e := tx.Query(ctx, query, args...)
 		if e != nil {
 			return e
@@ -651,7 +651,7 @@ func (r *PostgresRepository) ListTransfers(ctx context.Context, p Principal, s S
 		defer rows.Close()
 		for rows.Next() {
 			var v TransferRow
-			if e := rows.Scan(&v.ID, &v.ChainID, &v.TransactionID, &v.AssetID, &v.AmountAtomic, &v.Status, &v.Confirmations, &v.ObservedAt); e != nil {
+			if e := rows.Scan(&v.ID, &v.ChainID, &v.TransactionID, &v.AssetID, &v.AssetSymbol, &v.AssetDecimals, &v.AmountAtomic, &v.Status, &v.Confirmations, &v.ObservedAt); e != nil {
 				return e
 			}
 			page.Items = append(page.Items, v)

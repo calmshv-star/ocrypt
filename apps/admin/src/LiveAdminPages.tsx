@@ -237,6 +237,13 @@ function overviewIntentStatusKey(status:string):MessageKey {
   if (status === "partially_paid") return "status.partiallyPaid";
   if (status === "expired" || status === "cancelled") return "status.expired";
   if (status === "needs_review" || status === "reorg_review" || status === "overpaid" || status === "reversed") return "status.needsReview";
+	return "status.pending";
+}
+
+function transferStatusKey(status:string):MessageKey {
+  if (status === "finalized") return "status.finalized";
+  if (status === "confirmed") return "status.confirmed";
+  if (status === "observed") return "status.observed";
   return "status.pending";
 }
 
@@ -272,19 +279,19 @@ export function LiveResourcePage({ resource }: { resource: Resource }) {
     const items = pageItems(query.data);
     if (resource === "intents") return {
       labels: [t("admin.reference"), t("admin.identifier"), t("admin.exactAmount"), t("common.status"), t("admin.createdAt"), t("admin.expiresAt")],
-      rows: (items as IntentRow[]).map((item) => ({ id: item.id, cells: [item.merchant_order_id, <code>{short(item.id)}</code>, `${formatExactMinor(item.amount_minor, item.currency_scale)} ${item.currency}`, <StatusBadge status={item.status}>{item.status}</StatusBadge>, formatDate(item.created_at, locale), formatDate(item.expires_at, locale)] }))
+      rows: (items as IntentRow[]).map((item) => ({ id: item.id, cells: [item.merchant_order_id, <code>{short(item.id)}</code>, `${formatExactMinor(item.amount_minor, item.currency_scale)} ${item.currency}`, <StatusBadge status={item.status}>{t(overviewIntentStatusKey(item.status))}</StatusBadge>, formatDate(item.created_at, locale), formatDate(item.expires_at, locale)] }))
     };
     if (resource === "transfers") return {
-      labels: [t("admin.transaction"), t("admin.chain"), t("common.asset"), t("admin.atomicAmount"), t("admin.confirmations"), t("common.status"), t("admin.observedAt")],
+      labels: [t("admin.transaction"), t("admin.chain"), t("common.asset"), t("common.amount"), t("admin.confirmations"), t("common.status"), t("admin.observedAt")],
       rows: (items as TransferRow[]).map((item) => ({
         id: item.id,
         cells: [
           <code>{short(item.transaction_id)}</code>,
           item.chain_id,
           item.asset_id,
-          <code>{item.amount_atomic}</code>,
+          `${formatExactMinor(item.amount_atomic, item.asset_decimals)} ${item.asset_symbol}`,
           String(item.confirmations),
-          <StatusBadge status={item.status}>{item.status}</StatusBadge>,
+          <StatusBadge status={item.status}>{t(transferStatusKey(item.status))}</StatusBadge>,
           formatDate(item.observed_at, locale)
         ]
       }))

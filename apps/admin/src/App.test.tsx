@@ -133,6 +133,26 @@ describe("admin application", () => {
     expect(liveClient.transfers).toHaveBeenCalledWith({ tenantId, merchantId }, "");
   });
 
+  it("renders transfer amounts and statuses for operators instead of raw atomic values", async () => {
+    const liveClient = client({ transfers: vi.fn().mockResolvedValue({ items: [{
+      id:"20000000-0000-4000-8000-000000000020",
+      chain_id:"tron:mainnet",
+      transaction_id:"289410e8c5c364eeae4031a4b99a8fedda5748a58e846fb0f653f4c617fef854",
+      asset_id:"usdt-tron",
+      asset_symbol:"USDT",
+      asset_decimals:6,
+      amount_atomic:"6028692",
+      status:"finalized",
+      confirmations:1475,
+      observed_at:"2026-08-12T17:38:00Z"
+    }] }) });
+    renderApp("/transfers", { client: liveClient, preview: false });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Language" }), { target: { value: "ru" } });
+    expect(await screen.findByText("6.028692 USDT")).toBeInTheDocument();
+    expect(screen.getByText("Финализирован")).toBeInTheDocument();
+    expect(screen.queryByText("6028692")).not.toBeInTheDocument();
+  });
+
   it("keeps the webhook route visible when an older management API returns null for an empty page", async () => {
     const webhookPrincipal={...principal,permissions:[...principal.permissions,"webhook_settings:read"] as AdminPrincipal["permissions"]};
     const liveClient=client({me:vi.fn().mockResolvedValue(webhookPrincipal),webhookEndpoints:vi.fn().mockResolvedValue({data:null})});
