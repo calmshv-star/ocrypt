@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestStandaloneBootstrapAndRuntimeTargetsCoverDefaultCatalog(t *testing.T) {
+func TestStandaloneBootstrapAdmitsCatalogButRuntimeTargetsOnlyRUB(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", "..", ".."))
 	bootstrap := readFixture(t, filepath.Join(root, "deploy", "standalone", "bootstrap-rates.sql"))
 	compose := readFixture(t, filepath.Join(root, "deploy", "standalone", "compose.shadow.yaml"))
@@ -57,10 +57,17 @@ func TestStandaloneBootstrapAndRuntimeTargetsCoverDefaultCatalog(t *testing.T) {
 		t.Fatalf("bootstrap assets %v do not match gateway %v", gotAssets, assetIDs)
 	}
 	for _, id := range assetIDs {
+		policy := `{"policy_key":"rate-` + id + `-rub"}`
+		if strings.Count(compose, policy) != 1 {
+			t.Fatalf("standalone RUB runtime target %s is missing or duplicated", policy)
+		}
 		for _, currency := range defaultFiatCurrencies {
-			policy := `{"policy_key":"rate-` + id + `-` + strings.ToLower(currency) + `"}`
-			if strings.Count(compose, policy) != 1 {
-				t.Fatalf("standalone runtime target %s is missing or duplicated", policy)
+			if currency == "RUB" {
+				continue
+			}
+			unused := `{"policy_key":"rate-` + id + `-` + strings.ToLower(currency) + `"}`
+			if strings.Contains(compose, unused) {
+				t.Fatalf("unused standalone runtime target %s must remain disabled", unused)
 			}
 		}
 	}
