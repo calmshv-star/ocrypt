@@ -240,7 +240,7 @@ func TestEVMEmptyRouteWatchFastForwardsWithSparseCursorEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !batch.SparseBlocks || len(batch.Blocks) != 2 || !reflect.DeepEqual(requested, []uint64{11, 100}) || batch.Blocks[0].Height != 11 || batch.Blocks[1].Height != 100 || len(batch.Events) != 0 {
+	if !batch.SparseBlocks || !batch.IdleCheckpoint || len(batch.Blocks) != 2 || !reflect.DeepEqual(requested, []uint64{11, 100}) || batch.Blocks[0].Height != 11 || batch.Blocks[1].Height != 100 || len(batch.Events) != 0 {
 		t.Fatalf("empty route watch did not fast-forward sparsely: requested=%v batch=%+v", requested, batch)
 	}
 }

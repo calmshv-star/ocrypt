@@ -301,6 +301,7 @@ func (s *EVMSource) scanWatchedRange(ctx context.Context, from, to uint64) (scan
 			batch.Blocks = append(batch.Blocks, scanner.Block{Height: number, Hash: blockHash, ParentHash: parentHash, Time: blockTime})
 		}
 		batch.SparseBlocks = true
+		batch.IdleCheckpoint = true
 		return batch, nil
 	}
 	blocks := make(map[uint64]scanner.Block, to-from+1)
