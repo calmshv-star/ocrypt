@@ -29,10 +29,30 @@ func TestAdmittedTickIsAtomicPersistedPlannerProjection(t *testing.T) {
 			t.Errorf("missing projection invariant %q", fragment)
 		}
 	}
-	for _, fragment := range []string{"FROM asset_rate_ticks rt", "rt.status='active'", "rt.observed_at+make_interval(secs=>rt.max_age_seconds)>clock_timestamp()", "ORDER BY rt.observed_at DESC,rt.id DESC LIMIT 1"} {
+	for _, fragment := range []string{"FROM asset_rate_ticks rt", "rt.status='active'", "rt.observed_at>clock_timestamp()-interval '30 minutes'", "ORDER BY rt.observed_at DESC,rt.id DESC LIMIT 1"} {
 		if !strings.Contains(plannerSQL, fragment) {
 			t.Errorf("planner no longer enforces %q", fragment)
 		}
+	}
+}
+
+func TestCheckoutWakeupUsesTheSameThirtyMinuteObservationWindow(t *testing.T) {
+	raw, err := os.ReadFile("../../migrations/000037_rate_observation_window.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	for _, fragment := range []string{
+		"latest_observed_at>now_at-interval '30 minutes'",
+		"t.observed_at+interval '30 minutes'",
+		"pg_notify('ocrypt_rate_refresh',bound_policy)",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("rate observation-window migration no longer enforces %q", fragment)
+		}
+	}
+	if strings.Contains(sql, "latest_created_at>now_at-interval '30 minutes'") {
+		t.Fatal("checkout freshness must be based on provider observation time, not insertion time")
 	}
 }
 

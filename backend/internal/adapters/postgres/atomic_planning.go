@@ -38,7 +38,7 @@ func (s *Store) AllocateRouteInTx(ctx context.Context, tx pgx.Tx, p application.
 	var spread uint32
 	var policy int64
 	var provenance []byte
-	err = tx.QueryRow(ctx, `SELECT a.decimals,t.id::text,t.numerator::text,t.denominator::text,t.spread_bps,t.source,t.policy_version,t.provenance_hash FROM assets a JOIN chains c ON c.id=a.chain_id JOIN LATERAL(SELECT * FROM asset_rate_ticks rt WHERE rt.asset_id=a.id AND rt.fiat_currency=$1 AND rt.status='active' AND rt.observed_at+make_interval(secs=>rt.max_age_seconds)>clock_timestamp() ORDER BY rt.observed_at DESC,rt.id DESC LIMIT 1)t ON true WHERE a.id=$2 AND a.chain_id=$3 AND a.status='active' AND c.status='active'`, intent.Currency, assetID, chainID).Scan(&decimals, &tickID, &numeratorRaw, &denominatorRaw, &spread, &source, &policy, &provenance)
+	err = tx.QueryRow(ctx, `SELECT a.decimals,t.id::text,t.numerator::text,t.denominator::text,t.spread_bps,t.source,t.policy_version,t.provenance_hash FROM assets a JOIN chains c ON c.id=a.chain_id JOIN LATERAL(SELECT * FROM asset_rate_ticks rt WHERE rt.asset_id=a.id AND rt.fiat_currency=$1 AND rt.status='active' AND rt.observed_at>clock_timestamp()-interval '30 minutes' ORDER BY rt.observed_at DESC,rt.id DESC LIMIT 1)t ON true WHERE a.id=$2 AND a.chain_id=$3 AND a.status='active' AND c.status='active'`, intent.Currency, assetID, chainID).Scan(&decimals, &tickID, &numeratorRaw, &denominatorRaw, &spread, &source, &policy, &provenance)
 	if err == pgx.ErrNoRows {
 		return planned, fmt.Errorf("%w: no fresh persisted rate tick for route", domain.ErrStateConflict)
 	}
