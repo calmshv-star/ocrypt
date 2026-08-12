@@ -3,13 +3,21 @@ package rategateway
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/rates"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
 
 type fixtureFetcher struct {
 	calls      int
@@ -85,6 +93,68 @@ func TestGatewayRejectsUnknownProviderAndAsset(t *testing.T) {
 		if response.Code != http.StatusNotFound {
 			t.Fatalf("%s returned %d", path, response.Code)
 		}
+	}
+}
+
+func TestCoinPaprikaSharesOneUpstreamRequestAcrossChainAliases(t *testing.T) {
+	calls := 0
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		if request.URL.String() != "https://api.coinpaprika.com/v1/tickers/usdc-usd-coin?quotes=RUB,USD,EUR" {
+			t.Fatalf("unexpected upstream request %s", request.URL)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(`{
+				"id":"usdc-usd-coin",
+				"last_updated":"2026-08-12T18:00:00Z",
+				"quotes":{
+					"RUB":{"price":80},
+					"USD":{"price":1},
+					"EUR":{"price":0.9}
+				}
+			}`)),
+		}, nil
+	})}
+	source := &upstream{client: client, coinPaprikaCache: make(map[string]upstreamQuote)}
+
+	base, err := source.coinPaprika(context.Background(), "USD", assets["usdc-base"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	arbitrum, err := source.coinPaprika(context.Background(), "USD", assets["usdc-arbitrum"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("chain aliases made %d upstream requests, want 1", calls)
+	}
+	if base.BaseAsset != "usdc-base" || arbitrum.BaseAsset != "usdc-arbitrum" {
+		t.Fatalf("aliases lost their public IDs: %#v, %#v", base, arbitrum)
+	}
+}
+
+func TestCoinGeckoRequestIDsAreDeduplicated(t *testing.T) {
+	ids := sortedCoinGeckoIDs()
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, duplicate := seen[id]; duplicate {
+			t.Fatalf("duplicate CoinGecko ID %q in %#v", id, ids)
+		}
+		seen[id] = struct{}{}
+	}
+	if len(ids) >= len(assets) {
+		t.Fatalf("expected aliases to collapse, got %d IDs for %d assets", len(ids), len(assets))
+	}
+}
+
+func TestBoundedUpstreamReasonDoesNotEchoErrors(t *testing.T) {
+	if got := boundedUpstreamReason(context.DeadlineExceeded); got != "timeout" {
+		t.Fatalf("deadline classified as %q", got)
+	}
+	if got := boundedUpstreamReason(io.ErrUnexpectedEOF); got != "unavailable" {
+		t.Fatalf("unexpected error classified as %q", got)
 	}
 }
 

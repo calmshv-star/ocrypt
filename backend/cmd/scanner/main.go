@@ -48,11 +48,20 @@ func main() {
 	}
 	var source scanner.Source
 	var runtimeLoader *platformruntime.ScannerLoader
+	var staticWatchAddresses platformruntime.WatchAddressReader
 	if config.staticConfig {
 		source, err = scannerSource(config)
 		if err != nil {
 			slog.Error("scanner source initialization failed", "provider_kind", config.providerKind, "error", err)
 			os.Exit(1)
+		}
+		if config.routeWatchAddresses {
+			platformRepository, createErr := platformadmin.NewPostgresRepository(pool)
+			if createErr != nil {
+				slog.Error("scanner route watch reader initialization failed", "error", createErr)
+				os.Exit(1)
+			}
+			staticWatchAddresses = platformRepository
 		}
 	} else {
 		platformRepository, createErr := platformadmin.NewPostgresRepository(pool)
@@ -74,7 +83,7 @@ func main() {
 			slog.Error("provider operations service initialization failed", "error", createErr)
 			os.Exit(1)
 		}
-		runtimeLoader = &platformruntime.ScannerLoader{Reader: platformRepository, ProviderAdmission: providerService, SecretDir: config.platformSecretDir}
+		runtimeLoader = &platformruntime.ScannerLoader{Reader: platformRepository, ProviderAdmission: providerService, WatchAddresses: platformRepository, SecretDir: config.platformSecretDir}
 	}
 	metrics := telemetry.New("scanner")
 	worker := scanner.Worker{
@@ -95,6 +104,24 @@ func main() {
 	defer ticker.Stop()
 	run := func() {
 		started := time.Now()
+		if staticWatchAddresses != nil {
+			addresses, loadErr := staticWatchAddresses.ScannerWatchAddresses(ctx, config.chainID, time.Now().UTC())
+			if loadErr != nil {
+				metrics.ObserveCycle("scanner", "failure", 0, time.Since(started))
+				slog.Error("scanner route watch refresh failed", "chain_id", config.chainID, "error", loadErr)
+				return
+			}
+			cycleConfig := config
+			cycleConfig.watchedAddresses = addresses
+			cycleConfig.addressFiltered = true
+			cycleSource, createErr := scannerSource(cycleConfig)
+			if createErr != nil {
+				metrics.ObserveCycle("scanner", "failure", 0, time.Since(started))
+				slog.Error("scanner route watch source refresh failed", "chain_id", config.chainID, "error", createErr)
+				return
+			}
+			worker.Source = cycleSource
+		}
 		if runtimeLoader != nil {
 			runtime, loadErr := runtimeLoader.Load(ctx, config.platformKeys, time.Now().UTC())
 			if loadErr != nil {
@@ -164,6 +191,7 @@ type scannerConfig struct {
 	pollInterval, leaseDuration, maxHeadAge, maxReadyAge                             time.Duration
 	providerMinInterval                                                              time.Duration
 	staticConfig                                                                     bool
+	addressFiltered, routeWatchAddresses                                             bool
 	platformSecretDir                                                                string
 	platformKeys                                                                     platformruntime.ScannerKeys
 }
@@ -179,7 +207,20 @@ func loadScannerConfig() (scannerConfig, error) {
 		nativeAssetID:    os.Getenv("SCANNER_NATIVE_ASSET_ID"), gasFreeContracts: splitNonempty(os.Getenv("SCANNER_GASFREE_CONTRACTS")),
 		gasFreeFeeCollectors: splitNonempty(os.Getenv("SCANNER_GASFREE_FEE_COLLECTORS")),
 	}
+	var err error
 	config.staticConfig = os.Getenv("SCANNER_UNSAFE_DEVELOPMENT_STATIC_CONFIG") == "true" && (os.Getenv("ENVIRONMENT") == "development" || os.Getenv("ENVIRONMENT") == "test")
+	if raw := os.Getenv("SCANNER_ADDRESS_FILTERED"); raw != "" {
+		if config.addressFiltered, err = strconv.ParseBool(raw); err != nil {
+			return config, errors.New("SCANNER_ADDRESS_FILTERED must be true or false")
+		}
+	} else {
+		config.addressFiltered = len(config.watchedAddresses) > 0
+	}
+	if raw := os.Getenv("SCANNER_ROUTE_WATCH_ADDRESSES"); raw != "" {
+		if config.routeWatchAddresses, err = strconv.ParseBool(raw); err != nil {
+			return config, errors.New("SCANNER_ROUTE_WATCH_ADDRESSES must be true or false")
+		}
+	}
 	config.platformSecretDir = os.Getenv("SCANNER_SECRET_DIR")
 	if !config.staticConfig {
 		raw := []byte(os.Getenv("SCANNER_PLATFORM_RUNTIME_JSON"))
@@ -189,7 +230,6 @@ func loadScannerConfig() (scannerConfig, error) {
 			return config, errors.New("SCANNER_PLATFORM_RUNTIME_JSON is required and must be a strict runtime-key object")
 		}
 	}
-	var err error
 	if raw := os.Getenv("SCANNER_ASSETS_JSON"); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &config.assets); err != nil {
 			return config, errors.New("SCANNER_ASSETS_JSON must be an asset-keyed JSON object")
@@ -277,7 +317,7 @@ func scannerSource(config scannerConfig) (scanner.Source, error) {
 			Kind: providers.Kind(config.providerKind), HTTP: providers.HTTPConfig{Endpoint: endpoint, Headers: headers, Timeout: 20 * time.Second, MinInterval: config.providerMinInterval},
 			ProviderID: providerID, ChainID: config.chainID, NativeAssetID: config.nativeAssetID, NativeDecimals: config.nativeDecimals,
 			Assets: config.assets, IncludeInternal: config.includeInternal, GasFreeContracts: config.gasFreeContracts,
-			GasFreeFeeCollectors: config.gasFreeFeeCollectors, WatchedAddresses: config.watchedAddresses, PageSize: config.pageSize,
+			GasFreeFeeCollectors: config.gasFreeFeeCollectors, WatchedAddresses: config.watchedAddresses, AddressFiltered: config.addressFiltered, Overlap: config.overlap, PageSize: config.pageSize,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("initialize %s: %w", providerID, err)

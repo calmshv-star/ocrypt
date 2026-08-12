@@ -37,6 +37,26 @@ func TestProviderHeaderConfigurationFailsClosed(t *testing.T) {
 	}
 }
 
+func TestStaticScannerCanRefreshAddressFilterFromActiveRoutes(t *testing.T) {
+	values := map[string]string{
+		"SCANNER_UNSAFE_DEVELOPMENT_STATIC_CONFIG": "true", "ENVIRONMENT": "test",
+		"DATABASE_URL": "postgres://example", "WORKER_ID": "scanner-1", "SCANNER_CHAIN_ID": "eip155:8453", "SCANNER_GENESIS_HASH": "genesis",
+		"SCANNER_PROVIDER_KIND": "evm-jsonrpc", "SCANNER_PROVIDER_URLS": "https://one.example,https://two.example",
+		"SCANNER_QUORUM": "2", "SCANNER_OVERLAP": "2", "SCANNER_RANGE_SIZE": "4",
+		"SCANNER_ADDRESS_FILTERED": "true", "SCANNER_ROUTE_WATCH_ADDRESSES": "true", "SCANNER_WATCHED_ADDRESSES": "",
+	}
+	for key, value := range values {
+		t.Setenv(key, value)
+	}
+	config, err := loadScannerConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.addressFiltered || !config.routeWatchAddresses || len(config.watchedAddresses) != 0 {
+		t.Fatalf("unexpected active-route watch configuration: %+v", config)
+	}
+}
+
 func TestFailoverScannerConfigurationRequiresSingleHeadQuorum(t *testing.T) {
 	values := map[string]string{
 		"SCANNER_UNSAFE_DEVELOPMENT_STATIC_CONFIG": "true", "ENVIRONMENT": "test",

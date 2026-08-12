@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestStandaloneBootstrapAndRuntimeTargetsCoverDefaultCatalog(t *testing.T) {
+func TestStandaloneBootstrapAdmitsCatalogButRuntimeTargetsOnlyRUB(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", "..", ".."))
 	bootstrap := readFixture(t, filepath.Join(root, "deploy", "standalone", "bootstrap-rates.sql"))
 	compose := readFixture(t, filepath.Join(root, "deploy", "standalone", "compose.shadow.yaml"))
@@ -42,11 +42,32 @@ func TestStandaloneBootstrapAndRuntimeTargetsCoverDefaultCatalog(t *testing.T) {
 	for id := range assets {
 		assetIDs = append(assetIDs, id)
 	}
+	sort.Strings(assetIDs)
+	assetBlock := regexp.MustCompile(`(?s)\(VALUES\s+(.*?)\)\s+AS assets\(asset_id\)`).FindStringSubmatch(bootstrap)
+	if len(assetBlock) != 2 {
+		t.Fatal("default asset VALUES list is missing from rate bootstrap")
+	}
+	assetMatches := regexp.MustCompile(`'([a-z0-9-]+)'`).FindAllStringSubmatch(assetBlock[1], -1)
+	gotAssets := make([]string, 0, len(assetMatches))
+	for _, match := range assetMatches {
+		gotAssets = append(gotAssets, match[1])
+	}
+	sort.Strings(gotAssets)
+	if strings.Join(gotAssets, ",") != strings.Join(assetIDs, ",") {
+		t.Fatalf("bootstrap assets %v do not match gateway %v", gotAssets, assetIDs)
+	}
 	for _, id := range assetIDs {
+		policy := `{"policy_key":"rate-` + id + `-rub"}`
+		if strings.Count(compose, policy) != 1 {
+			t.Fatalf("standalone RUB runtime target %s is missing or duplicated", policy)
+		}
 		for _, currency := range defaultFiatCurrencies {
-			policy := `{"policy_key":"rate-` + id + `-` + strings.ToLower(currency) + `"}`
-			if strings.Count(compose, policy) != 1 {
-				t.Fatalf("standalone runtime target %s is missing or duplicated", policy)
+			if currency == "RUB" {
+				continue
+			}
+			unused := `{"policy_key":"rate-` + id + `-` + strings.ToLower(currency) + `"}`
+			if strings.Contains(compose, unused) {
+				t.Fatalf("unused standalone runtime target %s must remain disabled", unused)
 			}
 		}
 	}

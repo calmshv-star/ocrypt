@@ -14,12 +14,24 @@ import (
 
 const workerID = "019fed4b-47e6-74c4-b79e-76363fb73bcd"
 
+func TestBoundedFetchReasonDoesNotEchoErrors(t *testing.T) {
+	if got := boundedFetchReason(context.DeadlineExceeded); got != "timeout" {
+		t.Fatalf("deadline classified as %q", got)
+	}
+	if got := boundedFetchReason(errors.New("secret transport detail")); got != "network" {
+		t.Fatalf("unexpected error classified as %q", got)
+	}
+	if got := boundedFetchReason(errors.New("wrapped: rate provider status 403 with secret body")); got != "http_403" {
+		t.Fatalf("provider status classified as %q", got)
+	}
+}
+
 func baseEnvironment(t *testing.T) {
 	t.Helper()
 	t.Setenv("DATABASE_URL", "postgres://db/rates")
 	t.Setenv("RATE_WORKER_ID", workerID)
 	t.Setenv("RATE_TARGETS_JSON", `[{"policy_key":"eth-usd"}]`)
-	for _, key := range []string{"RATE_SECRET_DIR", "RATE_POLL_INTERVAL", "RATE_LEASE_DURATION", "RATE_MAX_ATTEMPTS", "RATE_MAX_READY_AGE", "RATE_HEALTH_ADDRESS"} {
+	for _, key := range []string{"RATE_SECRET_DIR", "RATE_POLL_INTERVAL", "RATE_LEASE_DURATION", "RATE_MAX_ATTEMPTS", "RATE_MAX_READY_AGE", "RATE_SOURCE_MIN_INTERVAL", "RATE_HEALTH_ADDRESS"} {
 		t.Setenv(key, "")
 	}
 }
@@ -30,7 +42,7 @@ func TestLoadConfigDefaultsAndStrictTargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value.healthAddress != ":9092" || value.pollInterval != 5*time.Second || value.leaseDuration != 30*time.Second || value.maxAttempts != 8 || len(value.targets) != 1 {
+	if value.healthAddress != ":9092" || value.pollInterval != 5*time.Second || value.leaseDuration != 30*time.Second || value.sourceMinInterval != 150*time.Millisecond || value.maxAttempts != 8 || len(value.targets) != 1 {
 		t.Fatalf("config=%#v", value)
 	}
 	t.Setenv("RATE_TARGETS_JSON", `[{"policy_key":"eth-usd","unknown":true}]`)

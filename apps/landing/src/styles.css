@@ -149,7 +149,7 @@ button, a, select { -webkit-tap-highlight-color: transparent; }
 .landing-footer { padding: 55px 0 45px; border-top: 1px solid var(--landing-line); }
 .landing-footer__grid { display: grid; grid-template-columns: 2fr repeat(3, 1fr); gap: 50px; }
 .landing-footer__grid > div { display: flex; flex-direction: column; align-items: flex-start; gap: 11px; }
-.landing-footer__grid p { max-width: 270px; margin: 7px 0; color: var(--mp-text-subtle); font-size: 12px; line-height: 1.6; }
+.landing-footer__grid p { max-width: 270px; margin: 7px 0; color: var(--mp-text-muted); font-size: 12px; line-height: 1.6; }
 .landing-footer__grid > div:first-child > span { display: flex; align-items: center; gap: 7px; color: #0e704f; font-size: 10px; }.landing-footer__grid > div:first-child > span i { width: 6px; height: 6px; border-radius: 50%; background: #22c788; }
 .landing-footer__grid strong { margin-bottom: 5px; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; }
 .landing-footer__grid a:not(.landing-brand) { color: var(--mp-text-muted); font-size: 12px; text-decoration: none; }.landing-footer__grid a:hover { color: var(--landing-accent); }

@@ -37,6 +37,8 @@ type Config struct {
 	GasFreeContracts     []string
 	GasFreeFeeCollectors []string
 	WatchedAddresses     []string
+	AddressFiltered      bool
+	Overlap              uint64
 	PageSize             uint32
 }
 
@@ -49,7 +51,7 @@ func NewSource(config Config) (scanner.Source, error) {
 		for key, value := range config.Assets {
 			assets[key] = EVMToken{AssetID: value.ID, Decimals: value.Decimals}
 		}
-		return NewEVMSource(EVMConfig{HTTP: config.HTTP, ProviderID: config.ProviderID, ChainID: config.ChainID, NativeAssetID: config.NativeAssetID, NativeDecimals: config.NativeDecimals, Tokens: assets, IncludeInternal: config.IncludeInternal})
+		return NewEVMSource(EVMConfig{HTTP: config.HTTP, ProviderID: config.ProviderID, ChainID: config.ChainID, NativeAssetID: config.NativeAssetID, NativeDecimals: config.NativeDecimals, Tokens: assets, IncludeInternal: config.IncludeInternal, WatchedAddresses: config.WatchedAddresses, AddressFiltered: config.AddressFiltered, Overlap: config.Overlap})
 	case KindTRONFullNode:
 		assets := make(map[string]TRONAsset, len(config.Assets))
 		for key, value := range config.Assets {

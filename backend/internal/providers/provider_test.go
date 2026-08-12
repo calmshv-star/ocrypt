@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -76,6 +77,9 @@ func TestEVMDirectSourceParsesNativeERC20AndInternalTraceReplaySafely(t *testing
 				if len(params) > 0 && string(params[0]) == `"0x0"` {
 					return fixture.Genesis
 				}
+				if len(params) == 2 && string(params[0]) == `"0x1"` && string(params[1]) != "true" {
+					t.Fatal("full EVM scan did not request transaction bodies")
+				}
 				return fixture.Block
 			case "eth_getBlockReceipts":
 				return fixture.Receipts
@@ -108,6 +112,136 @@ func TestEVMDirectSourceParsesNativeERC20AndInternalTraceReplaySafely(t *testing
 	}
 	if !reflect.DeepEqual(first, second) {
 		t.Fatal("duplicate range replay changed canonical EVM output")
+	}
+}
+
+func TestEVMWatchedRangeAvoidsBlockReceiptFanout(t *testing.T) {
+	var fixture struct {
+		ChainID  json.RawMessage `json:"chainId"`
+		Genesis  json.RawMessage `json:"genesis"`
+		Block    json.RawMessage `json:"block"`
+		Receipts json.RawMessage `json:"receipts"`
+	}
+	readFixture(t, "evm.json", &fixture)
+	var receipts []json.RawMessage
+	if err := json.Unmarshal(fixture.Receipts, &receipts); err != nil || len(receipts) != 1 {
+		t.Fatal("invalid EVM receipt fixture")
+	}
+	var receipt struct {
+		Logs json.RawMessage `json:"logs"`
+	}
+	if err := json.Unmarshal(receipts[0], &receipt); err != nil {
+		t.Fatal(err)
+	}
+	methods := make(map[string]int)
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		return 200, rpcResult(t, request, func(method string, params []json.RawMessage) json.RawMessage {
+			methods[method]++
+			switch method {
+			case "eth_chainId":
+				return fixture.ChainID
+			case "eth_getBlockByNumber":
+				if len(params) > 0 && string(params[0]) == `"0x0"` {
+					return fixture.Genesis
+				}
+				return fixture.Block
+			case "eth_getTransactionReceipt":
+				return receipts[0]
+			case "eth_getLogs":
+				return receipt.Logs
+			case "eth_getBlockReceipts":
+				t.Fatal("watched scan must not fetch every block receipt")
+				return nil
+			default:
+				t.Fatalf("unexpected method %s", method)
+				return nil
+			}
+		})
+	})
+	source, err := NewEVMSource(EVMConfig{
+		HTTP: HTTPConfig{Endpoint: "https://evm.example", Client: client}, ProviderID: "evm-a", ChainID: "eip155:1",
+		NativeAssetID: "eth", NativeDecimals: 18, AddressFiltered: true,
+		WatchedAddresses: []string{"0x2222222222222222222222222222222222222222", "0x3333333333333333333333333333333333333333"},
+		Tokens:           map[string]EVMToken{"0x4444444444444444444444444444444444444444": {AssetID: "usdt-eth", Decimals: 6}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := source.ScanRange(context.Background(), 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := make(map[string]bool, len(batch.Events))
+	for _, event := range batch.Events {
+		kinds[event.Kind] = true
+	}
+	if len(batch.Events) != 2 || !kinds["native_top_level"] || !kinds["token_transfer"] {
+		t.Fatalf("unexpected watched EVM events: %+v", batch.Events)
+	}
+	if methods["eth_getTransactionReceipt"] != 1 || methods["eth_getLogs"] != 1 || methods["eth_getBlockReceipts"] != 0 {
+		t.Fatalf("unexpected EVM request fanout: %+v", methods)
+	}
+}
+
+func TestEVMEmptyWatchSetUsesHeaderOnly(t *testing.T) {
+	var fixture struct {
+		Block json.RawMessage `json:"block"`
+	}
+	readFixture(t, "evm.json", &fixture)
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		return 200, rpcResult(t, request, func(method string, params []json.RawMessage) json.RawMessage {
+			if method != "eth_getBlockByNumber" {
+				t.Fatalf("empty watched scan used %s", method)
+			}
+			if len(params) == 2 && string(params[1]) != "false" {
+				t.Fatal("empty watched scan requested transaction bodies")
+			}
+			return fixture.Block
+		})
+	})
+	source, err := NewEVMSource(EVMConfig{HTTP: HTTPConfig{Endpoint: "https://evm.example", Client: client}, ProviderID: "evm-a", ChainID: "eip155:1", NativeAssetID: "eth", NativeDecimals: 18, AddressFiltered: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := source.ScanRange(context.Background(), 1, 1)
+	if err != nil || len(batch.Blocks) != 1 || len(batch.Events) != 0 {
+		t.Fatalf("unexpected empty watched batch: %+v err=%v", batch, err)
+	}
+}
+
+func TestEVMEmptyRouteWatchFastForwardsWithSparseCursorEvidence(t *testing.T) {
+	requested := make([]uint64, 0, 2)
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		return 200, rpcResult(t, request, func(method string, params []json.RawMessage) json.RawMessage {
+			if method != "eth_getBlockByNumber" || len(params) != 2 || string(params[1]) != "false" {
+				t.Fatalf("unexpected empty-route RPC: %s %s", method, params)
+			}
+			var tag string
+			if err := json.Unmarshal(params[0], &tag); err != nil {
+				t.Fatal(err)
+			}
+			height := uint64(100)
+			if tag != "finalized" {
+				parsed, err := parseHexUint64(tag)
+				if err != nil {
+					t.Fatal(err)
+				}
+				height = parsed
+				requested = append(requested, height)
+			}
+			return json.RawMessage(fmt.Sprintf(`{"number":"0x%x","hash":"0x%064x","parentHash":"0x%064x","timestamp":"0x64","transactions":[]}`, height, height+1, height))
+		})
+	})
+	source, err := NewEVMSource(EVMConfig{HTTP: HTTPConfig{Endpoint: "https://evm.example", Client: client}, ProviderID: "evm-a", ChainID: "eip155:1", NativeAssetID: "eth", NativeDecimals: 18, AddressFiltered: true, Overlap: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := source.ScanRange(context.Background(), 10, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !batch.SparseBlocks || !batch.IdleCheckpoint || len(batch.Blocks) != 3 || !reflect.DeepEqual(requested, []uint64{10, 11, 100}) || batch.Blocks[0].Height != 10 || batch.Blocks[1].Height != 11 || batch.Blocks[2].Height != 100 || len(batch.Events) != 0 {
+		t.Fatalf("empty route watch did not fast-forward sparsely: requested=%v batch=%+v", requested, batch)
 	}
 }
 
@@ -176,6 +310,16 @@ func TestTRONDirectSourceParsesStandardTRC20WithoutReceiptFanout(t *testing.T) {
 	}
 	if infoCalls != 0 || len(batch.Events) != 1 || batch.Events[0].Kind != "token_transfer" || batch.Events[0].Amount.String() != "639" {
 		t.Fatalf("standard TRC-20 scan used receipt fanout or returned wrong event: calls=%d events=%+v", infoCalls, batch.Events)
+	}
+}
+
+func TestTRONDirectTransferAcceptsFullMainnetAddressInABIWord(t *testing.T) {
+	transfer, ok := parseTRONDirectTokenTransfer(map[string]any{
+		"owner_address": "41bf6c6afc2cb5dbd037f51c1561f9006cfb0877df",
+		"data":          "a9059cbb000000000000000000000041b55706ccca3eca7e40078a73ad6779c24da43ab900000000000000000000000000000000000000000000000000000000005bfd94",
+	}, TRONAsset{AssetID: "usdt-tron", Decimals: 6}, 0)
+	if !ok || transfer.To != "TSW3ZVUt5jjuyiVgppBduZCtQeCKzR5Dv4" || transfer.ReceivedAmount != "6028692" || transfer.AssetID != "usdt-tron" {
+		t.Fatalf("unexpected full-address TRC-20 transfer: %+v parsed=%v", transfer, ok)
 	}
 }
 

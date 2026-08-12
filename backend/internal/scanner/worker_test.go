@@ -58,6 +58,21 @@ func TestScannerAppliesFinalityDepthAndCarriesRuntimeEvidence(t *testing.T) {
 		t.Fatalf("batch=%+v stored=%+v err=%v", batch, store.lastBatch, err)
 	}
 }
+
+func TestSparseRangeBindsOverlapCursorWithoutInventingIntermediateParents(t *testing.T) {
+	lease := Lease{Height: 11, Hash: "cursor-hash"}
+	batch := RangeBatch{
+		From: 10, To: 100, SparseBlocks: true, IdleCheckpoint: true,
+		Blocks: []Block{
+			{Height: 10, Hash: "from-hash", ParentHash: "parent-9", Time: time.Unix(10, 0)},
+			{Height: 11, Hash: "cursor-hash", ParentHash: "from-hash", Time: time.Unix(11, 0)},
+			{Height: 100, Hash: "head-hash", ParentHash: "parent-99", Time: time.Unix(100, 0)},
+		},
+	}
+	if err := validateRange(batch, 10, 100, lease, 2); err != nil {
+		t.Fatalf("valid sparse cursor evidence rejected: %v", err)
+	}
+}
 func (s *storeFixture) RewindReorg(_ context.Context, _ Lease, _ RangeBatch, _ ReorgError) error {
 	s.rewinds++
 	return nil

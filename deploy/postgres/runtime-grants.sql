@@ -120,7 +120,8 @@ GRANT INSERT ON payment_intent_versions,callback_events,callback_deliveries TO m
 GRANT UPDATE ON webhook_endpoints TO merchant_api_runtime;
 GRANT SELECT,INSERT,DELETE ON auth_nonces TO merchant_api_runtime;
 GRANT SELECT ON wallets,asset_rate_ticks TO merchant_api_runtime;
-GRANT EXECUTE ON FUNCTION lookup_api_credential(text),lookup_checkout_session(bytea) TO merchant_api_runtime;
+GRANT EXECUTE ON FUNCTION lookup_api_credential(text),lookup_checkout_session(bytea),
+  request_rate_refresh_if_stale(text,text) TO merchant_api_runtime;
 
 -- Deterministic sandbox capability. Revoke first so every deployment repairs
 -- privilege drift to the exact matrix. Reset can delete only sandbox scenarios
@@ -230,6 +231,8 @@ GRANT EXECUTE ON FUNCTION provider_operation_binding_policy_current(uuid)
 TO merchant_scanner_worker;
 GRANT SELECT,INSERT ON scanner_runtime_config_evidence TO merchant_scanner_worker;
 REVOKE UPDATE,DELETE,TRUNCATE ON scanner_runtime_config_evidence FROM merchant_scanner_worker;
+REVOKE ALL ON FUNCTION scanner_active_watch_addresses(text,timestamptz) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION scanner_active_watch_addresses(text,timestamptz) TO merchant_scanner_worker;
 
 -- Provider health is a private, cross-scope reader only for active platform
 -- snapshots. All circuit/rate/observation mutation remains behind fenced
@@ -436,7 +439,7 @@ GRANT INSERT ON match_candidates,ledger_transactions,callback_deliveries,outbox_
 GRANT SELECT ON payment_route_policy_bindings TO merchant_proof_worker;
 GRANT SELECT,UPDATE ON payment_intents,payment_routes,checkout_sessions,rate_quotes,
   address_assignments,addresses,amount_reservations TO merchant_plan_worker;
-GRANT SELECT ON webhook_endpoints,callback_events,payment_matches,payment_match_aggregates TO merchant_plan_worker;
+GRANT SELECT ON wallets,webhook_endpoints,callback_events,payment_matches,payment_match_aggregates TO merchant_plan_worker;
 GRANT UPDATE ON webhook_endpoints TO merchant_plan_worker;
 GRANT INSERT ON payment_intent_versions,callback_events,callback_deliveries,outbox_events TO merchant_plan_worker;
 GRANT SELECT,UPDATE ON reconciliation_reports TO merchant_reconciliation_worker;

@@ -69,34 +69,7 @@ VALUES('0198a100-0000-7000-8000-000000000031','0198a100-0000-7000-8000-000000000
        clock_timestamp(),clock_timestamp()+interval '365 days',clock_timestamp(),clock_timestamp())
 ON CONFLICT(id) DO NOTHING;
 
-CREATE OR REPLACE FUNCTION pg_temp.activate_platform_snapshot(
-  requested_tenant uuid, requested_kind platform_config_kind, requested_key text,
-  requested_payload jsonb, requester uuid, approver uuid
-) RETURNS uuid LANGUAGE plpgsql AS $$
-DECLARE
-  request_id uuid := uuidv7();
-  snapshot_id uuid := uuidv7();
-  activation_id uuid := uuidv7();
-  requested_scope uuid := platform_scope_uuid(requested_tenant);
-  now_at timestamptz := clock_timestamp();
-BEGIN
-  INSERT INTO platform_config_change_requests(
-    id,tenant_id,scope_id,kind,logical_key,version,based_on_version,payload,payload_hash,status,reason,
-    requested_by,approved_by,scheduled_by,activated_by,requested_at,decided_at,scheduled_for,activated_at,
-    created_at,updated_at,row_version)
-  VALUES(request_id,requested_tenant,requested_scope,requested_kind,requested_key,1,0,requested_payload,
-    digest(requested_payload::text,'sha256'),'active','Initial standalone production bootstrap',requester,approver,approver,approver,
-    now_at,now_at,now_at,now_at,now_at,now_at,4);
-  INSERT INTO platform_config_snapshots(
-    id,scope_id,tenant_id,change_request_id,kind,logical_key,version,payload,payload_hash,activated_by,activated_at)
-  VALUES(snapshot_id,requested_scope,requested_tenant,request_id,requested_kind,requested_key,1,requested_payload,
-    digest(requested_payload::text,'sha256'),approver,now_at);
-  INSERT INTO platform_config_heads(scope_id,tenant_id,kind,logical_key,snapshot_id,fence_token,updated_at)
-  VALUES(requested_scope,requested_tenant,requested_kind,requested_key,snapshot_id,1,now_at);
-  INSERT INTO platform_config_activations(id,scope_id,tenant_id,kind,logical_key,snapshot_id,fence_token,activation_type,actor_id,occurred_at)
-  VALUES(activation_id,requested_scope,requested_tenant,requested_kind,requested_key,snapshot_id,1,'activate',approver,now_at);
-  RETURN snapshot_id;
-END $$;
+\ir activate-platform-snapshot.sql
 
 SELECT pg_temp.activate_platform_snapshot('0198a100-0000-7000-8000-000000000001','merchant_environment','0198a100-0000-7000-8000-000000000002',
   '{"status":"active"}'::jsonb,'0198a100-0000-7000-8000-000000000003','0198a100-0000-7000-8000-000000000004')
@@ -105,7 +78,7 @@ SELECT pg_temp.activate_platform_snapshot('0198a100-0000-7000-8000-000000000001'
   '{"key":"new_routes","enabled":true,"rollout_bps":10000}'::jsonb,'0198a100-0000-7000-8000-000000000003','0198a100-0000-7000-8000-000000000004')
 WHERE NOT EXISTS(SELECT 1 FROM platform_config_heads WHERE scope_id=platform_scope_uuid('0198a100-0000-7000-8000-000000000001') AND kind='feature_flag' AND logical_key='new_routes');
 
-SELECT pg_temp.activate_platform_snapshot(NULL,'chain','eip155:1','{"family":"evm","network":"ethereum-mainnet","status":"active","genesis_hash":"d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3","quorum":2,"overlap":64,"range_size":128,"max_head_age_seconds":60}'::jsonb,'0198a100-0000-7000-8000-000000000003','0198a100-0000-7000-8000-000000000004')
+SELECT pg_temp.activate_platform_snapshot(NULL,'chain','eip155:1','{"family":"evm","network":"ethereum-mainnet","status":"active","genesis_hash":"0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3","quorum":2,"overlap":64,"range_size":128,"max_head_age_seconds":60}'::jsonb,'0198a100-0000-7000-8000-000000000003','0198a100-0000-7000-8000-000000000004')
 WHERE NOT EXISTS(SELECT 1 FROM platform_config_heads WHERE scope_id=platform_scope_uuid(NULL) AND kind='chain' AND logical_key='eip155:1');
 SELECT pg_temp.activate_platform_snapshot(NULL,'chain','solana:mainnet','{"family":"solana","network":"mainnet-beta","status":"active","genesis_hash":"5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2dXs","quorum":2,"overlap":64,"range_size":128,"max_head_age_seconds":60}'::jsonb,'0198a100-0000-7000-8000-000000000003','0198a100-0000-7000-8000-000000000004')
 WHERE NOT EXISTS(SELECT 1 FROM platform_config_heads WHERE scope_id=platform_scope_uuid(NULL) AND kind='chain' AND logical_key='solana:mainnet');
@@ -143,6 +116,8 @@ WHERE NOT EXISTS(SELECT 1 FROM platform_config_heads WHERE scope_id=platform_sco
 SELECT pg_temp.activate_platform_snapshot('0198a100-0000-7000-8000-000000000001','wallet_pool','0198a100-0000-7000-8000-000000000013','{"status":"active","chain_ref":"tron:mainnet"}'::jsonb,'0198a100-0000-7000-8000-000000000003','0198a100-0000-7000-8000-000000000004')
 WHERE NOT EXISTS(SELECT 1 FROM platform_config_heads WHERE scope_id=platform_scope_uuid('0198a100-0000-7000-8000-000000000001') AND kind='wallet_pool' AND logical_key='0198a100-0000-7000-8000-000000000013');
 
+\ir bootstrap-public-assets.sql
+
 INSERT INTO automated_matching_policy_changes(
   id,tenant_id,merchant_id,proposed_version,accumulate_partials,underpayment_tolerance_bps,overpayment_mode,
   accept_late_within_grace,require_same_sender,gasfree_enabled,status,created_by,requested_by,approved_by,activated_by,
@@ -165,10 +140,11 @@ ON CONFLICT(id) DO NOTHING;
 
 COMMIT;
 
--- The standalone install admits the complete default invoice-currency catalog
--- in the same invocation. Existing snapshots are left immutable on replay.
+-- The standalone install admits the complete rate catalog, but its worker
+-- targets only RUB by default. Each deployment opts into additional invoice
+-- currencies explicitly through RATE_TARGETS_JSON.
 \ir bootstrap-rates.sql
 
 SELECT 'wallets='||count(*) FROM wallets WHERE tenant_id='0198a100-0000-7000-8000-000000000001';
 SELECT 'addresses='||count(*) FROM addresses WHERE tenant_id='0198a100-0000-7000-8000-000000000001';
-SELECT 'assets='||count(*) FROM assets WHERE id IN ('eth-ethereum','sol-solana','ton-ton','trx-tron','usdt-tron');
+SELECT 'assets='||count(*) FROM assets WHERE status='active';

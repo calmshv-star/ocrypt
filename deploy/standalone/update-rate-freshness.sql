@@ -28,18 +28,22 @@ BEGIN
     RAISE EXCEPTION 'missing active rate snapshot %.%',requested_kind,requested_key;
   END IF;
   SELECT * INTO STRICT old_snapshot FROM platform_config_snapshots WHERE id=prior_snapshot_id;
-  IF (old_snapshot.payload->>'max_age_seconds')::integer=900 THEN
+  IF (old_snapshot.payload->>'max_age_seconds')::integer=2100
+     AND (requested_kind<>'rate_policy' OR (old_snapshot.payload->>'poll_interval_seconds')::integer=1800) THEN
     RETURN old_snapshot.id;
   END IF;
 
-  next_payload := jsonb_set(old_snapshot.payload,'{max_age_seconds}','900'::jsonb,false);
+  next_payload := jsonb_set(old_snapshot.payload,'{max_age_seconds}','2100'::jsonb,false);
+  IF requested_kind='rate_policy' THEN
+    next_payload := jsonb_set(next_payload,'{poll_interval_seconds}','1800'::jsonb,true);
+  END IF;
   INSERT INTO platform_config_change_requests(
     id,scope_id,kind,logical_key,version,based_on_version,payload,payload_hash,status,reason,
     requested_by,approved_by,scheduled_by,activated_by,requested_at,decided_at,scheduled_for,activated_at,
     created_at,updated_at,row_version)
   VALUES(new_request_id,requested_scope,requested_kind,requested_key,old_snapshot.version+1,old_snapshot.version,
     next_payload,digest(next_payload::text,'sha256'),'active',
-    'Use a 15 minute freshness window for the slower independent public source while retaining quorum 2 of 2',
+    'Use a 30 minute collection cadence with a five minute expiry margin and quorum 2 of 2',
     requester,approver,approver,approver,now_at,now_at,now_at,now_at,now_at,now_at,4);
   INSERT INTO platform_config_snapshots(
     id,scope_id,change_request_id,kind,logical_key,version,payload,payload_hash,activated_by,activated_at)

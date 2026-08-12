@@ -73,6 +73,50 @@ func (s *PostgresStore) EnsureTargets(ctx context.Context, owner string, targets
 	return nil
 }
 
+// DueTargets performs one bounded queue read for the worker loop. The former
+// per-target polling path opened a transaction for every configured pair even
+// when nothing was due; this keeps idle operation to one cheap query.
+func (s *PostgresStore) DueTargets(ctx context.Context, owner string, configured []Target, limit int) (due []Target, err error) {
+	if !ids.Valid(owner) || len(configured) < 1 || len(configured) > 256 || limit < 1 || limit > 256 {
+		return nil, ErrInvalidConfig
+	}
+	keys := make([]string, 0, len(configured))
+	seen := make(map[string]struct{}, len(configured))
+	for _, target := range configured {
+		if !validTarget(target) {
+			return nil, ErrInvalidConfig
+		}
+		if _, duplicate := seen[target.PolicyKey]; duplicate {
+			continue
+		}
+		seen[target.PolicyKey] = struct{}{}
+		keys = append(keys, target.PolicyKey)
+	}
+	if len(keys) == 0 {
+		return nil, ErrInvalidConfig
+	}
+	err = s.within(ctx, owner, Target{PolicyKey: keys[0]}, func(tx pgx.Tx) error {
+		rows, queryErr := tx.Query(ctx, `SELECT policy_key FROM rate_runtime_jobs
+WHERE scope_id=platform_scope_uuid(NULL) AND tenant_id IS NULL AND status='active'
+  AND policy_key=ANY($1::text[]) AND next_attempt_at<=clock_timestamp()
+  AND (lease_until IS NULL OR lease_until<clock_timestamp())
+ORDER BY updated_at DESC,next_attempt_at,policy_key LIMIT $2`, keys, limit)
+		if queryErr != nil {
+			return queryErr
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var key string
+			if scanErr := rows.Scan(&key); scanErr != nil {
+				return scanErr
+			}
+			due = append(due, Target{PolicyKey: key})
+		}
+		return rows.Err()
+	})
+	return due, err
+}
+
 func (s *PostgresStore) Claim(ctx context.Context, owner string, target Target, lease time.Duration) (Claim, bool, error) {
 	if lease < time.Second || lease > 5*time.Minute {
 		return Claim{}, false, ErrInvalidConfig

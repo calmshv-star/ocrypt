@@ -10,7 +10,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -23,10 +26,10 @@ import (
 )
 
 type config struct {
-	databaseURL, workerID, secretDir, healthAddress string
-	targets                                         []rates.Target
-	pollInterval, leaseDuration, maxReadyAge        time.Duration
-	maxAttempts                                     int
+	databaseURL, workerID, secretDir, healthAddress             string
+	targets                                                     []rates.Target
+	pollInterval, leaseDuration, maxReadyAge, sourceMinInterval time.Duration
+	maxAttempts                                                 int
 }
 
 func main() {
@@ -71,7 +74,7 @@ func main() {
 		slog.Error("rate provider initialization failed", "error", err)
 		os.Exit(1)
 	}
-	worker := rates.Worker{Owner: configuration.workerID, Loader: loader, Fetcher: observedFetcher{next: provider}, Store: store, NewID: ids.New,
+	worker := rates.Worker{Owner: configuration.workerID, Loader: loader, Fetcher: &observedFetcher{next: provider, minimumInterval: configuration.sourceMinInterval}, Store: store, NewID: ids.New,
 		Now: func() time.Time { return time.Now().UTC() }, LeaseDuration: configuration.leaseDuration, MaxAttempts: configuration.maxAttempts}
 	if err = worker.Validate(); err != nil {
 		slog.Error("rate worker initialization failed", "error", err)
@@ -91,7 +94,13 @@ func main() {
 		}
 	}()
 	run := func() {
-		for _, target := range configuration.targets {
+		due, dueErr := store.DueTargets(ctx, configuration.workerID, configuration.targets, len(configuration.targets))
+		if dueErr != nil {
+			metrics.ObserveCycle("rates", "failure", 0, 0)
+			slog.Warn("rate due queue unavailable", "error_code", boundedErrorCode(dueErr))
+			return
+		}
+		for _, target := range due {
 			started := time.Now()
 			success, runErr := worker.RunTarget(ctx, target)
 			if runErr != nil {
@@ -127,9 +136,29 @@ func main() {
 	}
 }
 
-type observedFetcher struct{ next rates.Fetcher }
+type observedFetcher struct {
+	next            rates.Fetcher
+	minimumInterval time.Duration
+	mu              sync.Mutex
+	lastStarted     time.Time
+}
 
-func (f observedFetcher) Fetch(ctx context.Context, source rates.SourceConfig) (rates.ProviderResult, error) {
+var providerStatusPattern = regexp.MustCompile(`provider status ([1-5][0-9][0-9])(?:\D|$)`)
+
+func (f *observedFetcher) Fetch(ctx context.Context, source rates.SourceConfig) (rates.ProviderResult, error) {
+	f.mu.Lock()
+	if wait := time.Until(f.lastStarted.Add(f.minimumInterval)); wait > 0 {
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			f.mu.Unlock()
+			return rates.ProviderResult{}, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	f.lastStarted = time.Now()
+	f.mu.Unlock()
 	result, err := f.next.Fetch(ctx, source)
 	if err != nil {
 		code := "rejected"
@@ -139,7 +168,7 @@ func (f observedFetcher) Fetch(ctx context.Context, source rates.SourceConfig) (
 		case errors.Is(err, rates.ErrUnavailable):
 			code = "unavailable"
 		}
-		slog.Warn("rate source fetch rejected", "source_key", source.Key, "error_code", code)
+		slog.Warn("rate source fetch rejected", "source_key", source.Key, "error_code", code, "reason", boundedFetchReason(err))
 		return result, err
 	}
 	age := time.Since(result.ObservedAt)
@@ -149,6 +178,34 @@ func (f observedFetcher) Fetch(ctx context.Context, source rates.SourceConfig) (
 		slog.Warn("rate source observation rejected", "source_key", source.Key, "error_code", "future", "age_seconds", int64(age/time.Second))
 	}
 	return result, nil
+}
+
+func boundedFetchReason(err error) string {
+	if err == nil {
+		return "unknown"
+	}
+	message := err.Error()
+	if match := providerStatusPattern.FindStringSubmatch(message); len(match) == 2 {
+		return "http_" + match[1]
+	}
+	switch {
+	case strings.Contains(message, "identity mismatch"):
+		return "identity_mismatch"
+	case strings.Contains(message, "invalid normalized rate"):
+		return "response_schema"
+	case strings.Contains(message, "content-type"), strings.Contains(message, "application/json"):
+		return "content_type"
+	case strings.Contains(message, "response exceeds"):
+		return "response_limit"
+	case strings.Contains(message, "DNS"):
+		return "dns"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return "network"
+	}
 }
 
 func healthHandler(store rates.Store, configuration config) http.Handler {
@@ -194,6 +251,9 @@ func loadConfig() (config, error) {
 	if result.maxReadyAge, err = durationEnv("RATE_MAX_READY_AGE", 2*time.Minute); err != nil {
 		return result, err
 	}
+	if result.sourceMinInterval, err = durationEnv("RATE_SOURCE_MIN_INTERVAL", 150*time.Millisecond); err != nil {
+		return result, err
+	}
 	if result.maxAttempts, err = intEnv("RATE_MAX_ATTEMPTS", 8, 1, 100); err != nil {
 		return result, err
 	}
@@ -223,7 +283,7 @@ func loadConfig() (config, error) {
 		seen[target] = true
 	}
 	result.targets = rates.SortedTargets(result.targets)
-	if result.pollInterval < time.Second || result.pollInterval > time.Minute || result.leaseDuration < time.Second || result.leaseDuration > 5*time.Minute || result.maxReadyAge < time.Second || result.maxReadyAge > 24*time.Hour {
+	if result.pollInterval < time.Second || result.pollInterval > time.Minute || result.leaseDuration < time.Second || result.leaseDuration > 5*time.Minute || result.maxReadyAge < time.Second || result.maxReadyAge > 24*time.Hour || result.sourceMinInterval < 10*time.Millisecond || result.sourceMinInterval > 2*time.Second {
 		return result, errors.New("rate durations outside allowed range")
 	}
 	return result, nil

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/big"
 	"mime"
 	"net"
@@ -26,6 +27,7 @@ const (
 	coinGeckoURL       = "https://api.coingecko.com/api/v3/simple/price?ids=%s&vs_currencies=%s&include_last_updated_at=true"
 	coinPaprikaURL     = "https://api.coinpaprika.com/v1/tickers/%s?quotes=%s"
 	kazakhstanRatesURL = "https://nationalbank.kz/rss/rates_all.xml"
+	coinPaprikaSpacing = 300 * time.Millisecond
 )
 
 // defaultFiatCurrencies is the closed, ready-to-use invoice-currency catalog.
@@ -47,11 +49,27 @@ type asset struct {
 }
 
 var assets = map[string]asset{
-	"eth-ethereum": {ID: "eth-ethereum", CoinGeckoID: "ethereum", CoinPaprikaID: "eth-ethereum"},
-	"sol-solana":   {ID: "sol-solana", CoinGeckoID: "solana", CoinPaprikaID: "sol-solana"},
-	"ton-ton":      {ID: "ton-ton", CoinGeckoID: "the-open-network", CoinPaprikaID: "toncoin-the-open-network"},
-	"trx-tron":     {ID: "trx-tron", CoinGeckoID: "tron", CoinPaprikaID: "trx-tron"},
-	"usdt-tron":    {ID: "usdt-tron", CoinGeckoID: "tether", CoinPaprikaID: "usdt-tether"},
+	"eth-ethereum":   {ID: "eth-ethereum", CoinGeckoID: "ethereum", CoinPaprikaID: "eth-ethereum"},
+	"usdc-ethereum":  {ID: "usdc-ethereum", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
+	"usdt-ethereum":  {ID: "usdt-ethereum", CoinGeckoID: "tether", CoinPaprikaID: "usdt-tether"},
+	"sol-solana":     {ID: "sol-solana", CoinGeckoID: "solana", CoinPaprikaID: "sol-solana"},
+	"usdc-solana":    {ID: "usdc-solana", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
+	"usdt-solana":    {ID: "usdt-solana", CoinGeckoID: "tether", CoinPaprikaID: "usdt-tether"},
+	"ton-ton":        {ID: "ton-ton", CoinGeckoID: "the-open-network", CoinPaprikaID: "toncoin-the-open-network"},
+	"usdt-ton":       {ID: "usdt-ton", CoinGeckoID: "tether", CoinPaprikaID: "usdt-tether"},
+	"trx-tron":       {ID: "trx-tron", CoinGeckoID: "tron", CoinPaprikaID: "trx-tron"},
+	"usdt-tron":      {ID: "usdt-tron", CoinGeckoID: "tether", CoinPaprikaID: "usdt-tether"},
+	"eth-base":       {ID: "eth-base", CoinGeckoID: "ethereum", CoinPaprikaID: "eth-ethereum"},
+	"usdc-base":      {ID: "usdc-base", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
+	"eth-arbitrum":   {ID: "eth-arbitrum", CoinGeckoID: "ethereum", CoinPaprikaID: "eth-ethereum"},
+	"usdc-arbitrum":  {ID: "usdc-arbitrum", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
+	"eth-optimism":   {ID: "eth-optimism", CoinGeckoID: "ethereum", CoinPaprikaID: "eth-ethereum"},
+	"usdc-optimism":  {ID: "usdc-optimism", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
+	"avax-avalanche": {ID: "avax-avalanche", CoinGeckoID: "avalanche-2", CoinPaprikaID: "avax-avalanche"},
+	"usdc-avalanche": {ID: "usdc-avalanche", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
+	"pol-polygon":    {ID: "pol-polygon", CoinGeckoID: "polygon-ecosystem-token", CoinPaprikaID: "pol-polygon-ecosystem-token"},
+	"usdc-polygon":   {ID: "usdc-polygon", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
+	"bnb-bsc":        {ID: "bnb-bsc", CoinGeckoID: "binancecoin", CoinPaprikaID: "bnb-binance-coin"},
 }
 
 type Fetcher interface {
@@ -126,6 +144,9 @@ func (g *Gateway) get(response http.ResponseWriter, request *http.Request) {
 	if !fresh {
 		value, err := g.fetcher.Fetch(request.Context(), provider, currency, configured)
 		if err != nil {
+			// Asset and provider identifiers are public catalog values; raw bodies,
+			// endpoints, credentials, and response evidence are intentionally omitted.
+			slog.Warn("rate gateway upstream rejected", "provider", provider, "asset", configured.ID, "currency", currency, "reason", boundedUpstreamReason(err))
 			writeError(response, http.StatusBadGateway)
 			return
 		}
@@ -139,6 +160,31 @@ func (g *Gateway) get(response http.ResponseWriter, request *http.Request) {
 	response.Header().Set("X-Content-Type-Options", "nosniff")
 	if err := json.NewEncoder(response).Encode(entry.Value); err != nil {
 		return
+	}
+}
+
+func boundedUpstreamReason(err error) string {
+	if err == nil {
+		return "unknown"
+	}
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "invalid CoinPaprika response"):
+		return "coinpaprika_schema"
+	case strings.Contains(message, "CoinPaprika rate is missing"):
+		return "coinpaprika_missing"
+	case strings.Contains(message, "invalid CoinGecko response"):
+		return "coingecko_schema"
+	case strings.Contains(message, "CoinGecko rate is missing"):
+		return "coingecko_missing"
+	case strings.Contains(message, "invalid response"):
+		return "http_response"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return "unavailable"
 	}
 }
 
@@ -165,6 +211,7 @@ type upstream struct {
 
 	coinPaprikaMu    sync.Mutex
 	coinPaprikaCache map[string]upstreamQuote
+	coinPaprikaLast  time.Time
 
 	kazakhstanMu     sync.Mutex
 	kazakhstanFactor upstreamQuote
@@ -275,9 +322,13 @@ func coinGeckoDecimal(quote struct {
 }
 
 func sortedCoinGeckoIDs() []string {
-	result := make([]string, 0, len(assets))
+	unique := make(map[string]struct{}, len(assets))
 	for _, configured := range assets {
-		result = append(result, configured.CoinGeckoID)
+		unique[configured.CoinGeckoID] = struct{}{}
+	}
+	result := make([]string, 0, len(unique))
+	for id := range unique {
+		result = append(result, id)
 	}
 	sort.Strings(result)
 	return result
@@ -290,10 +341,24 @@ func (u *upstream) coinPaprika(ctx context.Context, currency string, configured 
 	if currency == "KZT" {
 		upstreamCurrency = "USD"
 	}
-	cacheKey := configured.ID + "\x00" + upstreamCurrency
+	// Several chain-specific assets intentionally share one market quote (for
+	// example native USDC on Base and Arbitrum). Cache the raw upstream quote by
+	// the provider's identity so aliases cannot fan out into duplicate public API
+	// calls and hit the provider's free-tier rate limit.
+	cacheKey := configured.CoinPaprikaID + "\x00" + upstreamCurrency
 	quote, fresh := u.coinPaprikaCache[cacheKey]
 	fresh = fresh && quote.ExpiresAt.After(time.Now())
 	if !fresh {
+		if wait := time.Until(u.coinPaprikaLast.Add(coinPaprikaSpacing)); wait > 0 {
+			timer := time.NewTimer(wait)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return rates.ProviderResult{}, ctx.Err()
+			case <-timer.C:
+			}
+		}
+		u.coinPaprikaLast = time.Now()
 		group := []string{"RUB", "USD", "EUR"}
 		if upstreamCurrency == "INR" || upstreamCurrency == "CNY" {
 			group = []string{"INR", "CNY"}
@@ -308,7 +373,7 @@ func (u *upstream) coinPaprika(ctx context.Context, currency string, configured 
 		}
 		for parsedCurrency, parsedQuote := range parsed {
 			parsedQuote.ExpiresAt = time.Now().Add(2 * time.Minute)
-			u.coinPaprikaCache[configured.ID+"\x00"+parsedCurrency] = parsedQuote
+			u.coinPaprikaCache[configured.CoinPaprikaID+"\x00"+parsedCurrency] = parsedQuote
 		}
 		quote, fresh = u.coinPaprikaCache[cacheKey]
 		if !fresh {

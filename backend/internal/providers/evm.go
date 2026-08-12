@@ -20,18 +20,21 @@ import (
 const erc20TransferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
 type EVMToken struct {
-	AssetID  string
-	Decimals uint8
+	AssetID  string `json:"asset_id"`
+	Decimals uint8  `json:"decimals"`
 }
 
 type EVMConfig struct {
-	HTTP            HTTPConfig
-	ProviderID      string
-	ChainID         string
-	NativeAssetID   string
-	NativeDecimals  uint8
-	Tokens          map[string]EVMToken
-	IncludeInternal bool
+	HTTP             HTTPConfig
+	ProviderID       string
+	ChainID          string
+	NativeAssetID    string
+	NativeDecimals   uint8
+	Tokens           map[string]EVMToken
+	IncludeInternal  bool
+	WatchedAddresses []string
+	AddressFiltered  bool
+	Overlap          uint64
 }
 
 type EVMSource struct {
@@ -42,6 +45,9 @@ type EVMSource struct {
 	nativeDecimals  uint8
 	tokens          map[string]EVMToken
 	includeInternal bool
+	watched         map[string]struct{}
+	addressFiltered bool
+	overlap         uint64
 }
 
 func NewEVMSource(config EVMConfig) (*EVMSource, error) {
@@ -60,7 +66,19 @@ func NewEVMSource(config EVMConfig) (*EVMSource, error) {
 		}
 		tokens[canonical] = token
 	}
-	return &EVMSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, tokens: tokens, includeInternal: config.IncludeInternal}, nil
+	watched := make(map[string]struct{}, len(config.WatchedAddresses))
+	for _, address := range config.WatchedAddresses {
+		canonical, err := canonicalEVMAddress(address)
+		if err != nil {
+			return nil, errors.New("invalid EVM watched address")
+		}
+		watched[canonical] = struct{}{}
+	}
+	overlap := config.Overlap
+	if overlap == 0 {
+		overlap = 1
+	}
+	return &EVMSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, tokens: tokens, includeInternal: config.IncludeInternal, watched: watched, addressFiltered: config.AddressFiltered, overlap: overlap}, nil
 }
 
 type evmBlock struct {
@@ -150,6 +168,9 @@ func (s *EVMSource) ScanRange(ctx context.Context, from, to uint64) (scanner.Ran
 	if to < from || to-from > 2047 {
 		return scanner.RangeBatch{}, &ProviderError{Kind: ErrorPermanent, Operation: "evm scan range", Cause: errors.New("range must contain 1..2048 blocks")}
 	}
+	if s.addressFiltered && !s.includeInternal {
+		return s.scanWatchedRange(ctx, from, to)
+	}
 	head, err := s.taggedBlock(ctx, "finalized", false)
 	if err != nil {
 		return scanner.RangeBatch{}, err
@@ -237,6 +258,242 @@ func (s *EVMSource) ScanRange(ctx context.Context, from, to uint64) (scanner.Ran
 		}
 	}
 	return batch, nil
+}
+
+// scanWatchedRange keeps the canonical block/reorg evidence while avoiding a
+// receipt download for every public-chain transaction. Native candidates are
+// selected from block transaction envelopes and verified with one receipt;
+// allowlisted ERC-20 transfers are selected server-side with eth_getLogs.
+func (s *EVMSource) scanWatchedRange(ctx context.Context, from, to uint64) (scanner.RangeBatch, error) {
+	head, err := s.taggedBlock(ctx, "finalized", false)
+	if err != nil {
+		return scanner.RangeBatch{}, err
+	}
+	safeHeight, err := parseHexUint64(head.Number)
+	if err != nil || to > safeHeight {
+		return scanner.RangeBatch{}, &ProviderError{Kind: ErrorPermanent, Operation: "evm scan range", Cause: errors.New("range exceeds finalized head")}
+	}
+	batch := scanner.RangeBatch{From: from, To: to}
+	if len(s.watched) == 0 {
+		// With no payable route there can be no relevant transfer. Bind the
+		// durable overlap cursor and the new finalized cursor without downloading
+		// every intermediate block. Once a route exists the full canonical range
+		// is scanned again, beginning with the configured overlap.
+		cursorHeight := from + s.overlap - 1
+		if cursorHeight > to {
+			cursorHeight = to
+		}
+		heights := []uint64{from}
+		if cursorHeight != from {
+			heights = append(heights, cursorHeight)
+		}
+		if to != cursorHeight {
+			heights = append(heights, to)
+		}
+		for _, height := range heights {
+			block, err := s.block(ctx, height, false)
+			if err != nil {
+				return scanner.RangeBatch{}, err
+			}
+			number, blockTime, err := validateEVMBlock(block, height)
+			if err != nil {
+				return scanner.RangeBatch{}, malformed("evm block", err)
+			}
+			blockHash, _ := canonicalEVMHash(block.Hash)
+			parentHash, _ := canonicalEVMHash(block.ParentHash)
+			batch.Blocks = append(batch.Blocks, scanner.Block{Height: number, Hash: blockHash, ParentHash: parentHash, Time: blockTime})
+		}
+		batch.SparseBlocks = true
+		batch.IdleCheckpoint = true
+		return batch, nil
+	}
+	blocks := make(map[uint64]scanner.Block, to-from+1)
+	for height := from; height <= to; height++ {
+		block, err := s.block(ctx, height, len(s.watched) > 0)
+		if err != nil {
+			return scanner.RangeBatch{}, err
+		}
+		number, blockTime, err := validateEVMBlock(block, height)
+		if err != nil {
+			return scanner.RangeBatch{}, malformed("evm block", err)
+		}
+		blockHash, _ := canonicalEVMHash(block.Hash)
+		parentHash, _ := canonicalEVMHash(block.ParentHash)
+		canonicalBlock := scanner.Block{Height: number, Hash: blockHash, ParentHash: parentHash, Time: blockTime}
+		blocks[height] = canonicalBlock
+		batch.Blocks = append(batch.Blocks, canonicalBlock)
+		for _, raw := range block.Transactions {
+			var transaction evmTransaction
+			if err := json.Unmarshal(raw, &transaction); err != nil {
+				return scanner.RangeBatch{}, malformed("evm transaction", err)
+			}
+			toAddress, err := canonicalEVMAddress(transaction.To)
+			if err != nil {
+				if transaction.To == "" {
+					continue
+				}
+				return scanner.RangeBatch{}, malformed("evm native transfer", err)
+			}
+			if _, watched := s.watched[toAddress]; !watched {
+				continue
+			}
+			amount, err := parseHexAmount(transaction.Value)
+			if err != nil {
+				return scanner.RangeBatch{}, malformed("evm native transfer", err)
+			}
+			if amount == "0" {
+				continue
+			}
+			events, err := s.normalizeWatchedNative(ctx, transaction, canonicalBlock, safeHeight)
+			if err != nil {
+				return scanner.RangeBatch{}, err
+			}
+			batch.Events = append(batch.Events, events...)
+		}
+	}
+	logs, err := s.watchedTokenLogs(ctx, from, to)
+	if err != nil {
+		return scanner.RangeBatch{}, err
+	}
+	seen := make(map[string]struct{}, len(logs))
+	for _, log := range logs {
+		events, identity, err := s.normalizeWatchedTokenLog(log, blocks, safeHeight)
+		if err != nil {
+			return scanner.RangeBatch{}, err
+		}
+		if _, duplicate := seen[identity]; duplicate {
+			return scanner.RangeBatch{}, malformed("evm token log", errors.New("duplicate transfer log"))
+		}
+		seen[identity] = struct{}{}
+		batch.Events = append(batch.Events, events...)
+	}
+	sort.Slice(batch.Events, func(i, j int) bool {
+		left, right := batch.Events[i], batch.Events[j]
+		if left.BlockHeight != right.BlockHeight {
+			return left.BlockHeight < right.BlockHeight
+		}
+		if left.Identity.TransactionID != right.Identity.TransactionID {
+			return left.Identity.TransactionID < right.Identity.TransactionID
+		}
+		if left.Identity.EventIndex != right.Identity.EventIndex {
+			return left.Identity.EventIndex < right.Identity.EventIndex
+		}
+		return left.Identity.AssetID < right.Identity.AssetID
+	})
+	return batch, nil
+}
+
+func (s *EVMSource) normalizeWatchedNative(ctx context.Context, transaction evmTransaction, block scanner.Block, safeHeight uint64) ([]domain.TransferEvent, error) {
+	txHash, err := canonicalEVMHash(transaction.Hash)
+	if err != nil {
+		return nil, malformed("evm transaction", err)
+	}
+	var receipt evmReceipt
+	if err := s.http.rpc(ctx, "evm transaction receipt", "eth_getTransactionReceipt", []any{txHash}, &receipt); err != nil {
+		return nil, err
+	}
+	receiptBlock, err := parseHexUint64(receipt.BlockNumber)
+	if err != nil || receiptBlock != block.Height || !strings.EqualFold(receipt.BlockHash, block.Hash) || !strings.EqualFold(receipt.TransactionHash, txHash) {
+		return nil, malformed("evm receipt", errors.New("receipt block binding mismatch"))
+	}
+	if receipt.Status == "0x0" {
+		return nil, nil
+	}
+	if receipt.Status != "0x1" {
+		return nil, malformed("evm receipt", errors.New("invalid receipt status"))
+	}
+	amount, _ := parseHexAmount(transaction.Value)
+	from, err := canonicalEVMAddress(transaction.From)
+	if err != nil {
+		return nil, malformed("evm native transfer", err)
+	}
+	to, _ := canonicalEVMAddress(transaction.To)
+	evidence, _ := json.Marshal(struct {
+		Transaction evmTransaction `json:"transaction"`
+		Receipt     evmReceipt     `json:"receipt"`
+	}{Transaction: transaction, Receipt: receipt})
+	parsed := chains.EVMReceipt{TransactionID: txHash, BlockHeight: block.Height, BlockHash: block.Hash, BlockTime: block.Time, Success: true, Finalized: true, Confirmations: safeHeight - block.Height + 1, Native: &chains.EVMNative{From: from, To: to, Amount: amount, AssetID: s.nativeAssetID, Decimals: s.nativeDecimals}, RawEvidence: evidence}
+	adapter := chains.EVMAdapter{ChainID: s.chainID, Source: fixedEVMReceipt{value: parsed}}
+	return adapter.Normalize(context.Background(), txHash)
+}
+
+func (s *EVMSource) watchedTokenLogs(ctx context.Context, from, to uint64) ([]evmLog, error) {
+	if len(s.tokens) == 0 {
+		return nil, nil
+	}
+	contracts := make([]string, 0, len(s.tokens))
+	for contract := range s.tokens {
+		contracts = append(contracts, contract)
+	}
+	sort.Strings(contracts)
+	destinations := make([]string, 0, len(s.watched))
+	for address := range s.watched {
+		destinations = append(destinations, evmAddressTopic(address))
+	}
+	sort.Strings(destinations)
+	var logs []evmLog
+	for contractStart := 0; contractStart < len(contracts); contractStart += 50 {
+		contractEnd := min(contractStart+50, len(contracts))
+		for destinationStart := 0; destinationStart < len(destinations); destinationStart += 100 {
+			destinationEnd := min(destinationStart+100, len(destinations))
+			filter := map[string]any{
+				"fromBlock": hexQuantity(from),
+				"toBlock":   hexQuantity(to),
+				"address":   contracts[contractStart:contractEnd],
+				"topics":    []any{erc20TransferTopic, nil, destinations[destinationStart:destinationEnd]},
+			}
+			var page []evmLog
+			if err := s.http.rpc(ctx, "evm watched token logs", "eth_getLogs", []any{filter}, &page); err != nil {
+				return nil, err
+			}
+			logs = append(logs, page...)
+		}
+	}
+	return logs, nil
+}
+
+func (s *EVMSource) normalizeWatchedTokenLog(log evmLog, blocks map[uint64]scanner.Block, safeHeight uint64) ([]domain.TransferEvent, string, error) {
+	if log.Removed || len(log.Topics) != 3 || !strings.EqualFold(log.Topics[0], erc20TransferTopic) {
+		return nil, "", malformed("evm token log", errors.New("invalid finalized transfer log"))
+	}
+	contract, err := canonicalEVMAddress(log.Address)
+	if err != nil {
+		return nil, "", malformed("evm token log", err)
+	}
+	token, supported := s.tokens[contract]
+	if !supported {
+		return nil, "", malformed("evm token log", errors.New("provider returned an unrequested token contract"))
+	}
+	height, err := parseHexUint64(log.BlockNumber)
+	block, blockOK := blocks[height]
+	txHash, hashErr := canonicalEVMHash(log.TransactionHash)
+	if err != nil || hashErr != nil || !blockOK || !strings.EqualFold(log.BlockHash, block.Hash) {
+		return nil, "", malformed("evm token log", errors.New("log block binding mismatch"))
+	}
+	index, err := parseHexUint64(log.LogIndex)
+	if err != nil || index > uint64(^uint32(0)) {
+		return nil, "", malformed("evm token log", errors.New("invalid log index"))
+	}
+	from, err := addressFromTopic(log.Topics[1])
+	if err != nil {
+		return nil, "", malformed("evm token log", err)
+	}
+	to, err := addressFromTopic(log.Topics[2])
+	if err != nil {
+		return nil, "", malformed("evm token log", err)
+	}
+	if _, watched := s.watched[to]; !watched {
+		return nil, "", malformed("evm token log", errors.New("provider returned an unrequested destination"))
+	}
+	amount, err := parseEVMWordAmount(log.Data)
+	if err != nil || amount == "0" {
+		return nil, "", malformed("evm token log", errors.New("invalid transfer amount"))
+	}
+	evidence, _ := json.Marshal(log)
+	parsed := chains.EVMReceipt{TransactionID: txHash, BlockHeight: height, BlockHash: block.Hash, BlockTime: block.Time, Success: true, Finalized: true, Confirmations: safeHeight - height + 1, Logs: []chains.EVMLog{{Index: uint32(index), From: from, To: to, Amount: amount, AssetID: token.AssetID, Decimals: token.Decimals, Transfer: true}}, RawEvidence: evidence}
+	adapter := chains.EVMAdapter{ChainID: s.chainID, Source: fixedEVMReceipt{value: parsed}}
+	events, err := adapter.Normalize(context.Background(), txHash)
+	return events, fmt.Sprintf("%s:%d", txHash, index), err
 }
 
 func (s *EVMSource) normalizeEVMTransaction(transaction evmTransaction, receipts map[string]evmReceipt, traces map[string]evmTraceCall, height uint64, blockHash string, blockTime time.Time, safeHeight uint64) ([]domain.TransferEvent, error) {
@@ -434,6 +691,10 @@ func addressFromTopic(value string) (string, error) {
 		return "", errors.New("invalid indexed EVM address")
 	}
 	return "0x" + value[26:], nil
+}
+
+func evmAddressTopic(address string) string {
+	return "0x" + strings.Repeat("0", 24) + strings.TrimPrefix(address, "0x")
 }
 
 func parseHexUint64(value string) (uint64, error) {
