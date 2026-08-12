@@ -14,6 +14,15 @@ import (
 
 const workerID = "019fed4b-47e6-74c4-b79e-76363fb73bcd"
 
+func TestBoundedFetchReasonDoesNotEchoErrors(t *testing.T) {
+	if got := boundedFetchReason(context.DeadlineExceeded); got != "timeout" {
+		t.Fatalf("deadline classified as %q", got)
+	}
+	if got := boundedFetchReason(errors.New("secret transport detail")); got != "network" {
+		t.Fatalf("unexpected error classified as %q", got)
+	}
+}
+
 func baseEnvironment(t *testing.T) {
 	t.Helper()
 	t.Setenv("DATABASE_URL", "postgres://db/rates")

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -139,7 +140,7 @@ func (f observedFetcher) Fetch(ctx context.Context, source rates.SourceConfig) (
 		case errors.Is(err, rates.ErrUnavailable):
 			code = "unavailable"
 		}
-		slog.Warn("rate source fetch rejected", "source_key", source.Key, "error_code", code)
+		slog.Warn("rate source fetch rejected", "source_key", source.Key, "error_code", code, "reason", boundedFetchReason(err))
 		return result, err
 	}
 	age := time.Since(result.ObservedAt)
@@ -149,6 +150,37 @@ func (f observedFetcher) Fetch(ctx context.Context, source rates.SourceConfig) (
 		slog.Warn("rate source observation rejected", "source_key", source.Key, "error_code", "future", "age_seconds", int64(age/time.Second))
 	}
 	return result, nil
+}
+
+func boundedFetchReason(err error) string {
+	if err == nil {
+		return "unknown"
+	}
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "provider status 429"):
+		return "http_429"
+	case strings.Contains(message, "provider status 502"):
+		return "http_502"
+	case strings.Contains(message, "provider status"):
+		return "http_status"
+	case strings.Contains(message, "identity mismatch"):
+		return "identity_mismatch"
+	case strings.Contains(message, "invalid normalized rate"):
+		return "response_schema"
+	case strings.Contains(message, "content-type"), strings.Contains(message, "application/json"):
+		return "content_type"
+	case strings.Contains(message, "response exceeds"):
+		return "response_limit"
+	case strings.Contains(message, "DNS"):
+		return "dns"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return "network"
+	}
 }
 
 func healthHandler(store rates.Store, configuration config) http.Handler {

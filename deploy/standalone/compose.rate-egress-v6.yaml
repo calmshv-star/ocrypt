@@ -1,0 +1,8 @@
+services:
+  api:
+    networks: [data, core, rate-egress-v6]
+
+networks:
+  rate-egress-v6:
+    external: true
+    name: ${RATE_EGRESS_V6_NETWORK:-ocrypt-egress6}

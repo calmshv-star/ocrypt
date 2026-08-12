@@ -10,7 +10,7 @@ x-runtime: &runtime
 services:
   api:
     <<: *runtime
-    image: ocrypt-api:20260811-receipts
+    image: ocrypt-api:20260812-public-assets5
     container_name: ocrypt-api
     environment:
       APP_ENV: production

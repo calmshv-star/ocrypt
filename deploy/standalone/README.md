@@ -20,7 +20,7 @@ has a CPU, memory, and process limit in the supplied Compose definition.
 Pass `rate_gateway_origin` to `bootstrap.sql` along with its other documented
 psql variables. It must be the public HTTPS origin of the same API deployment,
 where `RATE_SOURCE_GATEWAY_ENABLED=true`. The supplied standalone Compose file
-already enables that gateway and starts the rate worker with all 30 policy
+already enables that gateway and starts the rate worker with all 126 policy
 targets.
 
 For an existing standalone database, admit the missing catalog idempotently:
@@ -52,7 +52,15 @@ observations. Their calls are batched and cached. Since neither quotes KZT
 directly, the gateway multiplies their USD observations by the official daily
 USD/KZT rate published through the National Bank of Kazakhstan RSS service.
 All arithmetic is exact rational arithmetic. No API key is required for the
-built-in catalog.
+built-in catalog. The gateway deduplicates chain aliases that share one market
+identity, so USDC and native ETH variants do not multiply free-tier requests.
+
+If a host's shared container IPv4 is rate-limited while its routed IPv6 remains
+healthy, create a dedicated outbound-only IPv6 Docker network and apply the
+optional `compose.rate-egress-v6.yaml` override. Use a subnet delegated to that
+host, keep the host's IPv6 forwarding policy at `DROP`, and verify that Docker's
+bridge rule accepts established replies but rejects new inbound forwarding.
+Only the API rate gateway joins this network; no extra port is published.
 
 This is not a silent fallback. If a source is unavailable, stale, future-dated,
 non-quorate, or outside the admitted spread, the worker does not publish a
