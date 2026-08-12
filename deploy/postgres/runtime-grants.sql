@@ -438,7 +438,7 @@ GRANT INSERT ON match_candidates,ledger_transactions,callback_deliveries,outbox_
 GRANT SELECT ON payment_route_policy_bindings TO merchant_proof_worker;
 GRANT SELECT,UPDATE ON payment_intents,payment_routes,checkout_sessions,rate_quotes,
   address_assignments,addresses,amount_reservations TO merchant_plan_worker;
-GRANT SELECT ON webhook_endpoints,callback_events,payment_matches,payment_match_aggregates TO merchant_plan_worker;
+GRANT SELECT ON wallets,webhook_endpoints,callback_events,payment_matches,payment_match_aggregates TO merchant_plan_worker;
 GRANT UPDATE ON webhook_endpoints TO merchant_plan_worker;
 GRANT INSERT ON payment_intent_versions,callback_events,callback_deliveries,outbox_events TO merchant_plan_worker;
 GRANT SELECT,UPDATE ON reconciliation_reports TO merchant_reconciliation_worker;
