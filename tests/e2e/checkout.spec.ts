@@ -74,7 +74,8 @@ if (!checkoutUrl) {
     await expect(page.locator('[data-testid="top-up-instruction"]')).toContainText("тот же адрес");
     await expect(page.locator('[data-testid="copy-amount"]')).toBeVisible();
     await expect(page.locator('[data-testid="copy-address"]')).toBeVisible();
-    await expect(page.locator('select[aria-label="Выберите маршрут оплаты"]')).toBeDisabled();
+    await expect(page.locator(".checkout-route-fixed")).toContainText("Tron · USDT");
+    await expect(page.locator('select[aria-label="Выберите маршрут оплаты"]')).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
   });
 
@@ -87,6 +88,11 @@ if (!checkoutUrl) {
     const session = {
       intent_id: "10000000-0000-4000-8000-000000000001",
       order_id: "order_from_browser_contract",
+      merchant_name: "Browser Contract Store",
+      amount_minor: "3813",
+      currency: "USD",
+      currency_scale: 2,
+      description: "Subscription renewal",
       status: "pending",
       expires_at: expiresAt,
       selected_route_id: routeID,
