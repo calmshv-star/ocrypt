@@ -21,6 +21,9 @@ func TestBoundedFetchReasonDoesNotEchoErrors(t *testing.T) {
 	if got := boundedFetchReason(errors.New("secret transport detail")); got != "network" {
 		t.Fatalf("unexpected error classified as %q", got)
 	}
+	if got := boundedFetchReason(errors.New("wrapped: rate provider status 403 with secret body")); got != "http_403" {
+		t.Fatalf("provider status classified as %q", got)
+	}
 }
 
 func baseEnvironment(t *testing.T) {

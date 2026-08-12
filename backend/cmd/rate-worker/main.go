@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -130,6 +131,8 @@ func main() {
 
 type observedFetcher struct{ next rates.Fetcher }
 
+var providerStatusPattern = regexp.MustCompile(`provider status ([1-5][0-9][0-9])(?:\D|$)`)
+
 func (f observedFetcher) Fetch(ctx context.Context, source rates.SourceConfig) (rates.ProviderResult, error) {
 	result, err := f.next.Fetch(ctx, source)
 	if err != nil {
@@ -157,13 +160,10 @@ func boundedFetchReason(err error) string {
 		return "unknown"
 	}
 	message := err.Error()
+	if match := providerStatusPattern.FindStringSubmatch(message); len(match) == 2 {
+		return "http_" + match[1]
+	}
 	switch {
-	case strings.Contains(message, "provider status 429"):
-		return "http_429"
-	case strings.Contains(message, "provider status 502"):
-		return "http_502"
-	case strings.Contains(message, "provider status"):
-		return "http_status"
 	case strings.Contains(message, "identity mismatch"):
 		return "identity_mismatch"
 	case strings.Contains(message, "invalid normalized rate"):
