@@ -34,6 +34,7 @@ type EVMConfig struct {
 	IncludeInternal  bool
 	WatchedAddresses []string
 	AddressFiltered  bool
+	Overlap          uint64
 }
 
 type EVMSource struct {
@@ -46,6 +47,7 @@ type EVMSource struct {
 	includeInternal bool
 	watched         map[string]struct{}
 	addressFiltered bool
+	overlap         uint64
 }
 
 func NewEVMSource(config EVMConfig) (*EVMSource, error) {
@@ -72,7 +74,11 @@ func NewEVMSource(config EVMConfig) (*EVMSource, error) {
 		}
 		watched[canonical] = struct{}{}
 	}
-	return &EVMSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, tokens: tokens, includeInternal: config.IncludeInternal, watched: watched, addressFiltered: config.AddressFiltered}, nil
+	overlap := config.Overlap
+	if overlap == 0 {
+		overlap = 1
+	}
+	return &EVMSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, tokens: tokens, includeInternal: config.IncludeInternal, watched: watched, addressFiltered: config.AddressFiltered, overlap: overlap}, nil
 }
 
 type evmBlock struct {
@@ -268,6 +274,35 @@ func (s *EVMSource) scanWatchedRange(ctx context.Context, from, to uint64) (scan
 		return scanner.RangeBatch{}, &ProviderError{Kind: ErrorPermanent, Operation: "evm scan range", Cause: errors.New("range exceeds finalized head")}
 	}
 	batch := scanner.RangeBatch{From: from, To: to}
+	if len(s.watched) == 0 {
+		// With no payable route there can be no relevant transfer. Bind the
+		// durable overlap cursor and the new finalized cursor without downloading
+		// every intermediate block. Once a route exists the full canonical range
+		// is scanned again, beginning with the configured overlap.
+		cursorHeight := from + s.overlap - 1
+		if cursorHeight > to {
+			cursorHeight = to
+		}
+		heights := []uint64{cursorHeight}
+		if to != cursorHeight {
+			heights = append(heights, to)
+		}
+		for _, height := range heights {
+			block, err := s.block(ctx, height, false)
+			if err != nil {
+				return scanner.RangeBatch{}, err
+			}
+			number, blockTime, err := validateEVMBlock(block, height)
+			if err != nil {
+				return scanner.RangeBatch{}, malformed("evm block", err)
+			}
+			blockHash, _ := canonicalEVMHash(block.Hash)
+			parentHash, _ := canonicalEVMHash(block.ParentHash)
+			batch.Blocks = append(batch.Blocks, scanner.Block{Height: number, Hash: blockHash, ParentHash: parentHash, Time: blockTime})
+		}
+		batch.SparseBlocks = true
+		return batch, nil
+	}
 	blocks := make(map[uint64]scanner.Block, to-from+1)
 	for height := from; height <= to; height++ {
 		block, err := s.block(ctx, height, len(s.watched) > 0)

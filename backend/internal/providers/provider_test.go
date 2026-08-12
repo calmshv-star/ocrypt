@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -205,6 +206,42 @@ func TestEVMEmptyWatchSetUsesHeaderOnly(t *testing.T) {
 	batch, err := source.ScanRange(context.Background(), 1, 1)
 	if err != nil || len(batch.Blocks) != 1 || len(batch.Events) != 0 {
 		t.Fatalf("unexpected empty watched batch: %+v err=%v", batch, err)
+	}
+}
+
+func TestEVMEmptyRouteWatchFastForwardsWithSparseCursorEvidence(t *testing.T) {
+	requested := make([]uint64, 0, 2)
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		return 200, rpcResult(t, request, func(method string, params []json.RawMessage) json.RawMessage {
+			if method != "eth_getBlockByNumber" || len(params) != 2 || string(params[1]) != "false" {
+				t.Fatalf("unexpected empty-route RPC: %s %s", method, params)
+			}
+			var tag string
+			if err := json.Unmarshal(params[0], &tag); err != nil {
+				t.Fatal(err)
+			}
+			height := uint64(100)
+			if tag != "finalized" {
+				parsed, err := parseHexUint64(tag)
+				if err != nil {
+					t.Fatal(err)
+				}
+				height = parsed
+				requested = append(requested, height)
+			}
+			return json.RawMessage(fmt.Sprintf(`{"number":"0x%x","hash":"0x%064x","parentHash":"0x%064x","timestamp":"0x64","transactions":[]}`, height, height+1, height))
+		})
+	})
+	source, err := NewEVMSource(EVMConfig{HTTP: HTTPConfig{Endpoint: "https://evm.example", Client: client}, ProviderID: "evm-a", ChainID: "eip155:1", NativeAssetID: "eth", NativeDecimals: 18, AddressFiltered: true, Overlap: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := source.ScanRange(context.Background(), 10, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !batch.SparseBlocks || len(batch.Blocks) != 2 || !reflect.DeepEqual(requested, []uint64{11, 100}) || batch.Blocks[0].Height != 11 || batch.Blocks[1].Height != 100 || len(batch.Events) != 0 {
+		t.Fatalf("empty route watch did not fast-forward sparsely: requested=%v batch=%+v", requested, batch)
 	}
 }
 

@@ -256,7 +256,7 @@ func (l ScannerLoader) Load(ctx context.Context, keys ScannerKeys, now time.Time
 		if rangePolicy.Timeout < timeout {
 			timeout = rangePolicy.Timeout
 		}
-		source, err := providers.NewSource(providers.Config{Kind: providers.Kind(rpc.ProviderKind), HTTP: providers.HTTPConfig{Endpoint: rpc.Endpoint, Headers: headers, Timeout: timeout}, ProviderID: rpc.ProviderID, ChainID: keys.Chain, NativeAssetID: nativeAssetID, NativeDecimals: nativeDecimals, Assets: assets, IncludeInternal: chain.IncludeInternal, GasFreeContracts: chain.GasFreeContracts, GasFreeFeeCollectors: chain.GasFreeFeeCollectors, WatchedAddresses: watchedAddresses, AddressFiltered: true, PageSize: chain.PageSize})
+		source, err := providers.NewSource(providers.Config{Kind: providers.Kind(rpc.ProviderKind), HTTP: providers.HTTPConfig{Endpoint: rpc.Endpoint, Headers: headers, Timeout: timeout}, ProviderID: rpc.ProviderID, ChainID: keys.Chain, NativeAssetID: nativeAssetID, NativeDecimals: nativeDecimals, Assets: assets, IncludeInternal: chain.IncludeInternal, GasFreeContracts: chain.GasFreeContracts, GasFreeFeeCollectors: chain.GasFreeFeeCollectors, WatchedAddresses: watchedAddresses, AddressFiltered: true, Overlap: chain.Overlap, PageSize: chain.PageSize})
 		if err != nil {
 			return ScannerRuntime{}, fmt.Errorf("initialize admitted RPC provider %s: %w", key, err)
 		}
