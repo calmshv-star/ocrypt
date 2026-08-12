@@ -139,6 +139,11 @@ type CheckoutRoute struct {
 type CheckoutSession struct {
 	IntentID        string          `json:"intent_id"`
 	OrderID         string          `json:"order_id"`
+	MerchantName    string          `json:"merchant_name"`
+	AmountMinor     string          `json:"amount_minor"`
+	Currency        string          `json:"currency"`
+	CurrencyScale   int16           `json:"currency_scale"`
+	Description     string          `json:"description"`
 	Status          string          `json:"status"`
 	ExpiresAt       time.Time       `json:"expires_at"`
 	SelectedRouteID string          `json:"selected_route_id"`

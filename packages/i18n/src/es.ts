@@ -533,6 +533,7 @@ export const es = {
   "checkout.loading": "Cargando datos de pago verificados…",
   "checkout.degraded": "Las actualizaciones están temporalmente retrasadas. Los datos de pago verificados que se muestran permanecen sin cambios.",
   "checkout.unavailable": "Este enlace de pago no está disponible o ya no es válido.",
+  "checkout.unavailableHelp": "No envíes fondos usando datos de pago antiguos. Vuelve al comercio para iniciar un pago nuevo o reintenta si acabas de abrir el enlace.",
   "admin.connected": "Conectado",
   "admin.sessionLoading": "Cargando tu sesión segura…",
   "admin.signInTitle": "Es necesario iniciar sesión",

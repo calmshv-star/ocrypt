@@ -10,7 +10,7 @@ const requestedLocale = new URLSearchParams(window.location.search).get("locale"
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ThemeProvider>
+    <ThemeProvider defaultTheme="light" storageKey="merchant-checkout-theme-v2">
       <I18nProvider initialLocale={isLocale(requestedLocale) ? requestedLocale : undefined}>
         <App />
       </I18nProvider>

@@ -1,6 +1,6 @@
 import { useI18n, type MessageKey } from "@merchant/i18n";
 import { Badge, Button, PRODUCT_NAME, Select, ThemeToggle } from "@merchant/ui";
-import { Check, CheckCircle2, Clock3, Copy, ExternalLink, FileCheck2, LockKeyhole, RadioTower, ShieldCheck, Upload } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, Clock3, Copy, ExternalLink, FileCheck2, LockKeyhole, RadioTower, RefreshCw, ShieldCheck, Upload } from "lucide-react";
 import QRCode from "qrcode";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
@@ -8,7 +8,7 @@ type CheckoutStatus = "pending" | "detected" | "partially_paid" | "confirming" |
 type OnChainRoute = { id: string; provider: "on_chain"; network: string; asset: string; amount: string; address: string; receivedAmount?: string; remainingAmount?: string; paymentCount?: number; topUpAllowed?: boolean; transactionHash?: string };
 type HostedRoute = { id: string; provider: "hosted_gateway"; providerId: string; asset: string; amount: string; paymentURL: string };
 type Route = OnChainRoute | HostedRoute;
-type CheckoutSession = { intentId: string; orderId: string; status: CheckoutStatus; expiresAt: string; routes: Route[]; selectedRouteId: string };
+type CheckoutSession = { intentId: string; orderId: string; merchantName: string; amountMinor: string; currency: string; currencyScale: number; description: string; status: CheckoutStatus; expiresAt: string; routes: Route[]; selectedRouteId: string };
 type PaymentLinkSelector = { provider: "on_chain"; chainId: string; assetId: string } | { provider: "hosted_gateway"; providerId: string; assetId: string };
 type PaymentLink = { name: string; amountMinor: string; currency: string; currencyScale: number; description: string; allowedRoutes: PaymentLinkSelector[]; expiresAt?: string };
 type ReturnTargets = { success?: string; cancel?: string };
@@ -55,14 +55,14 @@ function fixtureSession(params: URLSearchParams): CheckoutSession {
   const expiresIn = Math.max(1, Number(params.get("expires_in") ?? 900));
   const status = readFixtureStatus(params);
   const routes = status === "partially_paid" ? fixtureRoutes.map((route, index) => index === 0 ? { ...route, receivedAmount: "980", remainingAmount: "300", paymentCount: 1, topUpAllowed: true } : route) : fixtureRoutes;
-  return { intentId: params.get("intent_id") ?? "pi_preview_01JQ8H6G2PE3", orderId: params.get("order_id") ?? "CHECKOUT-84913", status, expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(), routes, selectedRouteId: routes.some((route) => route.id === params.get("route")) ? params.get("route")! : routes[0]!.id };
+  return { intentId: params.get("intent_id") ?? "pi_preview_01JQ8H6G2PE3", orderId: params.get("order_id") ?? "CHECKOUT-84913", merchantName: "Demo Store", amountMinor: "128000", currency: "USD", currencyScale: 2, description: "", status, expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(), routes, selectedRouteId: routes.some((route) => route.id === params.get("route")) ? params.get("route")! : routes[0]!.id };
 }
 
 function parseSession(value: unknown): CheckoutSession | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const input = value as Record<string, unknown>;
   const statuses: CheckoutStatus[] = ["pending", "detected", "partially_paid", "confirming", "needs_review", "settled", "expired", "preparing_payment_route", "payment_route_failed"];
-  if (typeof input.intent_id !== "string" || typeof input.order_id !== "string" || typeof input.status !== "string" || !statuses.includes(input.status as CheckoutStatus) || typeof input.expires_at !== "string" || !Number.isFinite(Date.parse(input.expires_at)) || !Array.isArray(input.routes) || typeof input.selected_route_id !== "string") return null;
+  if (typeof input.intent_id !== "string" || typeof input.order_id !== "string" || typeof input.merchant_name !== "string" || input.merchant_name.length < 1 || input.merchant_name.length > 200 || typeof input.amount_minor !== "string" || !/^[0-9]+$/.test(input.amount_minor) || typeof input.currency !== "string" || !/^[A-Z]{3}$/.test(input.currency) || typeof input.currency_scale !== "number" || !Number.isInteger(input.currency_scale) || input.currency_scale < 0 || input.currency_scale > 9 || typeof input.description !== "string" || input.description.length > 1000 || typeof input.status !== "string" || !statuses.includes(input.status as CheckoutStatus) || typeof input.expires_at !== "string" || !Number.isFinite(Date.parse(input.expires_at)) || !Array.isArray(input.routes) || typeof input.selected_route_id !== "string") return null;
   const waitingForRoute = input.status === "preparing_payment_route" || input.status === "payment_route_failed";
   if (waitingForRoute ? input.routes.length !== 0 || input.selected_route_id !== "" : input.routes.length === 0) return null;
   const parsedRoutes: Route[] = [];
@@ -86,7 +86,7 @@ function parseSession(value: unknown): CheckoutSession | null {
   }
   if (input.selected_route_id !== "" && !parsedRoutes.some((route) => route.id === input.selected_route_id)) return null;
   if (input.status === "partially_paid" && parsedRoutes.filter((route) => route.provider === "on_chain" && route.receivedAmount !== undefined && route.remainingAmount !== undefined).length !== 1) return null;
-  return { intentId: input.intent_id, orderId: input.order_id, status: input.status as CheckoutStatus, expiresAt: input.expires_at, routes: parsedRoutes, selectedRouteId: input.selected_route_id };
+  return { intentId: input.intent_id, orderId: input.order_id, merchantName: input.merchant_name, amountMinor: input.amount_minor, currency: input.currency, currencyScale: input.currency_scale, description: input.description, status: input.status as CheckoutStatus, expiresAt: input.expires_at, routes: parsedRoutes, selectedRouteId: input.selected_route_id };
 }
 
 function safeProviderPaymentURL(value: string): boolean {
@@ -209,6 +209,11 @@ function readReturns(token: string): ReturnTargets {
 function CheckoutChrome({ children }: { children: ReactNode }) {
   const { locale, locales, localeNames, setLocale, t } = useI18n();
   return <div className="checkout-page"><a className="mp-skip-link" href="#checkout-main">{t("common.skipContent")}</a><header className="checkout-header"><a aria-label={PRODUCT_NAME} className="checkout-brand" href="/"><span aria-hidden="true" className="checkout-brand__mark"><i /><i /></span><strong>{PRODUCT_NAME}</strong></a><div><Select aria-label={t("common.locale")} onChange={(event) => setLocale(event.target.value as typeof locale)} value={locale}>{locales.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}</Select><ThemeToggle label={t("common.theme")} /></div></header>{children}</div>;
+}
+
+function CheckoutUnavailable({ loading = false }: { loading?: boolean }) {
+  const { t } = useI18n();
+  return <CheckoutChrome><main className="checkout-main checkout-main--state" id="checkout-main"><section aria-live="polite" className="checkout-state" role={loading ? "status" : "alert"}><span aria-hidden="true" className="checkout-state__icon">{loading ? <RadioTower size={26} /> : <Clock3 size={26} />}</span><Badge tone={loading ? "info" : "negative"}>{t("checkout.secureCheckout")}</Badge><h1>{t(loading ? "checkout.loading" : "checkout.unavailable")}</h1>{!loading && <><p>{t("checkout.unavailableHelp")}</p><Button onClick={() => window.location.reload()} variant="secondary"><RefreshCw size={16} />{t("common.retry")}</Button></>}</section></main></CheckoutChrome>;
 }
 
 function PaymentLinkPage({ token, onRedeemed }: { token: string; onRedeemed: (redemption: Redemption) => void }) {
@@ -349,7 +354,7 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
       setReceiptState(result.status === "proof_queued" ? "queued" : "missing");
     } catch { setReceiptState("error"); }
   };
-  if (!session) return <CheckoutChrome><main className="checkout-main" id="checkout-main"><section aria-live="polite" className="checkout-intro"><Badge tone={loadFailed ? "negative" : "info"}>{t("checkout.secureCheckout")}</Badge><h1>{loadFailed ? t("checkout.unavailable") : t("checkout.loading")}</h1></section></main></CheckoutChrome>;
+  if (!session) return <CheckoutUnavailable loading={!loadFailed} />;
   if (!route) {
     const preparationStatus = status === "payment_route_failed" || status === "expired" ? "payment_route_failed" : "preparing_payment_route";
     const [title, help] = statusKeys[preparationStatus];
@@ -376,22 +381,19 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
   const amountToSend = isPartial ? route.remainingAmount! : route.amount;
   const amountLabel = isPartial ? "checkout.remainingAmount" : canSendToRoute ? "checkout.payExact" : "checkout.expectedAmount";
   const badgeTone = status === "settled" ? "positive" : status === "expired" ? "negative" : status === "partially_paid" || status === "needs_review" ? "warning" : "info";
+  const routeSelectable = status === "pending" && !session.selectedRouteId && session.routes.length > 1;
+  const displayTotal = `${formatMinor(session.amountMinor, session.currencyScale)} ${session.currency}`;
   return <CheckoutChrome><main className="checkout-main" id="checkout-main">
     <section className="checkout-intro">
-      <Badge tone="info">{t(fixture ? "checkout.preview" : "checkout.secureCheckout")}</Badge>
-      <h1>{t("checkout.title")}</h1>
-      <p>{t("checkout.description")}</p>
+      <div className="checkout-intro__copy"><Badge tone="info">{t(fixture ? "checkout.preview" : "checkout.secureCheckout")}</Badge><h1>{t("checkout.title")}</h1><p>{session.description || t("checkout.description")}</p></div>
+      <div className="checkout-order-context"><strong>{session.merchantName}</strong><span>{session.orderId}</span><div><small>{t("checkout.offerAmount")}</small><b>{displayTotal}</b></div></div>
       {loadFailed && <p className="checkout-degraded" role="alert">{t("checkout.degraded")}</p>}
       {selectionFailed && <p className="checkout-degraded" role="alert">{t("checkout.routeSelectionFailed")}</p>}
     </section>
     <div className="checkout-layout">
       <section className="checkout-card checkout-card--payment">
         <div className="checkout-route-head">
-          <label><span>{selecting ? t("checkout.selectingRoute") : t("checkout.selectRoute")}</span>
-            <Select aria-label={t("checkout.selectRoute")} disabled={selecting || status !== "pending" || Boolean(session.selectedRouteId) || session.routes.length === 1} onChange={(event) => void selectRoute(event.target.value)} value={route.id}>
-              {session.routes.map((item) => <option key={item.id} value={item.id}>{item.provider === "on_chain" ? `${item.network} · ${item.asset}` : `${t("checkout.provider")} · ${item.asset}`}</option>)}
-            </Select>
-          </label>
+          {routeSelectable ? <label><span>{selecting ? t("checkout.selectingRoute") : t("checkout.selectRoute")}</span><Select aria-label={t("checkout.selectRoute")} disabled={selecting} onChange={(event) => void selectRoute(event.target.value)} value={route.id}>{session.routes.map((item) => <option key={item.id} value={item.id}>{item.provider === "on_chain" ? `${item.network} · ${item.asset}` : `${t("checkout.provider")} · ${item.asset}`}</option>)}</Select></label> : <div className="checkout-route-fixed"><small>{t("checkout.selectRoute")}</small><strong><ShieldCheck size={16} />{routeLabel}</strong></div>}
           <Badge tone={badgeTone}>{t(routeStatusTitle)}</Badge>
         </div>
         {isPartial && <div className="checkout-progress" data-testid="payment-progress">
@@ -412,14 +414,10 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
           </div>
         </div> : <div className="checkout-provider"><ShieldCheck size={42} /><small>{t("checkout.providerAmount")}</small><strong data-testid="payment-amount">{route.amount} <span>{route.asset}</span></strong><p>{t("checkout.providerInstructions")}</p>{status !== "expired" && status !== "settled" && <a className="checkout-provider-link" data-testid="provider-payment-link" href={route.paymentURL} rel="noopener noreferrer" target="_blank">{t("checkout.continueProvider")}<ExternalLink size={16} /></a>}<div className="checkout-expiry"><Clock3 size={16} /><span>{t("checkout.expiresIn", { time: remaining })}</span></div></div>}
         <div className={`checkout-status is-${status}`} role="status"><span>{status === "settled" ? <CheckCircle2 size={22} /> : <RadioTower size={22} />}</span><div><strong>{t(routeStatusTitle)}</strong><p>{t(routeStatusHelp)}</p></div></div>
-        {route.provider === "on_chain" && status !== "settled" && status !== "expired" && <section className={`checkout-receipt is-${receiptState}`} data-testid="receipt-assistance">
-          <span aria-hidden="true">{receiptState === "queued" ? <FileCheck2 size={22} /> : <Upload size={22} />}</span>
-          <div><strong>{t(receiptState === "queued" ? "checkout.receiptQueued" : receiptState === "missing" ? "checkout.receiptMissing" : receiptState === "error" ? "checkout.receiptFailed" : receiptState === "uploading" ? "checkout.receiptUploading" : "checkout.receiptTitle")}</strong><p>{t(receiptState === "queued" ? "checkout.receiptQueuedHelp" : receiptState === "missing" ? "checkout.receiptMissingHelp" : receiptState === "error" ? "checkout.receiptFailedHelp" : "checkout.receiptHelp")}</p></div>
-          {(receiptState === "idle" || receiptState === "missing" || receiptState === "error") && <label className="checkout-receipt-button"><Upload size={14} />{t(receiptState === "idle" ? "checkout.receiptAction" : "checkout.receiptRetry")}<input accept="image/jpeg,image/png,image/webp" data-testid="receipt-file" onChange={(event) => { const file=event.target.files?.[0]; if(file) void submitReceipt(file); event.currentTarget.value=""; }} type="file" /></label>}
-        </section>}
+        {route.provider === "on_chain" && status !== "settled" && status !== "expired" && <details className={`checkout-receipt is-${receiptState}`} data-testid="receipt-assistance" open={receiptState !== "idle" || undefined}><summary><span aria-hidden="true">{receiptState === "queued" ? <FileCheck2 size={20} /> : <Upload size={20} />}</span><strong>{t(receiptState === "queued" ? "checkout.receiptQueued" : receiptState === "missing" ? "checkout.receiptMissing" : receiptState === "error" ? "checkout.receiptFailed" : receiptState === "uploading" ? "checkout.receiptUploading" : "checkout.receiptTitle")}</strong><ChevronDown aria-hidden="true" size={17} /></summary><div className="checkout-receipt__body"><p>{t(receiptState === "queued" ? "checkout.receiptQueuedHelp" : receiptState === "missing" ? "checkout.receiptMissingHelp" : receiptState === "error" ? "checkout.receiptFailedHelp" : "checkout.receiptHelp")}</p>{(receiptState === "idle" || receiptState === "missing" || receiptState === "error") && <label className="checkout-receipt-button"><Upload size={14} />{t(receiptState === "idle" ? "checkout.receiptAction" : "checkout.receiptRetry")}<input accept="image/jpeg,image/png,image/webp" data-testid="receipt-file" onChange={(event) => { const file=event.target.files?.[0]; if(file) void submitReceipt(file); event.currentTarget.value=""; }} type="file" /></label>}</div></details>}
         <ol aria-label={t("common.status")} className="checkout-steps">{statusSteps.map((key, index) => <li className={index + 1 <= step ? "is-complete" : ""} key={key}><span>{index + 1 <= step ? <Check size={12} /> : index + 1}</span><strong>{t(key)}</strong></li>)}</ol>
       </section>
-      <aside className="checkout-card checkout-summary"><h2>{t("common.details")}</h2><dl><div><dt>{t("checkout.intent")}</dt><dd><code>{session.intentId}</code></dd></div><div><dt>{t("checkout.order")}</dt><dd>{session.orderId}</dd></div>{route.provider === "on_chain" ? <div><dt>{t("common.network")}</dt><dd>{route.network}</dd></div> : <div><dt>{t("checkout.provider")}</dt><dd>{route.providerId}</dd></div>}<div><dt>{t("common.asset")}</dt><dd>{route.asset}</dd></div>{route.provider === "on_chain" && route.paymentCount !== undefined && <div><dt>{t("checkout.paymentCount")}</dt><dd>{route.paymentCount}</dd></div>}</dl>{explorerUrl && <a className="checkout-explorer" href={explorerUrl} rel="noreferrer" target="_blank">{t("checkout.openExplorer")}<ExternalLink size={14} /></a>}{returnControl}<p><LockKeyhole size={16} />{t(route.provider === "hosted_gateway" ? "checkout.providerSecureNote" : "checkout.secureNote")}</p></aside>
+      <aside className="checkout-card checkout-summary"><h2>{t("common.details")}</h2><strong className="checkout-summary__merchant">{session.merchantName}</strong><dl><div><dt>{t("checkout.order")}</dt><dd>{session.orderId}</dd></div>{route.provider === "on_chain" ? <div><dt>{t("common.network")}</dt><dd>{route.network}</dd></div> : <div><dt>{t("checkout.provider")}</dt><dd>{route.providerId}</dd></div>}<div><dt>{t("common.asset")}</dt><dd>{route.asset}</dd></div>{route.provider === "on_chain" && route.paymentCount !== undefined && <div><dt>{t("checkout.paymentCount")}</dt><dd>{route.paymentCount}</dd></div>}</dl><details className="checkout-technical"><summary>{t("checkout.intent")}</summary><code>{session.intentId}</code></details>{explorerUrl && <a className="checkout-explorer" href={explorerUrl} rel="noreferrer" target="_blank">{t("checkout.openExplorer")}<ExternalLink size={14} /></a>}{returnControl}<p><LockKeyhole size={16} />{t(route.provider === "hosted_gateway" ? "checkout.providerSecureNote" : "checkout.secureNote")}</p></aside>
     </div>
   </main></CheckoutChrome>;
 }
@@ -445,6 +443,5 @@ export function App() {
 }
 
 function Unavailable() {
-  const { t } = useI18n();
-  return <CheckoutChrome><main className="checkout-main" id="checkout-main"><section className="checkout-intro" role="alert"><Badge tone="negative">{t("checkout.secureCheckout")}</Badge><h1>{t("checkout.unavailable")}</h1></section></main></CheckoutChrome>;
+  return <CheckoutUnavailable />;
 }

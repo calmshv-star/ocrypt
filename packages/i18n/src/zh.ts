@@ -533,6 +533,7 @@ export const zhCN = {
   "checkout.loading": "正在加载已验证的付款详情…",
   "checkout.degraded": "更新暂时延迟。当前显示的已验证付款信息保持不变。",
   "checkout.unavailable": "此收银台链接不可用或已失效。",
+  "checkout.unavailableHelp": "请勿使用旧的付款信息转账。请返回商户重新发起付款；若链接刚刚打开，也可重试。",
   "admin.connected": "已连接",
   "admin.sessionLoading": "正在加载安全会话…",
   "admin.signInTitle": "需要登录",

@@ -163,7 +163,10 @@ func (s *PostgresRepository) RedeemPaymentLink(ctx context.Context, linkHash [32
 		if e != nil {
 			return classifyManagement(e)
 		}
-		session := CheckoutSession{IntentID: intentID, OrderID: intentCommand.MerchantOrderID, Status: "preparing_payment_route", ExpiresAt: expires, Version: 1}
+		session := CheckoutSession{IntentID: intentID, OrderID: intentCommand.MerchantOrderID, AmountMinor: amount.String(), Currency: currency, CurrencyScale: int16(scale), Description: description, Status: "preparing_payment_route", ExpiresAt: expires, Version: 1}
+		if e = tx.QueryRow(ctx, `SELECT display_name FROM merchants WHERE id=$1 AND tenant_id=$2`, merchantID, tenantID).Scan(&session.MerchantName); e != nil {
+			return e
+		}
 		if !hostedPreparing {
 			session.Status = "pending"
 			session.SelectedRouteID = route.ID

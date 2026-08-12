@@ -533,6 +533,7 @@ export const de = {
   "checkout.loading": "Verifizierte Zahlungsdaten werden geladen…",
   "checkout.degraded": "Aktualisierungen sind vorübergehend verzögert. Die angezeigten verifizierten Zahlungsdaten bleiben unverändert.",
   "checkout.unavailable": "Dieser Checkout-Link ist nicht verfügbar oder nicht mehr gültig.",
+  "checkout.unavailableHelp": "Senden Sie kein Geld an alte Zahlungsdaten. Kehren Sie zum Händler zurück und starten Sie eine neue Zahlung, oder versuchen Sie es erneut, wenn Sie den Link gerade geöffnet haben.",
   "admin.connected": "Verbunden",
   "admin.sessionLoading": "Sichere Sitzung wird geladen…",
   "admin.signInTitle": "Anmeldung erforderlich",

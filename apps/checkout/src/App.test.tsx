@@ -19,6 +19,11 @@ function session(status: "pending" | "detected" | "partially_paid" | "confirming
   return {
     intent_id: "10000000-0000-4000-8000-000000000001",
     order_id: "order_from_api",
+    merchant_name: "Demo Store",
+    amount_minor: "128000",
+    currency: "USD",
+    currency_scale: 2,
+    description: "Order payment",
     status,
     expires_at: new Date(Date.now() + 900_000).toISOString(),
     selected_route_id: selectedRouteId,
@@ -33,6 +38,11 @@ function hostedSession(paymentURL = "https://provider.example/pay/order-1") {
   return {
     intent_id: "10000000-0000-4000-8000-000000000001",
     order_id: "hosted_order",
+    merchant_name: "Demo Store",
+    amount_minor: "3085",
+    currency: "USD",
+    currency_scale: 2,
+    description: "Order payment",
     status: "pending",
     expires_at: new Date(Date.now() + 900_000).toISOString(),
     selected_route_id: routeOne,
@@ -46,6 +56,11 @@ function preparingSession(status: "preparing_payment_route" | "payment_route_fai
   return {
     intent_id: "10000000-0000-4000-8000-000000000001",
     order_id: "hosted_order",
+    merchant_name: "Demo Store",
+    amount_minor: "3085",
+    currency: "USD",
+    currency_scale: 2,
+    description: "Order payment",
     status,
     expires_at: new Date(Date.now() + 900_000).toISOString(),
     selected_route_id: "",
@@ -63,6 +78,9 @@ describe("hosted checkout", () => {
     window.history.replaceState({}, "", "/checkout/fixture");
     renderCheckout();
     expect(screen.getByRole("heading", { name: "Complete your payment" })).toBeInTheDocument();
+    expect(screen.getAllByText("Demo Store").length).toBeGreaterThan(0);
+    expect(screen.getByText("1280.00 USD")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Select a payment route" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Copy address" }));
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("TWb4A6kVtQJ4z9Yp2mR7sX8cN1hL5uD3eF");
     fireEvent.change(screen.getByRole("combobox", { name: "Language" }), { target: { value: "ru" } });
@@ -99,7 +117,7 @@ describe("hosted checkout", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(partial)));
     window.history.replaceState({}, "", `/checkout?token=${csToken}`);
     renderCheckout();
-    expect(await screen.findByRole("status")).toHaveTextContent("Partially paid");
+    expect(await screen.findByText("Partially paid", { selector: ".checkout-status strong" })).toBeInTheDocument();
     expect(screen.getByTestId("payment-received")).toHaveTextContent("4.62 usdt-tron");
     expect(screen.getByTestId("payment-remaining")).toHaveTextContent("1.5 usdt-tron");
     expect(screen.getByTestId("payment-amount")).toHaveTextContent("1.5 usdt-tron");
@@ -107,7 +125,8 @@ describe("hosted checkout", () => {
     expect(screen.getByTestId("top-up-instruction")).toHaveTextContent("recipient must receive the exact remaining amount");
     fireEvent.click(screen.getByRole("button", { name: "Copy amount" }));
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("1.5");
-    expect(screen.getByRole("combobox", { name: "Select a payment route" })).toBeDisabled();
+    expect(screen.queryByRole("combobox", { name: "Select a payment route" })).not.toBeInTheDocument();
+    expect(screen.getAllByText("tron:mainnet · usdt-tron").length).toBeGreaterThan(0);
   });
 
   it("removes payment controls after a full transfer has already been detected", async () => {
@@ -116,7 +135,7 @@ describe("hosted checkout", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(session("detected"))));
     window.history.replaceState({}, "", `/checkout?token=${csToken}`);
     renderCheckout();
-    expect(await screen.findByRole("status")).toHaveTextContent("Transfer detected");
+    expect(await screen.findByText("Transfer detected", { selector: ".checkout-status strong" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Copy amount" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Copy address" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Payment QR code")).not.toBeInTheDocument();
@@ -151,8 +170,8 @@ describe("hosted checkout", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(session("needs_review"))));
     window.history.replaceState({}, "", `/checkout?token=${csToken}`);
     renderCheckout();
-    expect(await screen.findByRole("status")).toHaveTextContent("Payment under review");
-    expect(screen.getByRole("status")).toHaveTextContent("Do not send another transfer");
+    expect(await screen.findByText("Payment under review", { selector: ".checkout-status strong" })).toBeInTheDocument();
+    expect(screen.getByText(/Do not send another transfer/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Copy amount" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Payment QR code")).not.toBeInTheDocument();
   });
@@ -181,6 +200,8 @@ describe("hosted checkout", () => {
     renderCheckout();
     expect(await screen.findByRole("heading", { name: "This checkout link is unavailable or no longer valid." })).toBeInTheDocument();
     expect(screen.queryByTestId("provider-payment-link")).not.toBeInTheDocument();
+    expect(screen.getByText(/Do not send funds using old payment details/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
   it("keeps the verified route visible until select-route is acknowledged", async () => {

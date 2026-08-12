@@ -533,6 +533,7 @@ export const fr = {
   "checkout.loading": "Chargement des informations de paiement vérifiées…",
   "checkout.degraded": "Les mises à jour sont temporairement retardées. Les informations de paiement vérifiées affichées restent inchangées.",
   "checkout.unavailable": "Ce lien de paiement est indisponible ou n'est plus valide.",
+  "checkout.unavailableHelp": "N'envoyez pas de fonds avec d'anciennes coordonnées. Revenez chez le marchand pour créer un nouveau paiement, ou réessayez si le lien vient d'être ouvert.",
   "admin.connected": "Connecté",
   "admin.sessionLoading": "Chargement de votre session sécurisée…",
   "admin.signInTitle": "Connexion requise",

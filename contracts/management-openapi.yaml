@@ -646,7 +646,7 @@ components:
     CheckoutSession:
       type: object
       additionalProperties: false
-      required: [intent_id, order_id, status, expires_at, selected_route_id, routes]
+      required: [intent_id, order_id, merchant_name, amount_minor, currency, currency_scale, description, status, expires_at, selected_route_id, routes]
       oneOf:
         - properties:
             status: { enum: [pending, detected, partially_paid, confirming, needs_review, settled, expired] }
@@ -662,6 +662,11 @@ components:
       properties:
         intent_id: { type: string, format: uuid }
         order_id: { type: string }
+        merchant_name: { type: string, minLength: 1, maxLength: 200 }
+        amount_minor: { type: string, pattern: '^[0-9]+$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        currency_scale: { type: integer, minimum: 0, maximum: 9 }
+        description: { type: string, maxLength: 1000 }
         status: { type: string, enum: [pending, detected, partially_paid, confirming, needs_review, settled, expired, preparing_payment_route, payment_route_failed] }
         expires_at: { type: string, format: date-time }
         selected_route_id: { type: string }

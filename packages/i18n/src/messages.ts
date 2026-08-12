@@ -531,6 +531,7 @@ export const en = {
   "checkout.loading": "Loading verified payment details…",
   "checkout.degraded": "Updates are temporarily delayed. The verified payment details shown here remain unchanged.",
   "checkout.unavailable": "This checkout link is unavailable or no longer valid.",
+  "checkout.unavailableHelp": "Do not send funds using old payment details. Return to the merchant to start a new payment, or retry if you opened the link moments ago.",
   "admin.connected": "Connected",
   "admin.sessionLoading": "Loading your secure session…",
   "admin.signInTitle": "Sign in required",
