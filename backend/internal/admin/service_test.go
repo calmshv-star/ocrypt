@@ -176,7 +176,7 @@ func TestRBACScopeAndStepUpAreServerAuthoritative(t *testing.T) {
 	}
 }
 
-func TestSessionRotationPreservesAbsoluteExpiryAndRejectsOldToken(t *testing.T) {
+func TestPassiveAuthenticationDoesNotRotateSession(t *testing.T) {
 	now := time.Now().UTC()
 	raw := stringsRepeat("s", 43)
 	identity, session := testIdentityAndSession(now, raw, stringsRepeat("c", 43))
@@ -186,14 +186,14 @@ func TestSessionRotationPreservesAbsoluteExpiryAndRejectsOldToken(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Tokens == nil || repo.rotated.ID == "" {
-		t.Fatal("expected session rotation")
+	if result.Tokens != nil || repo.rotated.ID != "" {
+		t.Fatal("passive authentication must not rotate a shared browser cookie")
 	}
-	if !repo.rotated.AbsoluteExpiresAt.Equal(session.AbsoluteExpiresAt) || !repo.rotated.CreatedAt.Equal(session.CreatedAt) {
-		t.Fatal("rotation extended absolute lifetime")
+	if !repo.session.IdleExpiresAt.Equal(now.Add(service.config.IdleTTL)) {
+		t.Fatal("expected idle lifetime to be refreshed without replacing the session")
 	}
-	if _, err := service.Authenticate(context.Background(), raw); !errors.Is(err, ErrUnauthenticated) {
-		t.Fatalf("old token remained valid: %v", err)
+	if _, err := service.Authenticate(context.Background(), raw); err != nil {
+		t.Fatalf("parallel-safe session token was rejected: %v", err)
 	}
 }
 

@@ -181,10 +181,10 @@ func (s *Store) ingestVerifiedProviderPayment(ctx context.Context, payment domai
 			if _, err = tx.Exec(ctx, `UPDATE payment_routes SET status=CASE WHEN id=$1 THEN 'settled'::route_status ELSE 'superseded'::route_status END,updated_at=$2,version=version+1 WHERE tenant_id=$3 AND merchant_id=$4 AND intent_id=$5 AND status IN ('active','expired')`, candidate.RouteID, now, candidate.TenantID, candidate.MerchantID, candidate.IntentID); err != nil {
 				return err
 			}
-			if _, err = tx.Exec(ctx, `UPDATE amount_reservations ar SET state='released',release_reason='sibling_settled',updated_at=$1,version=version+1 FROM payment_routes r WHERE ar.route_id=r.id AND ar.tenant_id=r.tenant_id AND r.intent_id=$2 AND r.id<>$3 AND r.tenant_id=$4 AND ar.state='active'`, now, candidate.IntentID, candidate.RouteID, candidate.TenantID); err != nil {
+			if _, err = tx.Exec(ctx, `UPDATE amount_reservations ar SET state='released',release_reason='sibling_settled',updated_at=$1,version=ar.version+1 FROM payment_routes r WHERE ar.route_id=r.id AND ar.tenant_id=r.tenant_id AND r.intent_id=$2 AND r.id<>$3 AND r.tenant_id=$4 AND ar.state='active'`, now, candidate.IntentID, candidate.RouteID, candidate.TenantID); err != nil {
 				return err
 			}
-			if _, err = tx.Exec(ctx, `UPDATE provider_orders po SET provider_status='superseded',updated_at=$1,version=version+1 FROM payment_routes r WHERE po.route_id=r.id AND po.tenant_id=r.tenant_id AND r.intent_id=$2 AND r.id<>$3 AND r.tenant_id=$4 AND po.provider_status IN ('pending','authorized','cancel_requested')`, now, candidate.IntentID, candidate.RouteID, candidate.TenantID); err != nil {
+			if _, err = tx.Exec(ctx, `UPDATE provider_orders po SET provider_status='superseded',updated_at=$1,version=po.version+1 FROM payment_routes r WHERE po.route_id=r.id AND po.tenant_id=r.tenant_id AND r.intent_id=$2 AND r.id<>$3 AND r.tenant_id=$4 AND po.provider_status IN ('pending','authorized','cancel_requested')`, now, candidate.IntentID, candidate.RouteID, candidate.TenantID); err != nil {
 				return err
 			}
 

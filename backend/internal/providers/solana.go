@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,12 +27,13 @@ type SolanaAsset struct {
 }
 
 type SolanaConfig struct {
-	HTTP           HTTPConfig
-	ProviderID     string
-	ChainID        string
-	NativeAssetID  string
-	NativeDecimals uint8
-	Assets         map[string]SolanaAsset
+	HTTP             HTTPConfig
+	ProviderID       string
+	ChainID          string
+	NativeAssetID    string
+	NativeDecimals   uint8
+	Assets           map[string]SolanaAsset
+	WatchedAddresses []string
 }
 
 type SolanaSource struct {
@@ -41,6 +43,7 @@ type SolanaSource struct {
 	nativeAssetID  string
 	nativeDecimals uint8
 	assets         map[string]SolanaAsset
+	watched        map[string]struct{}
 }
 
 func NewSolanaSource(config SolanaConfig) (*SolanaSource, error) {
@@ -58,7 +61,14 @@ func NewSolanaSource(config SolanaConfig) (*SolanaSource, error) {
 		}
 		assets[mint] = asset
 	}
-	return &SolanaSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, assets: assets}, nil
+	watched := make(map[string]struct{}, len(config.WatchedAddresses))
+	for _, address := range config.WatchedAddresses {
+		if !validBase58Length(address, 32) {
+			return nil, errors.New("invalid Solana watched address")
+		}
+		watched[address] = struct{}{}
+	}
+	return &SolanaSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, assets: assets, watched: watched}, nil
 }
 
 type solanaBlock struct {
@@ -98,12 +108,16 @@ type solanaTokenBalance struct {
 }
 
 type solanaInstruction struct {
-	Program   string `json:"program"`
-	ProgramID string `json:"programId"`
-	Parsed    *struct {
-		Type string         `json:"type"`
-		Info map[string]any `json:"info"`
-	} `json:"parsed"`
+	Program   string          `json:"program"`
+	ProgramID string          `json:"programId"`
+	Parsed    json.RawMessage `json:"parsed"`
+}
+
+type solanaSignatureInfo struct {
+	Signature string          `json:"signature"`
+	Slot      uint64          `json:"slot"`
+	Err       json.RawMessage `json:"err"`
+	BlockTime *int64          `json:"blockTime"`
 }
 
 func (s *SolanaSource) Heads(ctx context.Context) ([]scanner.ProviderHead, error) {
@@ -132,19 +146,34 @@ func (s *SolanaSource) ScanRange(ctx context.Context, from, to uint64) (scanner.
 	if to > safe {
 		return scanner.RangeBatch{}, &ProviderError{Kind: ErrorPermanent, Operation: "solana scan range", Cause: errors.New("range exceeds finalized slot")}
 	}
-	batch := scanner.RangeBatch{From: from, To: to}
-	for slot := from; slot <= to; slot++ {
+	var slots []uint64
+	if err := s.http.rpc(ctx, "solana produced slots", "getBlocks", []any{from, to, map[string]any{"commitment": "finalized"}}, &slots); err != nil {
+		return scanner.RangeBatch{}, err
+	}
+	if len(slots) == 0 {
+		return scanner.RangeBatch{}, &ProviderError{Kind: ErrorTransient, Operation: "solana produced slots", Cause: errors.New("range contains no produced blocks")}
+	}
+	for index, slot := range slots {
+		if slot < from || slot > to || (index > 0 && slot <= slots[index-1]) {
+			return scanner.RangeBatch{}, malformed("solana produced slots", errors.New("provider returned unordered or out-of-range slot"))
+		}
+	}
+	batch := scanner.RangeBatch{From: from, To: slots[len(slots)-1], SparseBlocks: true}
+	for _, slot := range slots {
 		var block solanaBlock
-		options := map[string]any{"commitment": "finalized", "transactionDetails": "full", "rewards": false, "encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}
+		transactionDetails := "full"
+		encoding := "jsonParsed"
+		if len(s.watched) > 0 {
+			transactionDetails = "none"
+			encoding = "json"
+		}
+		options := map[string]any{"commitment": "finalized", "transactionDetails": transactionDetails, "rewards": false, "encoding": encoding, "maxSupportedTransactionVersion": 0}
 		if err := s.http.rpc(ctx, "solana block", "getBlock", []any{slot, options}, &block); err != nil {
 			return scanner.RangeBatch{}, err
 		}
 		if !validBase58Length(block.Blockhash, 32) || !validBase58Length(block.PreviousBlockhash, 32) || block.BlockTime == nil || *block.BlockTime < 0 {
 			return scanner.RangeBatch{}, malformed("solana block", errors.New("incomplete block finality evidence"))
 		}
-		// Solana can skip slots. The current scanner cursor is one row per
-		// height, so a null getBlock is deliberately fail-closed instead of
-		// inventing a block hash and weakening reorg detection.
 		if slot > 0 && block.ParentSlot >= slot {
 			return scanner.RangeBatch{}, malformed("solana block", errors.New("invalid parent slot"))
 		}
@@ -158,7 +187,80 @@ func (s *SolanaSource) ScanRange(ctx context.Context, from, to uint64) (scanner.
 			batch.Events = append(batch.Events, events...)
 		}
 	}
+	if len(s.watched) > 0 {
+		events, err := s.scanWatchedTransactions(ctx, from, batch.To, batch.Blocks, safe)
+		if err != nil {
+			return scanner.RangeBatch{}, err
+		}
+		batch.Events = append(batch.Events, events...)
+	}
 	return batch, nil
+}
+
+func (s *SolanaSource) scanWatchedTransactions(ctx context.Context, from, to uint64, blocks []scanner.Block, safe uint64) ([]domain.TransferEvent, error) {
+	blocksBySlot := make(map[uint64]scanner.Block, len(blocks))
+	for _, block := range blocks {
+		blocksBySlot[block.Height] = block
+	}
+	signatures := make(map[string]uint64)
+	for address := range s.watched {
+		before := ""
+		for pageNumber := 0; pageNumber < 100; pageNumber++ {
+			options := map[string]any{"commitment": "finalized", "limit": 1000}
+			if before != "" {
+				options["before"] = before
+			}
+			var page []solanaSignatureInfo
+			if err := s.http.rpc(ctx, "solana address signatures", "getSignaturesForAddress", []any{address, options}, &page); err != nil {
+				return nil, err
+			}
+			if len(page) == 0 {
+				break
+			}
+			oldest := page[len(page)-1].Slot
+			for _, item := range page {
+				if item.Slot < from || item.Slot > to {
+					continue
+				}
+				if _, produced := blocksBySlot[item.Slot]; !produced || !validBase58Length(item.Signature, 64) {
+					return nil, malformed("solana address signatures", errors.New("signature is not bound to a produced slot"))
+				}
+				signatures[item.Signature] = item.Slot
+			}
+			if oldest <= from || len(page) < 1000 {
+				break
+			}
+			before = page[len(page)-1].Signature
+		}
+	}
+	ordered := make([]string, 0, len(signatures))
+	for signature := range signatures {
+		ordered = append(ordered, signature)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if signatures[ordered[i]] != signatures[ordered[j]] {
+			return signatures[ordered[i]] < signatures[ordered[j]]
+		}
+		return ordered[i] < ordered[j]
+	})
+	var events []domain.TransferEvent
+	for _, signature := range ordered {
+		var transaction solanaTransaction
+		options := map[string]any{"commitment": "finalized", "encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}
+		if err := s.http.rpc(ctx, "solana watched transaction", "getTransaction", []any{signature, options}, &transaction); err != nil {
+			return nil, err
+		}
+		if len(transaction.Transaction.Signatures) == 0 || transaction.Transaction.Signatures[0] != signature {
+			return nil, malformed("solana watched transaction", errors.New("signature binding mismatch"))
+		}
+		block := blocksBySlot[signatures[signature]]
+		normalized, err := s.normalizeSolanaTransaction(transaction, block.Height, block.Hash, block.Time, safe)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, normalized...)
+	}
+	return events, nil
 }
 
 func (s *SolanaSource) normalizeSolanaTransaction(transaction solanaTransaction, slot uint64, blockHash string, blockTime time.Time, safe uint64) ([]domain.TransferEvent, error) {
@@ -227,16 +329,33 @@ func (s *SolanaSource) normalizeSolanaTransaction(transaction solanaTransaction,
 }
 
 func (s *SolanaSource) parseSolanaInstruction(instruction solanaInstruction, tokenAccounts map[string]solanaTokenBalance, outer uint32, inner *uint32) (chains.SolanaTransfer, bool, error) {
-	if instruction.Parsed == nil {
+	if len(instruction.Parsed) == 0 || string(instruction.Parsed) == "null" {
 		return chains.SolanaTransfer{}, false, nil
 	}
-	info := instruction.Parsed.Info
-	if instruction.Program == "system" && instruction.ProgramID == "11111111111111111111111111111111" && instruction.Parsed.Type == "transfer" {
+	var parsed struct {
+		Type string         `json:"type"`
+		Info map[string]any `json:"info"`
+	}
+	// jsonParsed may still return a string for programs whose instruction
+	// parser is not available. Such opaque instructions are unrelated unless
+	// they are one of the explicitly recognized transfer programs below.
+	decoder := json.NewDecoder(bytes.NewReader(instruction.Parsed))
+	decoder.UseNumber()
+	if err := decoder.Decode(&parsed); err != nil {
+		return chains.SolanaTransfer{}, false, nil
+	}
+	info := parsed.Info
+	if instruction.Program == "system" && instruction.ProgramID == "11111111111111111111111111111111" && parsed.Type == "transfer" {
 		from, fromOK := stringValue(info["source"])
 		to, toOK := stringValue(info["destination"])
 		amount, amountOK := integerString(info["lamports"])
-		if !fromOK || !toOK || !amountOK || !validBase58Length(from, 32) || !validBase58Length(to, 32) || amount == "0" {
+		if !fromOK || !toOK || !amountOK || !validBase58Length(from, 32) || !validBase58Length(to, 32) {
 			return chains.SolanaTransfer{}, false, malformed("solana native instruction", errors.New("invalid parsed transfer"))
+		}
+		if amount == "0" {
+			// Zero-lamport system transfers are valid no-ops and are used by
+			// some programs for account checks. They are not payment events.
+			return chains.SolanaTransfer{}, false, nil
 		}
 		return chains.SolanaTransfer{OuterIndex: outer, InnerIndex: inner, Program: "system", From: from, To: to, AssetID: s.nativeAssetID, Amount: amount, Decimals: s.nativeDecimals, Native: true}, true, nil
 	}
@@ -247,7 +366,12 @@ func (s *SolanaSource) parseSolanaInstruction(instruction solanaInstruction, tok
 	if programID != solanaTokenProgram && programID != solanaToken2022Program {
 		return chains.SolanaTransfer{}, false, nil
 	}
-	if instruction.Parsed.Type != "transfer" && instruction.Parsed.Type != "transferChecked" {
+	if len(s.assets) == 0 {
+		// Native-only deployments must not fail a whole finalized block while
+		// validating metadata for unrelated SPL-token traffic.
+		return chains.SolanaTransfer{}, false, nil
+	}
+	if parsed.Type != "transfer" && parsed.Type != "transferChecked" {
 		return chains.SolanaTransfer{}, false, nil
 	}
 	sourceAccount, sourceOK := stringValue(info["source"])

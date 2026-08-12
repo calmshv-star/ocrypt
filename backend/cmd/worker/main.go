@@ -70,16 +70,21 @@ func main() {
 	proofChainID := ""
 	if roles["proofs"] {
 		proofChainID = os.Getenv("PROOF_VERIFIER_CHAIN_ID")
-		providers := splitNonempty(os.Getenv("PROOF_VERIFIER_PROVIDER_URLS"))
-		quorum, err := positiveInt("PROOF_VERIFIER_QUORUM", 2)
-		if err != nil {
-			slog.Error("invalid PROOF_VERIFIER_QUORUM", "error", err)
-			os.Exit(1)
-		}
-		verifier, err := scanner.NewQuorumHTTPSource(proofChainID, providers, quorum, os.Getenv("PROOF_VERIFIER_PROVIDER_TOKEN"), nil)
-		if err != nil {
-			slog.Error("proof verifier initialization failed", "error", err)
-			os.Exit(1)
+		var verifier application.TransactionVerifier
+		if strings.EqualFold(strings.TrimSpace(os.Getenv("PROOF_VERIFIER_DATABASE_ONLY")), "true") {
+			verifier = store
+		} else {
+			providers := splitNonempty(os.Getenv("PROOF_VERIFIER_PROVIDER_URLS"))
+			quorum, err := positiveInt("PROOF_VERIFIER_QUORUM", 2)
+			if err != nil {
+				slog.Error("invalid PROOF_VERIFIER_QUORUM", "error", err)
+				os.Exit(1)
+			}
+			verifier, err = scanner.NewQuorumHTTPSource(proofChainID, providers, quorum, os.Getenv("PROOF_VERIFIER_PROVIDER_TOKEN"), nil)
+			if err != nil {
+				slog.Error("proof verifier initialization failed", "error", err)
+				os.Exit(1)
+			}
 		}
 		proofWorker = &application.ProofWorker{Verifier: verifier, Queue: store, Process: processor, Lease: 30 * time.Second, Limit: 20}
 	}

@@ -95,7 +95,7 @@
 
 .theme-form-input:focus,
 .theme-form-input:active {
-  border-color: #66AFE9;
+  border-color: #333333;
   outline: none;
 }
 

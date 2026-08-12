@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestLoadScannerConfigMapsDirectProviderSecretsByURL(t *testing.T) {
 	values := map[string]string{
@@ -8,6 +11,7 @@ func TestLoadScannerConfigMapsDirectProviderSecretsByURL(t *testing.T) {
 		"DATABASE_URL": "postgres://example", "WORKER_ID": "scanner-1", "SCANNER_CHAIN_ID": "eip155:1", "SCANNER_GENESIS_HASH": "genesis",
 		"SCANNER_PROVIDER_KIND": "evm-jsonrpc", "SCANNER_PROVIDER_URLS": "https://one.example,https://two.example", "SCANNER_PROVIDER_IDS": "one,two",
 		"SCANNER_PROVIDER_HEADERS_JSON": `[{"X-Provider-Key":"first"},{"X-Provider-Key":"second"}]`, "SCANNER_QUORUM": "2", "SCANNER_OVERLAP": "12", "SCANNER_RANGE_SIZE": "100",
+		"SCANNER_PROVIDER_MIN_INTERVAL": "400ms",
 	}
 	for key, value := range values {
 		t.Setenv(key, value)
@@ -19,7 +23,7 @@ func TestLoadScannerConfigMapsDirectProviderSecretsByURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.providerKind != "evm-jsonrpc" || len(config.providerHeaders) != 2 || config.providerHeaders[0].Get("X-Provider-Key") != "first" || config.providerHeaders[1].Get("X-Provider-Key") != "second" {
+	if config.providerKind != "evm-jsonrpc" || config.providerMinInterval != 400*time.Millisecond || len(config.providerHeaders) != 2 || config.providerHeaders[0].Get("X-Provider-Key") != "first" || config.providerHeaders[1].Get("X-Provider-Key") != "second" {
 		t.Fatalf("unexpected provider mapping: %+v", config)
 	}
 }
@@ -30,6 +34,26 @@ func TestProviderHeaderConfigurationFailsClosed(t *testing.T) {
 	}
 	if _, err := parseProviderHeaders(`{"X-Key":"bad\nvalue"}`, 1); err == nil {
 		t.Fatal("expected header injection rejection")
+	}
+}
+
+func TestFailoverScannerConfigurationRequiresSingleHeadQuorum(t *testing.T) {
+	values := map[string]string{
+		"SCANNER_UNSAFE_DEVELOPMENT_STATIC_CONFIG": "true", "ENVIRONMENT": "test",
+		"DATABASE_URL": "postgres://example", "WORKER_ID": "scanner-1", "SCANNER_CHAIN_ID": "tron:mainnet", "SCANNER_GENESIS_HASH": "genesis",
+		"SCANNER_PROVIDER_KIND": "tron-fullnode", "SCANNER_PROVIDER_MODE": "failover", "SCANNER_PROVIDER_URLS": "https://one.example,https://two.example",
+		"SCANNER_QUORUM": "2", "SCANNER_OVERLAP": "2", "SCANNER_RANGE_SIZE": "4",
+	}
+	for key, value := range values {
+		t.Setenv(key, value)
+	}
+	if _, err := loadScannerConfig(); err == nil {
+		t.Fatal("failover mode accepted a multi-provider head quorum")
+	}
+	t.Setenv("SCANNER_QUORUM", "1")
+	config, err := loadScannerConfig()
+	if err != nil || config.providerMode != "failover" {
+		t.Fatalf("valid failover configuration rejected: config=%+v err=%v", config, err)
 	}
 }
 

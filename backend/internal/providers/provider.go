@@ -20,10 +20,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/calmshv-star/ocrypt/backend/internal/domain"
 	"github.com/calmshv-star/ocrypt/backend/internal/scanner"
 )
 
-const maxResponseBytes = 16 << 20
+// Finalized Solana blocks encoded as jsonParsed can legitimately exceed
+// 16 MiB during high traffic. Keep a finite defensive ceiling while allowing
+// the largest normal public-RPC block responses.
+const maxResponseBytes = 64 << 20
 
 type ErrorKind string
 
@@ -46,10 +50,20 @@ type ProviderError struct {
 }
 
 func (e *ProviderError) Error() string {
+	message := ""
 	if e.StatusCode != 0 {
-		return fmt.Sprintf("chain provider %s failed (%s, status %d)", e.Operation, e.Kind, e.StatusCode)
+		message = fmt.Sprintf("chain provider %s failed (%s, status %d)", e.Operation, e.Kind, e.StatusCode)
+	} else {
+		message = fmt.Sprintf("chain provider %s failed (%s)", e.Operation, e.Kind)
 	}
-	return fmt.Sprintf("chain provider %s failed (%s)", e.Operation, e.Kind)
+	// Adapter causes are deliberately constructed from validation labels,
+	// status codes, and decoder errors; request headers and response bodies are
+	// never included. Keeping the safe cause makes production failures
+	// diagnosable without exposing provider credentials.
+	if e.Cause != nil {
+		return message + ": " + e.Cause.Error()
+	}
+	return message
 }
 
 func (e *ProviderError) Unwrap() error { return e.Cause }
@@ -67,6 +81,9 @@ type endpointClient struct {
 	client  *http.Client
 	headers http.Header
 	now     func() time.Time
+	rateMu  sync.Mutex
+	nextRPC time.Time
+	minWait time.Duration
 }
 
 type HTTPConfig struct {
@@ -75,6 +92,9 @@ type HTTPConfig struct {
 	Timeout  time.Duration
 	Client   *http.Client
 	Now      func() time.Time
+	// MinInterval spaces requests to the same public provider. It is useful for
+	// free RPC nodes that enforce requests-per-second limits on short bursts.
+	MinInterval time.Duration
 }
 
 func newEndpointClient(config HTTPConfig) (*endpointClient, error) {
@@ -99,6 +119,9 @@ func newEndpointClient(config HTTPConfig) (*endpointClient, error) {
 		client = &copy
 		client.Timeout = timeout
 	}
+	if config.MinInterval < 0 || config.MinInterval > 30*time.Second {
+		return nil, errors.New("chain provider minimum request interval must be between zero and 30 seconds")
+	}
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	headers := make(http.Header, len(config.Headers))
 	for name, values := range config.Headers {
@@ -116,10 +139,32 @@ func newEndpointClient(config HTTPConfig) (*endpointClient, error) {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	return &endpointClient{base: parsed, client: client, headers: headers, now: now}, nil
+	return &endpointClient{base: parsed, client: client, headers: headers, now: now, minWait: config.MinInterval}, nil
+}
+
+func (c *endpointClient) waitForRateLimit(ctx context.Context) error {
+	if c.minWait == 0 {
+		return nil
+	}
+	c.rateMu.Lock()
+	defer c.rateMu.Unlock()
+	if wait := time.Until(c.nextRPC); wait > 0 {
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	c.nextRPC = time.Now().Add(c.minWait)
+	return nil
 }
 
 func (c *endpointClient) request(ctx context.Context, operation, method string, path []string, query url.Values, payload any, target any) error {
+	if err := c.waitForRateLimit(ctx); err != nil {
+		return &ProviderError{Kind: ErrorTransient, Operation: operation, Cause: err}
+	}
 	endpoint := c.base.JoinPath(path...)
 	endpoint.RawQuery = query.Encode()
 	var body io.Reader
@@ -290,26 +335,172 @@ func (q *QuorumSource) ScanRange(ctx context.Context, from, to uint64) (scanner.
 		count int
 		batch scanner.RangeBatch
 	})
+	var firstErr error
 	for range q.sources {
 		result := <-results
 		if result.err != nil {
+			if firstErr == nil {
+				firstErr = result.err
+			}
 			continue
 		}
-		canonical, err := json.Marshal(result.batch)
+		canonicalBatch := result.batch
+		canonicalBatch.Events = append([]domain.TransferEvent(nil), result.batch.Events...)
+		// Confirmations are derived from the provider's current safe head, so
+		// two honest providers can return the same canonical range while being
+		// one or two heads apart. They are not part of transfer identity or raw
+		// evidence and must not turn an otherwise identical range into a false
+		// provider disagreement.
+		for index := range canonicalBatch.Events {
+			canonicalBatch.Events[index].Confirmations = 0
+		}
+		canonical, err := json.Marshal(canonicalBatch)
 		if err != nil {
 			continue
 		}
 		digest := sha256.Sum256(canonical)
 		key := hex.EncodeToString(digest[:])
 		agreement := agreements[key]
+		if agreement.count == 0 {
+			agreement.batch = result.batch
+		} else {
+			for index := range agreement.batch.Events {
+				if result.batch.Events[index].Confirmations < agreement.batch.Events[index].Confirmations {
+					agreement.batch.Events[index].Confirmations = result.batch.Events[index].Confirmations
+				}
+			}
+		}
 		agreement.count++
-		agreement.batch = result.batch
 		agreements[key] = agreement
 		if agreement.count >= q.quorum {
 			return agreement.batch, nil
 		}
 	}
+	if q.quorum == 1 && firstErr != nil {
+		return scanner.RangeBatch{}, firstErr
+	}
 	return scanner.RangeBatch{}, &ProviderError{Kind: ErrorDisagreement, Operation: "range quorum", Cause: errors.New("providers returned different canonical ranges")}
 }
 
 var _ scanner.Source = (*QuorumSource)(nil)
+
+// FailoverSource keeps one direct RPC provider active and switches to the next
+// configured provider only when the active provider fails. Successful fallback
+// providers remain active for subsequent calls, matching the active-node model
+// used by the legacy payment monitor without requiring duplicate RPC traffic.
+type FailoverSource struct {
+	sources []scanner.Source
+	mu      sync.Mutex
+	active  int
+}
+
+func NewFailoverSource(sources []scanner.Source) (*FailoverSource, error) {
+	if len(sources) == 0 {
+		return nil, errors.New("direct source failover requires at least one source")
+	}
+	for _, source := range sources {
+		if source == nil {
+			return nil, errors.New("direct source failover contains nil source")
+		}
+	}
+	return &FailoverSource{sources: append([]scanner.Source(nil), sources...)}, nil
+}
+
+func (f *FailoverSource) order() []int {
+	f.mu.Lock()
+	start := f.active
+	f.mu.Unlock()
+	order := make([]int, 0, len(f.sources))
+	for offset := range f.sources {
+		order = append(order, (start+offset)%len(f.sources))
+	}
+	return order
+}
+
+func (f *FailoverSource) selectProvider(index int) {
+	f.mu.Lock()
+	f.active = index
+	f.mu.Unlock()
+}
+
+func (f *FailoverSource) Heads(ctx context.Context) ([]scanner.ProviderHead, error) {
+	var firstErr error
+	for _, index := range f.order() {
+		heads, err := f.sources[index].Heads(ctx)
+		if err == nil && len(heads) > 0 {
+			f.selectProvider(index)
+			return heads, nil
+		}
+		if err == nil {
+			err = &ProviderError{Kind: ErrorMalformed, Operation: "failover heads", Cause: errors.New("provider returned no heads")}
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	return nil, firstErr
+}
+
+func (f *FailoverSource) ScanRange(ctx context.Context, from, to uint64) (scanner.RangeBatch, error) {
+	var firstErr error
+	for _, index := range f.order() {
+		batch, err := f.sources[index].ScanRange(ctx, from, to)
+		if err == nil {
+			f.selectProvider(index)
+			return batch, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	return scanner.RangeBatch{}, firstErr
+}
+
+var _ scanner.Source = (*FailoverSource)(nil)
+
+// DestinationFilterSource preserves canonical block continuity while dropping
+// transfers that cannot match one of the service's receiving addresses. This
+// avoids persisting and settling unrelated public-chain traffic.
+type DestinationFilterSource struct {
+	source  scanner.Source
+	watched map[string]struct{}
+}
+
+func NewDestinationFilterSource(source scanner.Source, addresses []string) (*DestinationFilterSource, error) {
+	if source == nil {
+		return nil, errors.New("destination filter requires a source")
+	}
+	watched := make(map[string]struct{}, len(addresses))
+	for _, address := range addresses {
+		address = strings.TrimSpace(address)
+		if address == "" {
+			return nil, errors.New("destination filter contains an empty address")
+		}
+		watched[address] = struct{}{}
+	}
+	if len(watched) == 0 {
+		return nil, errors.New("destination filter requires at least one address")
+	}
+	return &DestinationFilterSource{source: source, watched: watched}, nil
+}
+
+func (f *DestinationFilterSource) Heads(ctx context.Context) ([]scanner.ProviderHead, error) {
+	return f.source.Heads(ctx)
+}
+
+func (f *DestinationFilterSource) ScanRange(ctx context.Context, from, to uint64) (scanner.RangeBatch, error) {
+	batch, err := f.source.ScanRange(ctx, from, to)
+	if err != nil {
+		return scanner.RangeBatch{}, err
+	}
+	events := batch.Events[:0]
+	for _, event := range batch.Events {
+		if _, ok := f.watched[event.Identity.ToAddress]; ok {
+			events = append(events, event)
+		}
+	}
+	batch.Events = events
+	return batch, nil
+}
+
+var _ scanner.Source = (*DestinationFilterSource)(nil)

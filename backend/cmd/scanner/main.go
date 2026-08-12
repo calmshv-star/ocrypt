@@ -150,8 +150,9 @@ func main() {
 
 type scannerConfig struct {
 	databaseURL, chainID, genesisHash, shard, workerID, providerToken, healthAddress string
-	providerKind, nativeAssetID                                                      string
+	providerKind, providerMode, nativeAssetID                                        string
 	providerURLs, providerIDs                                                        []string
+	watchedAddresses                                                                 []string
 	assets                                                                           map[string]providers.AssetConfig
 	providerHeaders                                                                  []http.Header
 	gasFreeContracts, gasFreeFeeCollectors                                           []string
@@ -161,6 +162,7 @@ type scannerConfig struct {
 	pageSize                                                                         uint32
 	includeInternal                                                                  bool
 	pollInterval, leaseDuration, maxHeadAge, maxReadyAge                             time.Duration
+	providerMinInterval                                                              time.Duration
 	staticConfig                                                                     bool
 	platformSecretDir                                                                string
 	platformKeys                                                                     platformruntime.ScannerKeys
@@ -171,8 +173,10 @@ func loadScannerConfig() (scannerConfig, error) {
 		databaseURL: os.Getenv("DATABASE_URL"), chainID: os.Getenv("SCANNER_CHAIN_ID"), genesisHash: os.Getenv("SCANNER_GENESIS_HASH"),
 		shard: env("SCANNER_SHARD", "default"), workerID: os.Getenv("WORKER_ID"), providerToken: os.Getenv("SCANNER_PROVIDER_TOKEN"),
 		healthAddress: env("SCANNER_HEALTH_ADDRESS", ":9091"), providerKind: env("SCANNER_PROVIDER_KIND", "normalized-gateway"),
+		providerMode: env("SCANNER_PROVIDER_MODE", "quorum"),
 		providerURLs: splitNonempty(os.Getenv("SCANNER_PROVIDER_URLS")), providerIDs: splitNonempty(os.Getenv("SCANNER_PROVIDER_IDS")),
-		nativeAssetID: os.Getenv("SCANNER_NATIVE_ASSET_ID"), gasFreeContracts: splitNonempty(os.Getenv("SCANNER_GASFREE_CONTRACTS")),
+		watchedAddresses: splitNonempty(os.Getenv("SCANNER_WATCHED_ADDRESSES")),
+		nativeAssetID:    os.Getenv("SCANNER_NATIVE_ASSET_ID"), gasFreeContracts: splitNonempty(os.Getenv("SCANNER_GASFREE_CONTRACTS")),
 		gasFreeFeeCollectors: splitNonempty(os.Getenv("SCANNER_GASFREE_FEE_COLLECTORS")),
 	}
 	config.staticConfig = os.Getenv("SCANNER_UNSAFE_DEVELOPMENT_STATIC_CONFIG") == "true" && (os.Getenv("ENVIRONMENT") == "development" || os.Getenv("ENVIRONMENT") == "test")
@@ -231,6 +235,9 @@ func loadScannerConfig() (scannerConfig, error) {
 	if config.maxReadyAge, err = positiveDuration("SCANNER_MAX_READY_AGE", 2*time.Minute); err != nil {
 		return config, err
 	}
+	if config.providerMinInterval, err = nonNegativeDuration("SCANNER_PROVIDER_MIN_INTERVAL", 0); err != nil {
+		return config, err
+	}
 	if config.databaseURL == "" || config.workerID == "" {
 		return config, errors.New("DATABASE_URL and WORKER_ID are required")
 	}
@@ -240,11 +247,20 @@ func loadScannerConfig() (scannerConfig, error) {
 	if len(config.providerIDs) != 0 && len(config.providerIDs) != len(config.providerURLs) {
 		return config, errors.New("SCANNER_PROVIDER_IDS must be empty or contain one ID per provider URL")
 	}
+	if config.providerMode != "quorum" && config.providerMode != "failover" {
+		return config, errors.New("SCANNER_PROVIDER_MODE must be quorum or failover")
+	}
+	if config.providerMode == "failover" && config.quorum != 1 {
+		return config, errors.New("SCANNER_QUORUM must be 1 in failover mode")
+	}
 	return config, nil
 }
 
 func scannerSource(config scannerConfig) (scanner.Source, error) {
 	if config.providerKind == "normalized-gateway" {
+		if config.providerMode != "quorum" {
+			return nil, errors.New("normalized gateway supports quorum mode only")
+		}
 		return scanner.NewQuorumHTTPSource(config.chainID, config.providerURLs, config.quorum, config.providerToken, nil)
 	}
 	sources := make([]scanner.Source, 0, len(config.providerURLs))
@@ -258,17 +274,30 @@ func scannerSource(config scannerConfig) (scanner.Source, error) {
 			headers.Set("Authorization", "Bearer "+config.providerToken)
 		}
 		source, err := providers.NewSource(providers.Config{
-			Kind: providers.Kind(config.providerKind), HTTP: providers.HTTPConfig{Endpoint: endpoint, Headers: headers, Timeout: 20 * time.Second},
+			Kind: providers.Kind(config.providerKind), HTTP: providers.HTTPConfig{Endpoint: endpoint, Headers: headers, Timeout: 20 * time.Second, MinInterval: config.providerMinInterval},
 			ProviderID: providerID, ChainID: config.chainID, NativeAssetID: config.nativeAssetID, NativeDecimals: config.nativeDecimals,
 			Assets: config.assets, IncludeInternal: config.includeInternal, GasFreeContracts: config.gasFreeContracts,
-			GasFreeFeeCollectors: config.gasFreeFeeCollectors, PageSize: config.pageSize,
+			GasFreeFeeCollectors: config.gasFreeFeeCollectors, WatchedAddresses: config.watchedAddresses, PageSize: config.pageSize,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("initialize %s: %w", providerID, err)
 		}
 		sources = append(sources, source)
 	}
-	return providers.NewQuorumSource(sources, config.quorum)
+	var source scanner.Source
+	var err error
+	if config.providerMode == "failover" {
+		source, err = providers.NewFailoverSource(sources)
+	} else {
+		source, err = providers.NewQuorumSource(sources, config.quorum)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(config.watchedAddresses) > 0 {
+		return providers.NewDestinationFilterSource(source, config.watchedAddresses)
+	}
+	return source, nil
 }
 
 func parseProviderHeaders(raw string, providerCount int) ([]http.Header, error) {
@@ -376,6 +405,18 @@ func positiveDuration(key string, fallback time.Duration) (time.Duration, error)
 	value, err := time.ParseDuration(raw)
 	if err != nil || value <= 0 {
 		return 0, errors.New(key + " must be a positive duration")
+	}
+	return value, nil
+}
+
+func nonNegativeDuration(key string, fallback time.Duration) (time.Duration, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil || value < 0 {
+		return 0, errors.New(key + " must be a non-negative duration")
 	}
 	return value, nil
 }

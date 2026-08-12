@@ -8,7 +8,7 @@ import "./styles.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ThemeProvider>
+    <ThemeProvider defaultTheme="light" storageKey="ocrypt-theme-v1">
       <I18nProvider>
         <App />
       </I18nProvider>

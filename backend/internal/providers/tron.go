@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/chains"
@@ -41,6 +42,10 @@ type TRONSource struct {
 	assets               map[string]TRONAsset
 	gasFreeContracts     map[string]bool
 	gasFreeFeeCollectors map[string]bool
+	stateMu              sync.Mutex
+	genesisHash          string
+	safeHeight           uint64
+	headObservedAt       time.Time
 }
 
 func NewTRONSource(config TRONConfig) (*TRONSource, error) {
@@ -119,30 +124,52 @@ func (s *TRONSource) Heads(ctx context.Context) ([]scanner.ProviderHead, error) 
 	if err != nil {
 		return nil, err
 	}
-	genesis, err := s.getTRONBlock(ctx, "tron genesis", []string{"walletsolidity", "getblockbynum"}, map[string]any{"num": 0})
-	if err != nil {
-		return nil, err
-	}
 	height, _, err := validateTRONBlock(head)
 	if err != nil {
 		return nil, malformed("tron finalized head", err)
 	}
-	genesisHash, err := canonicalTRONHash(genesis.BlockID)
-	if err != nil {
-		return nil, malformed("tron genesis", err)
+	s.stateMu.Lock()
+	genesisHash := s.genesisHash
+	s.stateMu.Unlock()
+	if genesisHash == "" {
+		genesis, fetchErr := s.getTRONBlock(ctx, "tron genesis", []string{"walletsolidity", "getblockbynum"}, map[string]any{"num": 0})
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+		genesisHash, err = canonicalTRONHash(genesis.BlockID)
+		if err != nil {
+			return nil, malformed("tron genesis", err)
+		}
 	}
-	return []scanner.ProviderHead{{Provider: s.providerID, ChainID: s.chainID, GenesisHash: genesisHash, SafeHeight: height, ObservedAt: s.http.now().UTC()}}, nil
+	observedAt := s.http.now().UTC()
+	s.stateMu.Lock()
+	s.genesisHash = genesisHash
+	s.safeHeight = height
+	s.headObservedAt = observedAt
+	s.stateMu.Unlock()
+	return []scanner.ProviderHead{{Provider: s.providerID, ChainID: s.chainID, GenesisHash: genesisHash, SafeHeight: height, ObservedAt: observedAt}}, nil
 }
 
 func (s *TRONSource) ScanRange(ctx context.Context, from, to uint64) (scanner.RangeBatch, error) {
 	if to < from || to-from > 511 {
 		return scanner.RangeBatch{}, &ProviderError{Kind: ErrorPermanent, Operation: "tron scan range", Cause: errors.New("range must contain 1..512 blocks")}
 	}
-	head, err := s.getTRONBlock(ctx, "tron finalized head", []string{"walletsolidity", "getnowblock"}, map[string]any{})
-	if err != nil {
-		return scanner.RangeBatch{}, err
+	s.stateMu.Lock()
+	safe, observedAt := s.safeHeight, s.headObservedAt
+	s.stateMu.Unlock()
+	var err error
+	if observedAt.IsZero() || time.Since(observedAt) > 30*time.Second {
+		head, fetchErr := s.getTRONBlock(ctx, "tron finalized head", []string{"walletsolidity", "getnowblock"}, map[string]any{})
+		if fetchErr != nil {
+			return scanner.RangeBatch{}, fetchErr
+		}
+		safe, _, err = validateTRONBlock(head)
+		if err == nil {
+			s.stateMu.Lock()
+			s.safeHeight, s.headObservedAt = safe, s.http.now().UTC()
+			s.stateMu.Unlock()
+		}
 	}
-	safe, _, err := validateTRONBlock(head)
 	if err != nil || to > safe {
 		return scanner.RangeBatch{}, &ProviderError{Kind: ErrorPermanent, Operation: "tron scan range", Cause: errors.New("range exceeds finalized head")}
 	}
@@ -178,19 +205,58 @@ func (s *TRONSource) normalizeTRONTransaction(ctx context.Context, transaction t
 	if err != nil {
 		return nil, malformed("tron transaction", err)
 	}
+	relevant, requiresInfo := false, false
+	var directTokenTransfers []chains.TRONTransfer
+	for index, contract := range transaction.RawData.Contracts {
+		switch contract.Type {
+		case "TransferContract":
+			relevant = true
+		case "TriggerSmartContract":
+			raw, _ := stringValue(contract.Parameter.Value["contract_address"])
+			trigger, triggerErr := canonicalTRONAddress(raw)
+			if triggerErr != nil {
+				return nil, malformed("tron smart contract call", triggerErr)
+			}
+			asset, supported := s.assets[trigger]
+			if !supported && !s.gasFreeContracts[trigger] {
+				continue
+			}
+			relevant = true
+			if s.gasFreeContracts[trigger] {
+				requiresInfo = true
+				continue
+			}
+			transfer, parsed := parseTRONDirectTokenTransfer(contract.Parameter.Value, asset, uint32(index))
+			if !parsed {
+				// Calls such as approve, permit, metadata reads, and application
+				// contract methods are not direct customer payments. Fetching a
+				// receipt for every such call causes one RPC request per unrelated
+				// transaction on busy public TRON blocks. Explicit GasFree
+				// contracts remain receipt-backed above; standard transfer and
+				// transferFrom calls are decoded directly from their ABI calldata.
+				continue
+			}
+			directTokenTransfers = append(directTokenTransfers, transfer)
+		}
+	}
+	if !relevant {
+		return nil, nil
+	}
 	var info tronTransactionInfo
-	if err := s.http.request(ctx, "tron transaction info", http.MethodPost, []string{"walletsolidity", "gettransactioninfobyid"}, nil, map[string]any{"value": txHash}, &info); err != nil {
-		return nil, err
+	if requiresInfo {
+		if err := s.http.request(ctx, "tron transaction info", http.MethodPost, []string{"walletsolidity", "gettransactioninfobyid"}, nil, map[string]any{"value": txHash}, &info); err != nil {
+			return nil, err
+		}
+		infoHash, err := canonicalTRONHash(info.ID)
+		if err != nil || infoHash != txHash {
+			return nil, malformed("tron transaction info", errors.New("transaction ID mismatch"))
+		}
+		infoHeight, err := numberUint64(info.BlockNumber)
+		if err != nil || infoHeight != height {
+			return nil, malformed("tron transaction info", errors.New("block binding mismatch"))
+		}
 	}
-	infoHash, err := canonicalTRONHash(info.ID)
-	if err != nil || infoHash != txHash {
-		return nil, malformed("tron transaction info", errors.New("transaction ID mismatch"))
-	}
-	infoHeight, err := numberUint64(info.BlockNumber)
-	if err != nil || infoHeight != height {
-		return nil, malformed("tron transaction info", errors.New("block binding mismatch"))
-	}
-	success := info.Result != "FAILED" && info.Receipt.Result != "FAILED"
+	success := len(transaction.Ret) > 0 && (!requiresInfo || (info.Result != "FAILED" && info.Receipt.Result != "FAILED"))
 	for _, result := range transaction.Ret {
 		if result.ContractRet != "SUCCESS" {
 			success = false
@@ -223,14 +289,21 @@ func (s *TRONSource) normalizeTRONTransaction(ctx context.Context, transaction t
 				break
 			}
 		}
-		tokenTransfers := make([]chains.TRONTransfer, 0, len(info.Logs))
+		tokenTransfers := directTokenTransfers
+		if requiresInfo {
+			tokenTransfers = make([]chains.TRONTransfer, 0, len(info.Logs))
+		}
 		for index, log := range info.Logs {
 			if len(log.Topics) != 3 || normalizeHex64(log.Topics[0]) != strings.TrimPrefix(erc20TransferTopic, "0x") {
 				continue
 			}
 			contractAddress, err := canonicalTRONAddress(log.Address)
 			if err != nil {
-				return nil, malformed("tron TRC-20 log", err)
+				// Unrelated contracts occasionally emit non-address topics or
+				// provider-specific log shapes. They cannot belong to one of the
+				// configured assets, so ignore them rather than failing the whole
+				// finalized block.
+				continue
 			}
 			asset, supported := s.assets[contractAddress]
 			if !supported {
@@ -288,6 +361,58 @@ func (s *TRONSource) normalizeTRONTransaction(ctx context.Context, transaction t
 	}{transaction, info})
 	adapter := chains.TRONAdapter{ChainID: s.chainID, Source: fixedTRONTransaction{value: parsed}}
 	return adapter.Normalize(context.Background(), txHash)
+}
+
+// parseTRONDirectTokenTransfer handles the two standard ABI calls used by
+// wallets for direct TRC-20 payments. Reading these calls from the finalized
+// block avoids one transaction-info request for every unrelated transaction
+// and keeps public RPC polling within practical rate limits. Explicitly
+// configured GasFree contracts still use receipt logs above; unrelated complex
+// calls to the token contract are intentionally ignored.
+func parseTRONDirectTokenTransfer(value map[string]any, asset TRONAsset, index uint32) (chains.TRONTransfer, bool) {
+	ownerRaw, ownerOK := stringValue(value["owner_address"])
+	data, dataOK := stringValue(value["data"])
+	if !ownerOK || !dataOK {
+		return chains.TRONTransfer{}, false
+	}
+	data = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(data), "0x"))
+	var fromRaw, toRaw, amountRaw string
+	switch {
+	case strings.HasPrefix(data, "a9059cbb") && len(data) == 8+64+64:
+		fromRaw = ownerRaw
+		toRaw = data[8 : 8+64]
+		amountRaw = data[8+64:]
+	case strings.HasPrefix(data, "23b872dd") && len(data) == 8+64+64+64:
+		fromRaw = data[8 : 8+64]
+		toRaw = data[8+64 : 8+64+64]
+		amountRaw = data[8+64+64:]
+	default:
+		return chains.TRONTransfer{}, false
+	}
+	from, err := canonicalTRONABIAddress(fromRaw)
+	if err != nil {
+		return chains.TRONTransfer{}, false
+	}
+	to, err := canonicalTRONABIAddress(toRaw)
+	if err != nil {
+		return chains.TRONTransfer{}, false
+	}
+	amount, err := parseRawHexAmount(amountRaw)
+	if err != nil || amount == "0" {
+		return chains.TRONTransfer{}, false
+	}
+	return chains.TRONTransfer{Index: index, From: from, To: to, AssetID: asset.AssetID, ReceivedAmount: amount, Decimals: asset.Decimals}, true
+}
+
+func canonicalTRONABIAddress(value string) (string, error) {
+	value = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "0x"))
+	if len(value) == 64 {
+		if value[:24] != strings.Repeat("0", 24) {
+			return "", errors.New("invalid TRON ABI address")
+		}
+		value = value[24:]
+	}
+	return canonicalTRONAddress(value)
 }
 
 func (s *TRONSource) getTRONBlock(ctx context.Context, operation string, path []string, payload any) (tronBlock, error) {

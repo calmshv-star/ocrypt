@@ -1,7 +1,7 @@
 {{ template "header.html" . }}
 
 <div class="theme-panel">
-  <h2 class="theme-heading">Enter User Code</h2>
+  <h2 class="theme-heading">Введите код</h2>
   <form method="post" action="{{ .PostURL }}">
     <div class="theme-form-row">
       {{ if( .UserCode  )}}
@@ -13,10 +13,10 @@
 
     {{ if .Invalid }}
     <div id="login-error" class="dex-error-box">
-      Invalid or Expired User Code
+      Код неверен или устарел
     </div>
     {{ end }}
-    <button tabindex="3" id="submit-login" type="submit" class="dex-btn theme-btn--primary">Submit</button>
+    <button tabindex="3" id="submit-login" type="submit" class="dex-btn theme-btn--primary">Продолжить</button>
   </form>
 </div>
 

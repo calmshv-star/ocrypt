@@ -98,7 +98,14 @@ export function LiveOverviewPage() {
   const volumes = Array.isArray(overview?.settled_volume_today) ? overview.settled_volume_today : [];
   const flow = Array.isArray(overview?.payment_flow) ? overview.payment_flow : [];
   const recent = Array.isArray(overview?.recent_intents) ? overview.recent_intents : [];
-  const actionCount = overview ? overview.unmatched + overview.partially_paid + overview.reorg_review + overview.webhook_dead_letter : 0;
+  const settlementRate = overviewMetric(overview?.settlement_rate_bps);
+  const settledCreatedToday = overviewMetric(overview?.settled_created_today);
+  const createdToday = overviewMetric(overview?.created_today);
+  const confirming = overviewMetric(overview?.confirming);
+  const actionMetrics = [overview?.unmatched, overview?.partially_paid, overview?.reorg_review, overview?.webhook_dead_letter].map(overviewMetric);
+  const actionCount = actionMetrics.every((value): value is number => value !== null)
+    ? actionMetrics.reduce((total, value) => total + value, 0)
+    : null;
   return <div className="admin-page">
     <PageHeader
       actions={<><a className="admin-overview-action" href="#/intents">{t("overview.allPayments")}<ArrowRight size={14} /></a><a className="admin-overview-action is-primary" href="#/payment-links">{t("overview.createPaymentLink")}<ArrowRight size={14} /></a></>}
@@ -118,26 +125,26 @@ export function LiveOverviewPage() {
               : <span className="admin-overview-empty-value">—</span>}
           />
           <StatCard
-            change={`${formatBasisPoints(overview.settlement_rate_bps)}%`}
-            changeLabel={t("overview.ofCreatedToday", { settled: overview.settled_created_today, created: overview.created_today })}
+            change={settlementRate === null ? "—" : `${formatBasisPoints(settlementRate)}%`}
+            changeLabel={settledCreatedToday === null || createdToday === null ? t("overview.metricUnavailable") : t("overview.ofCreatedToday", { settled: settledCreatedToday, created: createdToday })}
             icon={<CheckCircle2 size={16} />}
             label={t("overview.settledToday")}
-            trend={overview.settlement_rate_bps >= 9000 ? "up" : "flat"}
+            trend={settlementRate !== null && settlementRate >= 9000 ? "up" : "flat"}
             value={String(overview.settled_today)}
           />
           <StatCard
-            changeLabel={t("overview.confirmingCount", { count: overview.confirming })}
+            changeLabel={confirming === null ? t("overview.metricUnavailable") : t("overview.confirmingCount", { count: confirming })}
             icon={<Clock3 size={16} />}
             label={t("overview.inProgress")}
             trend="flat"
             value={String(overview.open_intents)}
           />
           <StatCard
-            changeLabel={actionCount === 0 ? t("overview.noActions") : t("overview.openIssues")}
+            changeLabel={actionCount === null ? t("overview.metricUnavailable") : actionCount === 0 ? t("overview.noActions") : t("overview.openIssues")}
             icon={<AlertTriangle size={16} />}
             label={t("overview.needsAction")}
-            trend={actionCount === 0 ? "up" : "down"}
-            value={String(actionCount)}
+            trend={actionCount === null ? "flat" : actionCount === 0 ? "up" : "down"}
+            value={actionCount === null ? "—" : String(actionCount)}
           />
         </section>
 
@@ -157,7 +164,9 @@ export function LiveOverviewPage() {
           </SectionCard>
 
           <SectionCard className="admin-live-actions-card" description={t("overview.actionQueueDescription")} title={t("overview.actionQueue")}>
-            {actionCount === 0
+            {actionCount === null
+              ? <div className="admin-live-actions-empty"><strong>{t("overview.metricUnavailable")}</strong></div>
+              : actionCount === 0
               ? <div className="admin-live-actions-empty"><CheckCircle2 size={22} /><strong>{t("overview.noActions")}</strong><span>{t("overview.noActionsDescription")}</span></div>
               : <div className="admin-live-action-list">
                   <OverviewAction href="#/unmatched" label={t("overview.unmatchedPayments")} severity="violet" value={overview.unmatched} />
@@ -201,6 +210,11 @@ function OverviewAction({ href, label, severity, value }: { href:string;label:Re
 
 function formatBasisPoints(value:number) {
   return (Math.max(0, value) / 100).toFixed(2).replace(/\.00$/, "");
+}
+
+function overviewMetric(value:unknown):number|null {
+  const numeric = typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" ? Number(value) : Number.NaN;
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function formatOverviewMoney(value:string, scale:number, currency:string, locale:string) {

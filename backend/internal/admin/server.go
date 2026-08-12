@@ -66,8 +66,8 @@ func NewServer(service *Service, repository Repository, config ServerConfig) (*S
 	if err != nil || origin.Scheme != "https" || origin.Host == "" || origin.User != nil || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" {
 		return nil, errors.New("admin public origin must be an HTTPS origin without a path")
 	}
-	if config.CookieTTL < 5*time.Minute || config.CookieTTL > 12*time.Hour {
-		return nil, errors.New("admin cookie TTL must be between five minutes and twelve hours")
+	if config.CookieTTL < 5*time.Minute || config.CookieTTL > maxAdminSessionTTL {
+		return nil, errors.New("admin cookie TTL must be between five minutes and ten years")
 	}
 	if config.BodyLimit < 1024 || config.BodyLimit > 1<<20 {
 		return nil, errors.New("admin request body limit must be between 1 KiB and 1 MiB")

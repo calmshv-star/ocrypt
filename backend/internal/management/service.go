@@ -82,13 +82,20 @@ func (s *Service) SubmitReceipt(ctx context.Context, token, origin, mediaType st
 	var candidate ReceiptTransferCandidate
 	if analysis.TransactionID == "" && analysis.Amount != "" {
 		if amount, parseErr := receiptAmountAtomic(analysis.Amount, target.AssetDecimals); parseErr == nil {
-			occurredAt := s.now()
+			var occurredAt time.Time
+			window := time.Duration(0)
 			if analysis.OccurredAt != "" {
 				occurredAt, _ = time.Parse(time.RFC3339Nano, analysis.OccurredAt)
+				window = 10 * time.Minute
 			}
-			candidate, err = s.repository.FindReceiptTransferCandidate(ctx, target, amount.String(), occurredAt.UTC(), 10*time.Minute)
-			if err != nil {
-				return ReceiptSubmission{}, false, ErrDependency
+			// A screenshot is only a discovery hint. Do not let it redirect an
+			// intent to a different payment merely because the shared receiving
+			// address also saw that amount.
+			if amount.String() == target.ExpectedAmount {
+				candidate, err = s.repository.FindReceiptTransferCandidate(ctx, target, amount.String(), occurredAt.UTC(), window)
+				if err != nil {
+					return ReceiptSubmission{}, false, ErrDependency
+				}
 			}
 		}
 	}

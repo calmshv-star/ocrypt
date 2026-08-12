@@ -163,10 +163,10 @@ func loadAdminConfig() (adminConfig, error) {
 	if config.PasswordOnly && (config.RequiredACR != "password" || !config.AcceptedAMR["pwd"]) {
 		return adminConfig{}, errors.New("password-only mode requires ADMIN_REQUIRED_ACR=password and ADMIN_ACCEPTED_AMR to include pwd")
 	}
-	if config.IdleTTL, err = durationEnv("ADMIN_IDLE_TTL", "15m"); err != nil {
+	if config.IdleTTL, err = durationEnv("ADMIN_IDLE_TTL", "87600h"); err != nil {
 		return adminConfig{}, err
 	}
-	if config.AbsoluteTTL, err = durationEnv("ADMIN_ABSOLUTE_TTL", "8h"); err != nil {
+	if config.AbsoluteTTL, err = durationEnv("ADMIN_ABSOLUTE_TTL", "87600h"); err != nil {
 		return adminConfig{}, err
 	}
 	if config.RotationInterval, err = durationEnv("ADMIN_ROTATION_INTERVAL", "5m"); err != nil {

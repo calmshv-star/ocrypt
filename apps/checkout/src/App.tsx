@@ -322,7 +322,7 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
     const timer = window.setInterval(() => setSecondsLeft((value) => Math.max(0, value - 1)), 1000);
     return () => window.clearInterval(timer);
   }, [status, token]);
-  useEffect(() => { if (canvasRef.current && qrPayload) void QRCode.toCanvas(canvasRef.current, qrPayload, { width: 208, margin: 1, color: { dark: "#111827", light: "#ffffff" }, errorCorrectionLevel: "M" }); }, [qrPayload]);
+  useEffect(() => { if (canvasRef.current && qrPayload) void QRCode.toCanvas(canvasRef.current, qrPayload, { width: 208, margin: 1, color: { dark: "#111111", light: "#ffffff" }, errorCorrectionLevel: "M" }); }, [qrPayload]);
 
   const selectRoute = async (nextRoute: string) => {
     if (status !== "pending") return;

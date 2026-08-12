@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/calmshv-star/ocrypt/backend/internal/domain"
 	"github.com/calmshv-star/ocrypt/backend/internal/scanner"
 )
 
@@ -145,6 +146,69 @@ func TestTRONDirectSourceParsesGasFreeNetAndFeeEvidence(t *testing.T) {
 	}
 }
 
+func TestTRONDirectSourceParsesStandardTRC20WithoutReceiptFanout(t *testing.T) {
+	var fixture map[string]json.RawMessage
+	readFixture(t, "tron.json", &fixture)
+	data := "a9059cbb" + strings.Repeat("0", 24) + strings.Repeat("22", 20) + strings.Repeat("0", 61) + "27f"
+	fixture["block"] = json.RawMessage(`{"blockID":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","block_header":{"raw_data":{"number":1,"parentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","timestamp":100000}},"transactions":[{"txID":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","raw_data":{"contract":[{"type":"TriggerSmartContract","parameter":{"value":{"owner_address":"411111111111111111111111111111111111111111","contract_address":"414444444444444444444444444444444444444444","data":"` + data + `"}}}]},"ret":[{"contractRet":"SUCCESS"}]}]}`)
+	infoCalls := 0
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		switch {
+		case strings.HasSuffix(request.URL.Path, "/getnowblock"):
+			return 200, fixture["head"]
+		case strings.HasSuffix(request.URL.Path, "/getblockbynum"):
+			return 200, fixture["block"]
+		case strings.HasSuffix(request.URL.Path, "/gettransactioninfobyid"):
+			infoCalls++
+			return 429, nil
+		default:
+			t.Fatalf("unexpected TRON path %s", request.URL.Path)
+			return 500, nil
+		}
+	})
+	source, err := NewTRONSource(TRONConfig{HTTP: HTTPConfig{Endpoint: "https://tron.example", Client: client}, ProviderID: "tron-a", ChainID: "tron:mainnet", NativeAssetID: "trx-tron", NativeDecimals: 6, Assets: map[string]TRONAsset{"414444444444444444444444444444444444444444": {AssetID: "usdt-tron", Decimals: 6}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := source.ScanRange(context.Background(), 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if infoCalls != 0 || len(batch.Events) != 1 || batch.Events[0].Kind != "token_transfer" || batch.Events[0].Amount.String() != "639" {
+		t.Fatalf("standard TRC-20 scan used receipt fanout or returned wrong event: calls=%d events=%+v", infoCalls, batch.Events)
+	}
+}
+
+func TestTRONDirectSourceIgnoresNonPaymentTokenCallsWithoutReceiptFanout(t *testing.T) {
+	var fixture map[string]json.RawMessage
+	readFixture(t, "tron.json", &fixture)
+	data := "095ea7b3" + strings.Repeat("0", 24) + strings.Repeat("22", 20) + strings.Repeat("f", 64)
+	fixture["block"] = json.RawMessage(`{"blockID":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","block_header":{"raw_data":{"number":1,"parentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","timestamp":100000}},"transactions":[{"txID":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","raw_data":{"contract":[{"type":"TriggerSmartContract","parameter":{"value":{"owner_address":"411111111111111111111111111111111111111111","contract_address":"414444444444444444444444444444444444444444","data":"` + data + `"}}}]},"ret":[{"contractRet":"SUCCESS"}]}]}`)
+	infoCalls := 0
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		switch {
+		case strings.HasSuffix(request.URL.Path, "/getnowblock"):
+			return 200, fixture["head"]
+		case strings.HasSuffix(request.URL.Path, "/getblockbynum"):
+			return 200, fixture["block"]
+		case strings.HasSuffix(request.URL.Path, "/gettransactioninfobyid"):
+			infoCalls++
+			return 429, nil
+		default:
+			t.Fatalf("unexpected TRON path %s", request.URL.Path)
+			return 500, nil
+		}
+	})
+	source, err := NewTRONSource(TRONConfig{HTTP: HTTPConfig{Endpoint: "https://tron.example", Client: client}, ProviderID: "tron-a", ChainID: "tron:mainnet", NativeAssetID: "trx-tron", NativeDecimals: 6, Assets: map[string]TRONAsset{"414444444444444444444444444444444444444444": {AssetID: "usdt-tron", Decimals: 6}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := source.ScanRange(context.Background(), 1, 1)
+	if err != nil || infoCalls != 0 || len(batch.Events) != 0 {
+		t.Fatalf("non-payment token call caused receipt fanout or an event: calls=%d events=%+v err=%v", infoCalls, batch.Events, err)
+	}
+}
+
 func TestSolanaDirectSourceParsesSOLAndToken2022InnerInstruction(t *testing.T) {
 	var fixture map[string]json.RawMessage
 	readFixture(t, "solana.json", &fixture)
@@ -155,6 +219,8 @@ func TestSolanaDirectSourceParsesSOLAndToken2022InnerInstruction(t *testing.T) {
 				return fixture["genesis"]
 			case "getSlot":
 				return fixture["slot"]
+			case "getBlocks":
+				return json.RawMessage(`[1]`)
 			case "getBlock":
 				return fixture["block"]
 			default:
@@ -173,6 +239,47 @@ func TestSolanaDirectSourceParsesSOLAndToken2022InnerInstruction(t *testing.T) {
 	}
 	if len(batch.Events) != 2 || batch.Events[0].Kind != "native_top_level" || batch.Events[1].Kind != "token2022_transfer" || batch.Events[1].Identity.EventIndex != "instruction:0/inner:0" {
 		t.Fatalf("unexpected Solana events: %+v", batch.Events)
+	}
+}
+
+func TestSolanaWatchedAddressUsesLightBlocksAndFetchesOnlyMatchingTransaction(t *testing.T) {
+	var fixture map[string]json.RawMessage
+	readFixture(t, "solana.json", &fixture)
+	var fullBlock struct {
+		Transactions []json.RawMessage `json:"transactions"`
+	}
+	if err := json.Unmarshal(fixture["block"], &fullBlock); err != nil || len(fullBlock.Transactions) != 1 {
+		t.Fatal("invalid Solana fixture")
+	}
+	header := json.RawMessage(`{"blockhash":"So11111111111111111111111111111111111111112","previousBlockhash":"11111111111111111111111111111111","parentSlot":0,"blockTime":100,"transactions":[]}`)
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		return 200, rpcResult(t, request, func(method string, _ []json.RawMessage) json.RawMessage {
+			switch method {
+			case "getGenesisHash":
+				return fixture["genesis"]
+			case "getSlot":
+				return fixture["slot"]
+			case "getBlocks":
+				return json.RawMessage(`[1]`)
+			case "getBlock":
+				return header
+			case "getSignaturesForAddress":
+				return json.RawMessage(`[{"signature":"1111111111111111111111111111111111111111111111111111111111111111","slot":1,"err":null,"blockTime":100}]`)
+			case "getTransaction":
+				return fullBlock.Transactions[0]
+			default:
+				t.Fatalf("unexpected Solana method %s", method)
+				return nil
+			}
+		})
+	})
+	source, err := NewSolanaSource(SolanaConfig{HTTP: HTTPConfig{Endpoint: "https://solana.example", Client: client}, ProviderID: "sol-a", ChainID: "solana:mainnet", NativeAssetID: "sol-solana", NativeDecimals: 9, WatchedAddresses: []string{"So11111111111111111111111111111111111111112"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := source.ScanRange(context.Background(), 1, 1)
+	if err != nil || len(batch.Blocks) != 1 || len(batch.Events) != 1 || batch.Events[0].Identity.ToAddress != "So11111111111111111111111111111111111111112" {
+		t.Fatalf("watched-address scan failed: batch=%+v err=%v", batch, err)
 	}
 }
 
@@ -264,6 +371,9 @@ func TestDirectSourceRejectsMalformedProviderEvidence(t *testing.T) {
 			if method == "getSlot" {
 				return fixture["slot"]
 			}
+			if method == "getBlocks" {
+				return json.RawMessage(`[1]`)
+			}
 			return fixture["block"]
 		})
 	})
@@ -288,6 +398,70 @@ func TestQuorumSourceRejectsProviderDisagreement(t *testing.T) {
 	_, err = quorum.ScanRange(context.Background(), 1, 1)
 	if ErrorKindOf(err) != ErrorDisagreement {
 		t.Fatalf("expected disagreement taxonomy, got %v", err)
+	}
+}
+
+func TestQuorumSourceIgnoresProviderHeadConfirmationDrift(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	batch := scanner.RangeBatch{From: 1, To: 1, Blocks: []scanner.Block{{Height: 1, Hash: "a", ParentHash: "g", Time: now}}, Events: []domain.TransferEvent{{ID: "event", Identity: domain.EventIdentity{ChainID: "tron:mainnet", TransactionID: "tx", EventIndex: "transfer:0", AssetID: "trx-tron", ToAddress: "wallet"}, Confirmations: 10}}}
+	other := batch
+	other.Events = append([]domain.TransferEvent(nil), batch.Events...)
+	other.Events[0].Confirmations = 12
+	quorum, err := NewQuorumSource([]scanner.Source{staticSource{batch: batch}, staticSource{batch: other}}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := quorum.ScanRange(context.Background(), 1, 1)
+	if err != nil || result.Events[0].Confirmations != 10 {
+		t.Fatalf("confirmation drift must not break range agreement: result=%+v err=%v", result, err)
+	}
+}
+
+func TestSingleProviderQuorumPreservesProviderError(t *testing.T) {
+	want := &ProviderError{Kind: ErrorRateLimited, Operation: "tron block", StatusCode: http.StatusTooManyRequests}
+	quorum, err := NewQuorumSource([]scanner.Source{staticSource{err: want}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = quorum.ScanRange(context.Background(), 1, 1)
+	if !errors.Is(err, want) || ErrorKindOf(err) != ErrorRateLimited {
+		t.Fatalf("single provider error was hidden: %v", err)
+	}
+}
+
+func TestFailoverSourceSwitchesAndKeepsSuccessfulBackupActive(t *testing.T) {
+	want := scanner.RangeBatch{From: 1, To: 1, Blocks: []scanner.Block{{Height: 1, Hash: "backup"}}}
+	primary := &trackingSource{rangeErr: errors.New("primary unavailable")}
+	backup := &trackingSource{batch: want, heads: []scanner.ProviderHead{{Provider: "backup", SafeHeight: 1}}}
+	source, err := NewFailoverSource([]scanner.Source{primary, backup})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := source.ScanRange(context.Background(), 1, 1)
+	if err != nil || !reflect.DeepEqual(batch, want) {
+		t.Fatalf("fallback range failed: batch=%+v err=%v", batch, err)
+	}
+	heads, err := source.Heads(context.Background())
+	if err != nil || len(heads) != 1 || heads[0].Provider != "backup" {
+		t.Fatalf("active backup was not reused: heads=%+v err=%v", heads, err)
+	}
+	if primary.rangeCalls != 1 || primary.headCalls != 0 || backup.rangeCalls != 1 || backup.headCalls != 1 {
+		t.Fatalf("unexpected provider calls: primary=%+v backup=%+v", primary, backup)
+	}
+}
+
+func TestDestinationFilterPreservesBlocksAndKeepsOnlyWatchedTransfers(t *testing.T) {
+	batch := scanner.RangeBatch{From: 1, To: 1, Blocks: []scanner.Block{{Height: 1, Hash: "block"}}, Events: []domain.TransferEvent{
+		{Identity: domain.EventIdentity{ToAddress: "merchant"}},
+		{Identity: domain.EventIdentity{ToAddress: "someone-else"}},
+	}}
+	source, err := NewDestinationFilterSource(staticSource{batch: batch}, []string{"merchant"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered, err := source.ScanRange(context.Background(), 1, 1)
+	if err != nil || len(filtered.Blocks) != 1 || len(filtered.Events) != 1 || filtered.Events[0].Identity.ToAddress != "merchant" {
+		t.Fatalf("unexpected filtered range: batch=%+v err=%v", filtered, err)
 	}
 }
 
@@ -317,9 +491,30 @@ func TestFactoryUsesStableProviderKindAndRejectsUnknownKind(t *testing.T) {
 	}
 }
 
-type staticSource struct{ batch scanner.RangeBatch }
+type staticSource struct {
+	batch scanner.RangeBatch
+	err   error
+}
+
+type trackingSource struct {
+	batch                 scanner.RangeBatch
+	heads                 []scanner.ProviderHead
+	rangeErr              error
+	headErr               error
+	rangeCalls, headCalls int
+}
+
+func (s *trackingSource) Heads(context.Context) ([]scanner.ProviderHead, error) {
+	s.headCalls++
+	return s.heads, s.headErr
+}
+
+func (s *trackingSource) ScanRange(context.Context, uint64, uint64) (scanner.RangeBatch, error) {
+	s.rangeCalls++
+	return s.batch, s.rangeErr
+}
 
 func (s staticSource) Heads(context.Context) ([]scanner.ProviderHead, error) { return nil, nil }
 func (s staticSource) ScanRange(context.Context, uint64, uint64) (scanner.RangeBatch, error) {
-	return s.batch, nil
+	return s.batch, s.err
 }

@@ -52,11 +52,17 @@ func TestProofWorkerVerifiesBeforeNormalSettlementPipeline(t *testing.T) {
 	}
 }
 
-func TestProofWorkerRecordsSupportedTransactionNotFound(t *testing.T) {
+func TestProofWorkerRetriesMissingTransactionUntilAttemptLimit(t *testing.T) {
 	queue := &proofQueueFixture{jobs: []ProofJob{{Proof: domain.PaymentProof{ID: "proof", ChainID: "eip155:1", TransactionID: "0xmissing"}, Attempt: 1}}}
 	worker := ProofWorker{Verifier: proofVerifierFixture{}, Queue: queue, Process: NewTransferProcessor(&settlementFixture{})}
 	count, err := worker.RunBatch(t.Context(), "worker", "eip155:1", 10)
-	if err != nil || count != 1 || len(queue.retried) != 1 || queue.retried[0] != domain.ProofNotFound {
+	if err != nil || count != 1 || len(queue.retried) != 1 || queue.retried[0] != domain.ProofQueued {
 		t.Fatalf("count=%d err=%v retried=%v", count, err, queue.retried)
+	}
+	queue.jobs[0].Attempt = 20
+	queue.retried = nil
+	count, err = worker.RunBatch(t.Context(), "worker", "eip155:1", 10)
+	if err != nil || count != 1 || len(queue.retried) != 1 || queue.retried[0] != domain.ProofNotFound {
+		t.Fatalf("terminal count=%d err=%v retried=%v", count, err, queue.retried)
 	}
 }

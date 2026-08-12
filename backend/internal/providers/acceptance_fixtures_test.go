@@ -139,6 +139,8 @@ func TestRetainedProviderAcceptanceFixtures(t *testing.T) {
 					return fixture["genesis"]
 				case "getSlot":
 					return fixture["slot"]
+				case "getBlocks":
+					return json.RawMessage(`[1]`)
 				case "getBlock":
 					return fixture["block"]
 				default:

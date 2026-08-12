@@ -36,6 +36,7 @@ type Config struct {
 	IncludeInternal      bool
 	GasFreeContracts     []string
 	GasFreeFeeCollectors []string
+	WatchedAddresses     []string
 	PageSize             uint32
 }
 
@@ -60,13 +61,13 @@ func NewSource(config Config) (scanner.Source, error) {
 		for key, value := range config.Assets {
 			assets[key] = SolanaAsset{AssetID: value.ID, Decimals: value.Decimals}
 		}
-		return NewSolanaSource(SolanaConfig{HTTP: config.HTTP, ProviderID: config.ProviderID, ChainID: config.ChainID, NativeAssetID: config.NativeAssetID, NativeDecimals: config.NativeDecimals, Assets: assets})
+		return NewSolanaSource(SolanaConfig{HTTP: config.HTTP, ProviderID: config.ProviderID, ChainID: config.ChainID, NativeAssetID: config.NativeAssetID, NativeDecimals: config.NativeDecimals, Assets: assets, WatchedAddresses: config.WatchedAddresses})
 	case KindTONCenterV3:
 		assets := make(map[string]TONAsset, len(config.Assets))
 		for key, value := range config.Assets {
 			assets[key] = TONAsset{AssetID: value.ID, Decimals: value.Decimals}
 		}
-		return NewTONSource(TONConfig{HTTP: config.HTTP, ProviderID: config.ProviderID, ChainID: config.ChainID, NativeAssetID: config.NativeAssetID, NativeDecimals: config.NativeDecimals, Jettons: assets, PageSize: config.PageSize})
+		return NewTONSource(TONConfig{HTTP: config.HTTP, ProviderID: config.ProviderID, ChainID: config.ChainID, NativeAssetID: config.NativeAssetID, NativeDecimals: config.NativeDecimals, Jettons: assets, WatchedAddresses: config.WatchedAddresses, PageSize: config.PageSize})
 	case KindAptosFullNode:
 		assets := make(map[string]AptosAsset, len(config.Assets))
 		for key, value := range config.Assets {

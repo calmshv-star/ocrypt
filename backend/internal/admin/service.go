@@ -27,6 +27,8 @@ type ServiceConfig struct {
 	PasswordOnly bool
 }
 
+const maxAdminSessionTTL = 10 * 365 * 24 * time.Hour
+
 type AuthResult struct {
 	Principal Principal
 	Session   Session
@@ -49,11 +51,11 @@ func NewService(repository Repository, provider *OIDCProvider, stateBox SecretBo
 	if config.LoginTTL < time.Minute || config.LoginTTL > 15*time.Minute {
 		return nil, errors.New("admin login TTL must be between one and fifteen minutes")
 	}
-	if config.IdleTTL < 5*time.Minute || config.IdleTTL > time.Hour {
-		return nil, errors.New("admin idle TTL must be between five minutes and one hour")
+	if config.IdleTTL < 5*time.Minute || config.IdleTTL > maxAdminSessionTTL {
+		return nil, errors.New("admin idle TTL must be between five minutes and ten years")
 	}
-	if config.AbsoluteTTL < config.IdleTTL || config.AbsoluteTTL > 12*time.Hour {
-		return nil, errors.New("admin absolute TTL must be between idle TTL and twelve hours")
+	if config.AbsoluteTTL < config.IdleTTL || config.AbsoluteTTL > maxAdminSessionTTL {
+		return nil, errors.New("admin absolute TTL must be between idle TTL and ten years")
 	}
 	if config.RotationInterval < time.Minute || config.RotationInterval > config.IdleTTL {
 		return nil, errors.New("admin session rotation interval must be between one minute and idle TTL")
@@ -259,24 +261,11 @@ func (s *Service) Authenticate(ctx context.Context, rawSession string) (AuthResu
 	if err != nil || identity.Status != "active" || session.Purpose != "admin" || session.InvitationID != "" || session.RevokedAt != nil || !session.IdleExpiresAt.After(now) || !session.AbsoluteExpiresAt.After(now) {
 		return AuthResult{}, ErrUnauthenticated
 	}
-	if now.Sub(session.RotatedAt) >= s.config.RotationInterval {
-		claims := IDTokenClaims{Issuer: session.Issuer, Subject: session.Subject, ACR: session.ACR, AMR: session.AMR}
-		tokens, rotated, err := s.newSession(identity, claims, now)
-		if err != nil {
-			return AuthResult{}, err
-		}
-		rotated.CreatedAt, rotated.AbsoluteExpiresAt, rotated.StepUpUntil = session.CreatedAt, session.AbsoluteExpiresAt, session.StepUpUntil
-		rotated.CSRFHash = session.CSRFHash
-		tokens.CSRF = ""
-		if err := s.repository.RotateSession(ctx, hash, rotated); err != nil {
-			return AuthResult{}, ErrUnauthenticated
-		}
-		if err := s.repository.AppendAudit(ctx, AuditEntry{ActorUserID: identity.UserID, SessionID: rotated.ID, Action: "admin.session.rotated", ResourceType: "admin_session", ResourceID: rotated.ID, RequestID: rotated.ID, Reason: "passive rotation interval elapsed", Details: json.RawMessage(`{}`), OccurredAt: now}); err != nil {
-			_ = s.repository.RevokeSession(ctx, rotated.SessionHash, "audit_write_failed", now)
-			return AuthResult{}, ErrUnauthenticated
-		}
-		return AuthResult{Principal: PrincipalFor(identity, rotated), Session: rotated, Tokens: &tokens, MFAAt: sessionMFAAt(rotated, s.config.StepUpTTL)}, nil
-	}
+	// Do not rotate a browser session from a passive authenticated request.
+	// Admin pages intentionally fetch several resources in parallel. Rotating here
+	// made those requests race: one response installed the replacement cookie while
+	// another rejected the old cookie and cleared the new one. Explicit login,
+	// step-up and logout remain the session creation/revocation boundaries.
 	idleExpiry := now.Add(s.config.IdleTTL)
 	if idleExpiry.After(session.AbsoluteExpiresAt) {
 		idleExpiry = session.AbsoluteExpiresAt
