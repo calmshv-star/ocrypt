@@ -213,7 +213,7 @@ function CheckoutChrome({ children }: { children: ReactNode }) {
 
 function CheckoutUnavailable({ loading = false }: { loading?: boolean }) {
   const { t } = useI18n();
-  return <CheckoutChrome><main className="checkout-main checkout-main--state" id="checkout-main"><section aria-live="polite" className="checkout-state" role={loading ? "status" : "alert"}><span aria-hidden="true" className="checkout-state__icon">{loading ? <RadioTower size={26} /> : <Clock3 size={26} />}</span><Badge tone={loading ? "info" : "negative"}>{t("checkout.secureCheckout")}</Badge><h1>{t(loading ? "checkout.loading" : "checkout.unavailable")}</h1>{!loading && <><p>{t("checkout.unavailableHelp")}</p><Button onClick={() => window.location.reload()} variant="secondary"><RefreshCw size={16} />{t("common.retry")}</Button></>}</section></main></CheckoutChrome>;
+  return <CheckoutChrome><main className="checkout-main checkout-main--state" id="checkout-main"><section aria-live="polite" className="checkout-state" role={loading ? "status" : "alert"}><span aria-hidden="true" className="checkout-state__icon">{loading ? <RadioTower size={26} /> : <Clock3 size={26} />}</span><h1>{t(loading ? "checkout.loading" : "checkout.unavailable")}</h1>{!loading && <><p>{t("checkout.unavailableHelp")}</p><Button onClick={() => window.location.reload()} variant="secondary"><RefreshCw size={16} />{t("common.retry")}</Button></>}</section></main></CheckoutChrome>;
 }
 
 function PaymentLinkPage({ token, onRedeemed }: { token: string; onRedeemed: (redemption: Redemption) => void }) {
@@ -359,7 +359,7 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
     const preparationStatus = status === "payment_route_failed" || status === "expired" ? "payment_route_failed" : "preparing_payment_route";
     const [title, help] = statusKeys[preparationStatus];
     const cancelURL = returnTargets.cancel;
-    return <CheckoutChrome><main className="checkout-main" id="checkout-main"><section className="checkout-intro"><Badge tone={preparationStatus === "payment_route_failed" ? "negative" : "info"}>{t("checkout.secureCheckout")}</Badge><h1>{t(title)}</h1><p>{t(help)}</p>{loadFailed && <p className="checkout-degraded" role="alert">{t("checkout.degraded")}</p>}</section><section className="checkout-card checkout-link-state" data-testid="payment-route-preparation" role="status"><span>{preparationStatus === "payment_route_failed" ? <Clock3 size={28} /> : <RadioTower size={28} />}</span><strong>{t(title)}</strong><p>{t(help)}</p>{preparationStatus === "payment_route_failed" && cancelURL && <a className="checkout-return" href={cancelURL}>{t("checkout.cancelPayment")}</a>}</section></main></CheckoutChrome>;
+    return <CheckoutChrome><main className="checkout-main" id="checkout-main"><section className="checkout-intro"><h1>{t(title)}</h1><p>{t(help)}</p>{loadFailed && <p className="checkout-degraded" role="alert">{t("checkout.degraded")}</p>}</section><section className="checkout-card checkout-link-state" data-testid="payment-route-preparation" role="status"><span>{preparationStatus === "payment_route_failed" ? <Clock3 size={28} /> : <RadioTower size={28} />}</span><strong>{t(title)}</strong><p>{t(help)}</p>{preparationStatus === "payment_route_failed" && cancelURL && <a className="checkout-return" href={cancelURL}>{t("checkout.cancelPayment")}</a>}</section></main></CheckoutChrome>;
   }
   const remaining = `${String(Math.floor(secondsLeft / 60)).padStart(2, "0")}:${String(secondsLeft % 60).padStart(2, "0")}`;
   const [statusTitle, statusHelp] = statusKeys[status];
@@ -385,7 +385,7 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
   const displayTotal = `${formatMinor(session.amountMinor, session.currencyScale)} ${session.currency}`;
   return <CheckoutChrome><main className="checkout-main" id="checkout-main">
     <section className="checkout-intro">
-      <div className="checkout-intro__copy"><Badge tone="info">{t(fixture ? "checkout.preview" : "checkout.secureCheckout")}</Badge><h1>{t("checkout.title")}</h1><p>{session.description || t("checkout.description")}</p></div>
+      <div className="checkout-intro__copy">{fixture && <Badge tone="violet">{t("checkout.preview")}</Badge>}<h1>{t("checkout.title")}</h1><p>{session.description || t("checkout.description")}</p></div>
       <div className="checkout-order-context"><strong>{session.merchantName}</strong><span>{session.orderId}</span><div><small>{t("checkout.offerAmount")}</small><b>{displayTotal}</b></div></div>
       {loadFailed && <p className="checkout-degraded" role="alert">{t("checkout.degraded")}</p>}
       {selectionFailed && <p className="checkout-degraded" role="alert">{t("checkout.routeSelectionFailed")}</p>}
