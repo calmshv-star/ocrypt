@@ -28,7 +28,11 @@ def rpc(endpoint, method, params):
     request = urllib.request.Request(
         endpoint,
         data=payload,
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "Ocrypt/1.0 public-chain cursor seeder",
+        },
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=15) as response:
