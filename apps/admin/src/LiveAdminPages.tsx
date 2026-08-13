@@ -413,7 +413,8 @@ export function LiveUnmatchedPage() {
   const requiresLate = classification.includes("late");
   const requiresCrossAsset = classification.includes("wrong_asset") || classification.includes("cross_asset");
   const exceptionConfirmed = (!requiresShortfall || acceptShortfall) && (!requiresLate || acceptLate) && (!requiresCrossAsset || acceptCrossAsset);
-  const selectedCandidate = selected?.candidates.find((candidate) => candidate.route_id === candidateId && !candidate.disqualified);
+  const compatibleCandidates = selected?.candidates.filter((candidate) => !candidate.disqualified) ?? [];
+  const selectedCandidate = compatibleCandidates.find((candidate) => candidate.route_id === candidateId);
   const requestResolution = async () => {
     if (!selected || !selectedCandidate || !admin.scope || !exceptionConfirmed || !admin.can("resolution:request")) return;
     setBusy(true);
@@ -439,7 +440,7 @@ export function LiveUnmatchedPage() {
         </SectionCard>
         {selected && <SectionCard title={t(unmatchedReasonKey(selected.classification))}>
           <div className="admin-unmatched-payment"><div><span>{t("common.amount")}</span><strong>{formatAtomic(selected.amount_atomic, selected.asset_decimals)} {selected.asset_symbol}</strong></div><div><span>{t("common.network")}</span><strong>{networkName(selected.chain_id)}</strong></div><div><span>{t("common.time")}</span><strong>{formatDate(selected.on_chain_time, locale)}</strong></div></div>
-          {selected.candidates.length > 0 ? <fieldset className="admin-live-fieldset admin-unmatched-orders"><legend>{t("admin.selectCandidate")}</legend>{selected.candidates.filter((candidate) => !candidate.disqualified).map((candidate) => <label key={candidate.id}><input checked={candidateId === candidate.route_id} name="candidate" onChange={() => setCandidateId(candidate.route_id)} type="radio" /><span><strong>{candidate.merchant_order_id}</strong><small>{t("admin.exactAmount")}: {candidate.expected_display} {candidate.asset_symbol} · {formatDate(candidate.order_created_at, locale)}</small></span></label>)}</fieldset> : <div className="admin-unmatched-empty"><strong>{t("unmatched.noCandidate")}</strong><p>{t("unmatched.noCandidateBody")}</p></div>}
+          {compatibleCandidates.length > 0 ? <fieldset className="admin-live-fieldset admin-unmatched-orders"><legend>{t("admin.selectCandidate")}</legend>{compatibleCandidates.map((candidate) => <label key={candidate.id}><input checked={candidateId === candidate.route_id} name="candidate" onChange={() => setCandidateId(candidate.route_id)} type="radio" /><span><strong>{candidate.merchant_order_id}</strong><small>{t("admin.exactAmount")}: {candidate.expected_display} {candidate.asset_symbol} · {formatDate(candidate.order_created_at, locale)}</small></span></label>)}</fieldset> : <div className="admin-unmatched-empty"><strong>{t("unmatched.noCandidate")}</strong><p>{t("unmatched.noCandidateBody")}</p></div>}
           {requiresShortfall && <label className="admin-unmatched-confirm"><input checked={acceptShortfall} onChange={(event) => setAcceptShortfall(event.target.checked)} type="checkbox" /><span>{t("admin.acceptShortfall")}</span></label>}
           {requiresLate && <label className="admin-unmatched-confirm"><input checked={acceptLate} onChange={(event) => setAcceptLate(event.target.checked)} type="checkbox" /><span>{t("admin.acceptLate")}</span></label>}
           {requiresCrossAsset && <label className="admin-unmatched-confirm"><input checked={acceptCrossAsset} onChange={(event) => setAcceptCrossAsset(event.target.checked)} type="checkbox" /><span>{t("admin.acceptCrossAsset")}</span></label>}
