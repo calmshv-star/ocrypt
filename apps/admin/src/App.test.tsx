@@ -139,7 +139,7 @@ describe("admin application", () => {
     renderApp("/settings", { client: client({ me: vi.fn().mockResolvedValue(settingsPrincipal) }), preview: false });
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
     const settingsPage = screen.getByTestId("merchant-settings-page");
-    for (const name of ["Financial settings", "Webhooks", "API clients", "Matching policies", "Audit log"]) {
+    for (const name of ["Financial settings", "Webhooks", "Integration credentials", "Matching policies", "Audit log"]) {
       expect(within(settingsPage).getByRole("link", { name: new RegExp(name) })).toBeInTheDocument();
     }
     for (const name of ["Management audit", "Assets & RPC", "Platform configuration", "Reconciliation"]) {
