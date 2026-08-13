@@ -841,8 +841,6 @@ export const ru = {
   "merchant.memberActive": "Активен",
   "merchant.memberDisabled": "Отключён",
   "merchant.memberRemoved": "Удалён",
-  "merchant.nonFinancialOnly": "Только нефинансовые настройки",
-  "merchant.nonFinancialOnlyBody": "В этой форме нельзя менять расчёты, кошельки, сопоставление и политику финальности.",
   "merchant.notifications": "Уведомления",
   "merchant.oneDay": "Один день",
   "merchant.oneHour": "Один час",

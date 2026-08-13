@@ -841,8 +841,6 @@ export const zhCN = {
   "merchant.memberActive": "有效",
   "merchant.memberDisabled": "已停用",
   "merchant.memberRemoved": "已移除",
-  "merchant.nonFinancialOnly": "仅限非财务设置",
-  "merchant.nonFinancialOnlyBody": "此表单不能更改结算、钱包、匹配或最终性策略。",
   "merchant.notifications": "通知",
   "merchant.oneDay": "一天",
   "merchant.oneHour": "一小时",
