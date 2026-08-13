@@ -105,6 +105,16 @@ func TestAutomatedAllocationTimestampParameterIsExplicitlyTyped(t *testing.T) {
 	}
 }
 
+func TestAutomatedAllocationConflictTargetMatchesPartialUniqueIndex(t *testing.T) {
+	source, err := os.ReadFile("matching_automation.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(source), "ON CONFLICT (event_id) WHERE state<>'reversed' AND event_id IS NOT NULL") {
+		t.Fatal("payment match conflict target must imply the active-event partial unique index predicate")
+	}
+}
+
 func TestSettlementUUIDIsExplicitlyCastWhenReusedAsBusinessReference(t *testing.T) {
 	for _, name := range []string{"matching_automation.go", "resolution_settlement.go", "hosted_settlement.go"} {
 		source, err := os.ReadFile(name)
