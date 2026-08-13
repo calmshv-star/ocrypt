@@ -548,6 +548,7 @@ export const es = {
   "admin.noScopeBody": "Tu cuenta no tiene asignado ningún ámbito de inquilino o comercio.",
   "admin.dataLoading": "Cargando datos autorizados…",
   "admin.dataError": "No se pudieron cargar los datos autorizados.",
+  "admin.dataErrorBody": "Vuelve a intentarlo. No se modificarán los datos operativos.",
   "admin.emptyTitle": "No hay registros",
   "admin.emptyBody": "No hay registros en el ámbito autorizado seleccionado.",
   "admin.permissionTitle": "Se requiere permiso",

@@ -548,6 +548,7 @@ export const zhCN = {
   "admin.noScopeBody": "您的账户尚未分配租户或商户范围。",
   "admin.dataLoading": "正在加载授权数据…",
   "admin.dataError": "无法加载授权数据。",
+  "admin.dataErrorBody": "请重试。不会更改任何运营数据。",
   "admin.emptyTitle": "没有记录",
   "admin.emptyBody": "所选授权范围内没有记录。",
   "admin.permissionTitle": "需要权限",

@@ -680,12 +680,22 @@ func (r *PostgresRepository) ListUnmatched(ctx context.Context, p Principal, s S
 		if e != nil {
 			return e
 		}
-		defer rows.Close()
 		for rows.Next() {
 			var v UnmatchedRow
 			if e := rows.Scan(&v.ID, &v.EventID, &v.Classification, &v.Status, &v.Severity, &v.AssignedOperatorID, &v.Version, &v.CreatedAt); e != nil {
+				rows.Close()
 				return e
 			}
+			page.Items = append(page.Items, v)
+		}
+		if e := rows.Err(); e != nil {
+			rows.Close()
+			return e
+		}
+		rows.Close()
+		trimPage(&page.Items, &page.NextCursor, limit, func(v UnmatchedRow) string { return v.ID })
+		for i := range page.Items {
+			v := &page.Items[i]
 			candidateSQL := `SELECT mc.id::text,mc.route_id::text,mc.rank,mc.score,mc.evidence,cardinality(mc.disqualifiers)>0 FROM match_candidates mc`
 			candidateArgs := []any{v.ID}
 			if s.MerchantID != "" {
@@ -715,10 +725,8 @@ func (r *PostgresRepository) ListUnmatched(ctx context.Context, p Principal, s S
 				return e
 			}
 			crows.Close()
-			page.Items = append(page.Items, v)
 		}
-		trimPage(&page.Items, &page.NextCursor, limit, func(v UnmatchedRow) string { return v.ID })
-		return rows.Err()
+		return nil
 	})
 	return page, classifyAdminDB(err)
 }

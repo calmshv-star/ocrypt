@@ -546,6 +546,7 @@ export const en = {
   "admin.noScopeBody": "Your account has no tenant or merchant scope assigned.",
   "admin.dataLoading": "Loading authorized data…",
   "admin.dataError": "Authorized data could not be loaded.",
+  "admin.dataErrorBody": "Try again. No operational data will be changed.",
   "admin.emptyTitle": "No records",
   "admin.emptyBody": "There are no records in the selected authorized scope.",
   "admin.permissionTitle": "Permission required",

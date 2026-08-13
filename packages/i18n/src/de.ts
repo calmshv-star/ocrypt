@@ -548,6 +548,7 @@ export const de = {
   "admin.noScopeBody": "Ihrem Konto ist kein Mandanten- oder Händlerbereich zugewiesen.",
   "admin.dataLoading": "Autorisierte Daten werden geladen…",
   "admin.dataError": "Die autorisierten Daten konnten nicht geladen werden.",
+  "admin.dataErrorBody": "Versuchen Sie es erneut. Betriebsdaten werden dabei nicht geändert.",
   "admin.emptyTitle": "Keine Einträge",
   "admin.emptyBody": "Im ausgewählten autorisierten Bereich sind keine Einträge vorhanden.",
   "admin.permissionTitle": "Berechtigung erforderlich",
