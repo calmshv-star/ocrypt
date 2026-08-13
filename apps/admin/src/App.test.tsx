@@ -272,12 +272,13 @@ describe("admin application", () => {
     const hideUnmatched = vi.fn().mockResolvedValue({ id:caseId, status:"ignored", version:5 });
     const liveClient = client({
       unmatched: vi.fn().mockResolvedValue({ items: [{
-        id:caseId,event_id:"20000000-0000-4000-8000-000000000013",classification:"ambiguous",status:"candidates_ready",severity:"low",version:4,created_at:new Date().toISOString(),chain_id:"tron",transaction_id:"abcdef",asset_symbol:"USDT",asset_decimals:6,amount_atomic:"6028000",on_chain_time:new Date().toISOString(),
+        id:caseId,event_id:"20000000-0000-4000-8000-000000000013",classification:"ambiguous",status:"candidates_ready",severity:"low",version:4,created_at:new Date().toISOString(),chain_id:"tron",transaction_id:"abcdef",asset_symbol:"USDT",asset_decimals:6,amount_atomic:"1",on_chain_time:new Date().toISOString(),
         candidates:[{id:"20000000-0000-4000-8000-000000000014",route_id:routeId,rank:1,score:80,evidence:{},disqualified:false,merchant_order_id:"ORDER-2042",expected_display:"6.028",expected_atomic:"6028000",asset_symbol:"USDT",order_amount_minor:"49900",order_currency:"RUB",order_currency_scale:2,order_created_at:new Date().toISOString()}]
       }] }),
       hideUnmatched
     });
     renderApp("/unmatched", { client:liveClient, preview:false });
+    expect((await screen.findAllByText("< 0.01 RUB")).length).toBeGreaterThan(0);
     fireEvent.click(await screen.findByRole("button", { name:"Hide from list" }));
     await waitFor(() => expect(hideUnmatched).toHaveBeenCalledWith({tenantId,merchantId},caseId,expect.objectContaining({version:4,reason:"Hidden by operator without order attribution",idempotency_key:expect.stringMatching(/.{8,}/)})));
   });

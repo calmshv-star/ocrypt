@@ -266,6 +266,7 @@ function approximateUnmatchedMoney(item:UnmatchedRow, locale:string) {
     const orderMinor = BigInt(candidate.order_amount_minor);
     if (expected <= 0n || received < 0n || orderMinor <= 0n) return "";
     const approximateMinor = (received * orderMinor + expected / 2n) / expected;
+    if (received > 0n && approximateMinor === 0n) return `< ${formatOverviewMoney("1", candidate.order_currency_scale, candidate.order_currency, locale)}`;
     return `≈ ${formatOverviewMoney(approximateMinor.toString(), candidate.order_currency_scale, candidate.order_currency, locale)}`;
   } catch {
     return "";
