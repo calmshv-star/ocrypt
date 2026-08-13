@@ -46,4 +46,25 @@ func TestUnmanagedAPIClientStatusUsesCredentialValidity(t *testing.T) {
 	}
 }
 
+func TestPaginatedManagementQueriesDoNotCastEmptyUUIDCursors(t *testing.T) {
+	for _, path := range []string{
+		"postgres_links_checkout.go",
+		"postgres_webhooks.go",
+		"postgres_clients_audit.go",
+		"postgres_actions.go",
+	} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := string(raw)
+		if strings.Contains(source, "id<$") {
+			t.Fatalf("%s casts an empty cursor directly to uuid", path)
+		}
+		if !strings.Contains(source, "id<NULLIF($") {
+			t.Fatalf("%s lost its NULL-safe UUID cursor predicate", path)
+		}
+	}
+}
+
 func timePointer(value time.Time) *time.Time { return &value }

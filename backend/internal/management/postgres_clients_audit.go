@@ -73,7 +73,7 @@ SELECT id::text,managed FROM (
        SELECT 1 FROM management_api_client_versions v
         WHERE v.tenant_id=a.tenant_id AND v.api_client_id=a.id)
 ) inventory
-WHERE ($3='' OR id<$3::uuid)
+WHERE ($3='' OR id<NULLIF($3,'')::uuid)
 ORDER BY id DESC
 LIMIT $4`, p.TenantID, p.MerchantID, cursor, limit+1)
 		if e != nil {
@@ -288,7 +288,7 @@ func unmanagedAPIKeyStatus(validFrom time.Time, validUntil, revokedAt *time.Time
 
 func (s *PostgresRepository) ListAudit(ctx context.Context, p Principal, cursor string, limit int) (page Page[AuditEvent], err error) {
 	err = s.withinTenant(ctx, p.TenantID, func(tx pgx.Tx) error {
-		rows, e := tx.Query(ctx, `SELECT id::text,sequence,actor_id::text,COALESCE(session_id,''),action,resource_type,resource_id::text,COALESCE(reason,''),details,encode(previous_hash,'hex'),encode(entry_hash,'hex'),occurred_at FROM management_audit_log WHERE tenant_id=$1 AND merchant_id=$2 AND ($3='' OR id<$3::uuid) ORDER BY id DESC LIMIT $4`, p.TenantID, p.MerchantID, cursor, limit+1)
+		rows, e := tx.Query(ctx, `SELECT id::text,sequence,actor_id::text,COALESCE(session_id,''),action,resource_type,resource_id::text,COALESCE(reason,''),details,encode(previous_hash,'hex'),encode(entry_hash,'hex'),occurred_at FROM management_audit_log WHERE tenant_id=$1 AND merchant_id=$2 AND ($3='' OR id<NULLIF($3,'')::uuid) ORDER BY id DESC LIMIT $4`, p.TenantID, p.MerchantID, cursor, limit+1)
 		if e != nil {
 			return e
 		}
