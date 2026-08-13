@@ -72,7 +72,7 @@ func (s *PostgresRepository) GetManagementAction(ctx context.Context, p Principa
 
 func (s *PostgresRepository) ListManagementActions(ctx context.Context, p Principal, operation, cursor string, limit int) (result Page[ManagementActionRequest], err error) {
 	err = s.withinTenant(ctx, p.TenantID, func(tx pgx.Tx) error {
-		rows, e := tx.Query(ctx, `SELECT `+managementActionColumns+` FROM management_action_requests WHERE merchant_id=$1 AND operation=$2 AND ($3='' OR id<$3::uuid) ORDER BY id DESC LIMIT $4`, p.MerchantID, operation, cursor, limit+1)
+		rows, e := tx.Query(ctx, `SELECT `+managementActionColumns+` FROM management_action_requests WHERE merchant_id=$1 AND operation=$2 AND ($3='' OR id<NULLIF($3,'')::uuid) ORDER BY id DESC LIMIT $4`, p.MerchantID, operation, cursor, limit+1)
 		if e != nil {
 			return e
 		}

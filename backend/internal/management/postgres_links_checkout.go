@@ -53,7 +53,7 @@ func (s *PostgresRepository) GetPaymentLink(ctx context.Context, p Principal, id
 
 func (s *PostgresRepository) ListPaymentLinks(ctx context.Context, p Principal, cursor string, limit int) (page Page[PaymentLink], err error) {
 	err = s.withinTenant(ctx, p.TenantID, func(tx pgx.Tx) error {
-		rows, e := tx.Query(ctx, `SELECT id::text FROM payment_links WHERE tenant_id=$1 AND merchant_id=$2 AND ($3='' OR id<$3::uuid) ORDER BY id DESC LIMIT $4`, p.TenantID, p.MerchantID, cursor, limit+1)
+		rows, e := tx.Query(ctx, `SELECT id::text FROM payment_links WHERE tenant_id=$1 AND merchant_id=$2 AND ($3='' OR id<NULLIF($3,'')::uuid) ORDER BY id DESC LIMIT $4`, p.TenantID, p.MerchantID, cursor, limit+1)
 		if e != nil {
 			return e
 		}

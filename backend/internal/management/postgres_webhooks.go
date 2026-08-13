@@ -64,7 +64,7 @@ func (s *PostgresRepository) GetWebhookEndpoint(ctx context.Context, p Principal
 }
 func (s *PostgresRepository) ListWebhookEndpoints(ctx context.Context, p Principal, cursor string, limit int) (page Page[WebhookEndpoint], err error) {
 	err = s.withinTenant(ctx, p.TenantID, func(tx pgx.Tx) error {
-		rows, e := tx.Query(ctx, `SELECT id::text FROM webhook_endpoints WHERE tenant_id=$1 AND merchant_id=$2 AND ($3='' OR id<$3::uuid) ORDER BY id DESC LIMIT $4`, p.TenantID, p.MerchantID, cursor, limit+1)
+		rows, e := tx.Query(ctx, `SELECT id::text FROM webhook_endpoints WHERE tenant_id=$1 AND merchant_id=$2 AND ($3='' OR id<NULLIF($3,'')::uuid) ORDER BY id DESC LIMIT $4`, p.TenantID, p.MerchantID, cursor, limit+1)
 		if e != nil {
 			return e
 		}
@@ -278,7 +278,7 @@ func (s *PostgresRepository) DisableWebhookEndpoint(ctx context.Context, p Princ
 
 func (s *PostgresRepository) ListWebhookDeliveries(ctx context.Context, p Principal, endpointID, cursor string, limit int) (page Page[WebhookDelivery], err error) {
 	err = s.withinTenant(ctx, p.TenantID, func(tx pgx.Tx) error {
-		rows, e := tx.Query(ctx, `SELECT d.id::text,e.id::text,e.event_type,d.status::text,d.attempt_count,d.last_http_status,COALESCE(d.last_error_category,''),COALESCE(left(a.response_snippet,512),''),d.next_attempt_at,d.acknowledged_at,d.created_at,d.updated_at,d.version FROM callback_deliveries d JOIN callback_events e ON e.id=d.callback_event_id AND e.tenant_id=d.tenant_id JOIN webhook_endpoints w ON w.id=d.endpoint_id AND w.tenant_id=d.tenant_id LEFT JOIN LATERAL(SELECT response_snippet FROM callback_attempts WHERE delivery_id=d.id AND tenant_id=d.tenant_id ORDER BY attempt_number DESC LIMIT 1)a ON true WHERE d.endpoint_id=$1 AND d.tenant_id=$2 AND w.merchant_id=$3 AND ($4='' OR d.id<$4::uuid) ORDER BY d.id DESC LIMIT $5`, endpointID, p.TenantID, p.MerchantID, cursor, limit+1)
+		rows, e := tx.Query(ctx, `SELECT d.id::text,e.id::text,e.event_type,d.status::text,d.attempt_count,d.last_http_status,COALESCE(d.last_error_category,''),COALESCE(left(a.response_snippet,512),''),d.next_attempt_at,d.acknowledged_at,d.created_at,d.updated_at,d.version FROM callback_deliveries d JOIN callback_events e ON e.id=d.callback_event_id AND e.tenant_id=d.tenant_id JOIN webhook_endpoints w ON w.id=d.endpoint_id AND w.tenant_id=d.tenant_id LEFT JOIN LATERAL(SELECT response_snippet FROM callback_attempts WHERE delivery_id=d.id AND tenant_id=d.tenant_id ORDER BY attempt_number DESC LIMIT 1)a ON true WHERE d.endpoint_id=$1 AND d.tenant_id=$2 AND w.merchant_id=$3 AND ($4='' OR d.id<NULLIF($4,'')::uuid) ORDER BY d.id DESC LIMIT $5`, endpointID, p.TenantID, p.MerchantID, cursor, limit+1)
 		if e != nil {
 			return e
 		}
