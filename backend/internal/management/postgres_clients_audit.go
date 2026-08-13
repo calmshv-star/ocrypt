@@ -62,11 +62,11 @@ func (s *PostgresRepository) ListAPIClients(ctx context.Context, p Principal, cu
 		// the same credential twice.
 		rows, e := tx.Query(ctx, `
 SELECT id::text,managed FROM (
-  SELECT c.id,true AS managed
+  SELECT c.id AS id,true AS managed
     FROM management_api_clients c
    WHERE c.tenant_id=$1 AND c.merchant_id=$2
   UNION ALL
-  SELECT a.id,false AS managed
+  SELECT a.id AS id,false AS managed
     FROM api_clients a
    WHERE a.tenant_id=$1 AND a.merchant_id=$2
      AND NOT EXISTS(
