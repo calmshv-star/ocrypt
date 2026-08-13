@@ -791,7 +791,7 @@ func (r *PostgresRepository) FinancialSettings(ctx context.Context, p Principal,
 		return result, ErrForbidden
 	}
 	err = r.withinScope(ctx, p, s, pgx.ReadOnly, func(tx pgx.Tx) error {
-		rows, queryErr := tx.Query(ctx, `SELECT merchant_currency,route_currency,chain_id,asset_id,asset_symbol,asset_status,chain_status,route_status,wallet_count,active_wallet_count,address_count,available_address_count,assigned_address_count,quarantined_address_count FROM admin_financial_settings_inventory($1,$2)`, s.TenantID, s.MerchantID)
+		rows, queryErr := tx.Query(ctx, `SELECT merchant_currency,route_currency,chain_id,asset_id,asset_symbol,asset_status,chain_status,route_status,wallet_count,active_wallet_count,address_count,usable_address_count,assigned_address_count,quarantined_address_count FROM admin_financial_settings_inventory($1,$2)`, s.TenantID, s.MerchantID)
 		if queryErr != nil {
 			return queryErr
 		}
@@ -799,7 +799,7 @@ func (r *PostgresRepository) FinancialSettings(ctx context.Context, p Principal,
 		currencies := map[string]struct{}{}
 		for rows.Next() {
 			var route FinancialSettingsRoute
-			if scanErr := rows.Scan(&result.SettlementCurrency, &route.Currency, &route.ChainID, &route.AssetID, &route.AssetSymbol, &route.AssetStatus, &route.ChainStatus, &route.RouteStatus, &route.WalletCount, &route.ActiveWalletCount, &route.AddressCount, &route.AvailableAddressCount, &route.AssignedAddressCount, &route.QuarantinedAddressCount); scanErr != nil {
+			if scanErr := rows.Scan(&result.SettlementCurrency, &route.Currency, &route.ChainID, &route.AssetID, &route.AssetSymbol, &route.AssetStatus, &route.ChainStatus, &route.RouteStatus, &route.WalletCount, &route.ActiveWalletCount, &route.AddressCount, &route.UsableAddressCount, &route.AssignedAddressCount, &route.QuarantinedAddressCount); scanErr != nil {
 				return scanErr
 			}
 			currencies[route.Currency] = struct{}{}

@@ -298,7 +298,7 @@ type FinancialSettingsRoute struct {
 	WalletCount             int64  `json:"wallet_count"`
 	ActiveWalletCount       int64  `json:"active_wallet_count"`
 	AddressCount            int64  `json:"address_count"`
-	AvailableAddressCount   int64  `json:"available_address_count"`
+	UsableAddressCount      int64  `json:"usable_address_count"`
 	AssignedAddressCount    int64  `json:"assigned_address_count"`
 	QuarantinedAddressCount int64  `json:"quarantined_address_count"`
 }
