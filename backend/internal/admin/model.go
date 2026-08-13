@@ -249,12 +249,16 @@ type TransferRow struct {
 }
 
 type CandidateRow struct {
-	ID           string          `json:"id"`
-	RouteID      string          `json:"route_id"`
-	Rank         int             `json:"rank"`
-	Score        int             `json:"score"`
-	Evidence     json.RawMessage `json:"evidence"`
-	Disqualified bool            `json:"disqualified"`
+	ID              string          `json:"id"`
+	RouteID         string          `json:"route_id"`
+	Rank            int             `json:"rank"`
+	Score           int             `json:"score"`
+	Evidence        json.RawMessage `json:"evidence"`
+	Disqualified    bool            `json:"disqualified"`
+	MerchantOrderID string          `json:"merchant_order_id"`
+	ExpectedDisplay string          `json:"expected_display"`
+	AssetSymbol     string          `json:"asset_symbol"`
+	OrderCreatedAt  time.Time       `json:"order_created_at"`
 }
 
 type UnmatchedRow struct {
@@ -266,6 +270,12 @@ type UnmatchedRow struct {
 	AssignedOperatorID string         `json:"assigned_operator_id,omitempty"`
 	Version            int64          `json:"version"`
 	CreatedAt          time.Time      `json:"created_at"`
+	ChainID            string         `json:"chain_id"`
+	TransactionID      string         `json:"transaction_id"`
+	AssetSymbol        string         `json:"asset_symbol"`
+	AssetDecimals      int16          `json:"asset_decimals"`
+	AmountAtomic       string         `json:"amount_atomic"`
+	OnChainTime        time.Time      `json:"on_chain_time"`
 	Candidates         []CandidateRow `json:"candidates"`
 }
 
