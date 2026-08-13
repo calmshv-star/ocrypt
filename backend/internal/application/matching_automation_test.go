@@ -75,6 +75,84 @@ func TestAutomatedMatchingFivePercentShortfallAndUnboundedOverpaymentPolicy(t *t
 	}
 }
 
+func TestAutomatedMatchingPolicyIsIdenticalAcrossConfiguredAssets(t *testing.T) {
+	configuredAssets := []struct {
+		chainID string
+		assetID string
+	}{
+		{chainID: "eip155:1", assetID: "eth-ethereum"},
+		{chainID: "eip155:1", assetID: "usdc-ethereum"},
+		{chainID: "eip155:1", assetID: "usdt-ethereum"},
+		{chainID: "solana:mainnet", assetID: "sol-solana"},
+		{chainID: "solana:mainnet", assetID: "usdc-solana"},
+		{chainID: "solana:mainnet", assetID: "usdt-solana"},
+		{chainID: "ton:mainnet", assetID: "ton-ton"},
+		{chainID: "ton:mainnet", assetID: "usdt-ton"},
+		{chainID: "tron:mainnet", assetID: "trx-tron"},
+		{chainID: "tron:mainnet", assetID: "usdt-tron"},
+		{chainID: "eip155:8453", assetID: "eth-base"},
+		{chainID: "eip155:8453", assetID: "usdc-base"},
+		{chainID: "eip155:42161", assetID: "eth-arbitrum"},
+		{chainID: "eip155:42161", assetID: "usdc-arbitrum"},
+		{chainID: "eip155:10", assetID: "eth-optimism"},
+		{chainID: "eip155:10", assetID: "usdc-optimism"},
+		{chainID: "eip155:43114", assetID: "avax-avalanche"},
+		{chainID: "eip155:43114", assetID: "usdc-avalanche"},
+		{chainID: "eip155:137", assetID: "pol-polygon"},
+		{chainID: "eip155:137", assetID: "usdc-polygon"},
+		{chainID: "eip155:56", assetID: "bnb-bsc"},
+	}
+
+	paidAt := time.Date(2026, 8, 14, 1, 0, 0, 0, time.UTC)
+	policy := automatedPolicy()
+	policy.UnderpaymentToleranceBPS = 500
+	policy.OverpaymentMode = OverpaymentCreditExpected
+
+	for _, configured := range configuredAssets {
+		t.Run(configured.assetID, func(t *testing.T) {
+			current := automatedRoute(paidAt)
+			current.ID = "current-route"
+			current.IntentID = "current-intent"
+			current.ChainID = configured.chainID
+			current.AssetID = configured.assetID
+			current.ExpectedAmount = money.MustParse("100000000")
+			current.StartsAt = paidAt.Add(-5 * time.Minute)
+			current.ExpiresAt = paidAt.Add(25 * time.Minute)
+			current.GraceEndsAt = paidAt.Add(24 * time.Hour)
+
+			old := current
+			old.ID = "old-route"
+			old.IntentID = "old-intent"
+			old.Status = domain.RouteExpired
+			old.StartsAt = paidAt.Add(-8 * time.Hour)
+			old.ExpiresAt = paidAt.Add(-7 * time.Hour)
+			old.GraceEndsAt = paidAt.Add(time.Hour)
+
+			underpaid := automatedEvent("underpaid", "95000000", paidAt)
+			underpaid.Identity.ChainID = configured.chainID
+			underpaid.Identity.AssetID = configured.assetID
+
+			candidates := BuildCandidates(underpaid, []domain.PaymentRoute{old, current}, paidAt)
+			if len(candidates) != 2 || candidates[0].RouteID != current.ID || candidates[0].Class != ExceptionPartial || candidates[0].Score <= candidates[1].Score {
+				t.Fatalf("current address lease was not preferred: %#v", candidates)
+			}
+
+			shortfall, err := EvaluateAutomatedMatch(current, []domain.TransferEvent{underpaid}, paidAt, policy)
+			if err != nil || shortfall.Outcome != AutomatedSettle || shortfall.Class != ExceptionUnderpaid || shortfall.Received.String() != "95000000" || shortfall.Credited.String() != "95000000" {
+				t.Fatalf("five-percent shortfall was not settled: %#v %v", shortfall, err)
+			}
+
+			overpaid := automatedEvent("overpaid", "1000000000000", paidAt)
+			overpaid.Identity.ChainID = configured.chainID
+			overpaid.Identity.AssetID = configured.assetID
+			excess, err := EvaluateAutomatedMatch(current, []domain.TransferEvent{overpaid}, paidAt, policy)
+			if err != nil || excess.Outcome != AutomatedSettle || excess.Class != ExceptionOverpaid || excess.Received.String() != "1000000000000" || excess.Credited.String() != "100000000" {
+				t.Fatalf("unbounded overpayment was not settled safely: %#v %v", excess, err)
+			}
+		})
+	}
+}
+
 func TestAutomatedMatchingDeduplicatesIdenticalIdentityAndRejectsConflictingFacts(t *testing.T) {
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	route, policy := automatedRoute(now), automatedPolicy()
