@@ -26,7 +26,7 @@ function date(value:string,locale:string){return new Intl.DateTimeFormat(locale,
 function State({loading,error,empty}:{loading:boolean;error:unknown;empty:boolean}){
   const{t}=useI18n();
   if(loading)return <div aria-busy="true" className="admin-live-state" role="status"><strong>{t("admin.dataLoading")}</strong></div>;
-  if(error)return <div className="admin-live-state" role="alert"><strong>{t("admin.dataError")}</strong><p>{t("admin.sessionErrorBody")}</p></div>;
+  if(error)return <div className="admin-live-state" role="alert"><strong>{t("admin.dataError")}</strong><p>{t("admin.dataErrorBody")}</p></div>;
   if(empty)return <div className="admin-live-state" role="status"><strong>{t("admin.emptyTitle")}</strong><p>{t("admin.emptyBody")}</p></div>;
   return null;
 }

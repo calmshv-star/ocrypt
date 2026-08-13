@@ -185,7 +185,7 @@ function AdminApplication() {
     user={{ name: userName, email: userEmail, initials }}
     workspace={admin.scopes.length > 1 ? <WorkspaceSwitcher detail={scopeDetail} icon={<ShieldCheck size={15} />} label={t("admin.switchScope")} name={scopeName} onClick={nextScope} /> : <div className="admin-current-workspace"><ShieldCheck size={15} /><span><strong>{scopeName}</strong><small>{scopeDetail}</small></span></div>}
   >
-    <RouteErrorBoundary key={location.pathname} fallback={<div className="admin-live-state" role="alert"><strong>{t("admin.dataError")}</strong><p>{t("admin.sessionErrorBody")}</p><Button onClick={()=>window.location.reload()}>{t("common.retry")}</Button></div>}>
+    <RouteErrorBoundary key={location.pathname} fallback={<div className="admin-live-state" role="alert"><strong>{t("admin.dataError")}</strong><p>{t("admin.dataErrorBody")}</p><Button onClick={()=>window.location.reload()}>{t("common.retry")}</Button></div>}>
       <Suspense fallback={<div aria-busy="true" className="admin-route-loading"><span /><span /><span /></div>}>{admin.preview ? <PreviewRoutes /> : <ProductionRoutes />}</Suspense>
     </RouteErrorBoundary>
   </AppShell>;

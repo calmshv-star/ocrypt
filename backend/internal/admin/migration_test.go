@@ -110,6 +110,29 @@ func TestTransferRowsExposeHumanAmountMetadata(t *testing.T) {
 	}
 }
 
+func TestUnmatchedListDrainsPageBeforeCandidateQueries(t *testing.T) {
+	raw, err := os.ReadFile("postgres.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	start := strings.Index(source, "func (r *PostgresRepository) ListUnmatched")
+	if start < 0 {
+		t.Fatal("ListUnmatched not found")
+	}
+	tail := source[start:]
+	end := strings.Index(tail, "func (r *PostgresRepository) ListWebhooks")
+	if end < 0 {
+		t.Fatal("ListWebhooks not found")
+	}
+	method := tail[:end]
+	drain := strings.Index(method, "rows.Close()\n\t\ttrimPage")
+	candidates := strings.Index(method, "candidateSQL :=")
+	if drain < 0 || candidates < 0 || drain > candidates {
+		t.Fatal("unmatched page rows must be drained and closed before candidate queries")
+	}
+}
+
 func TestManualResolutionBridgePersistsAndRechecksCandidateVersion(t *testing.T) {
 	raw, err := os.ReadFile("postgres.go")
 	if err != nil {

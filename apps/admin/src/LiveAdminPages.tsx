@@ -73,7 +73,7 @@ function StatePanel({ state, retry }: { state: "loading" | "error" | "empty" | "
   const copy = state === "loading"
     ? ["admin.dataLoading", "admin.dataLoading"]
     : state === "error"
-      ? ["admin.dataError", "admin.sessionErrorBody"]
+      ? ["admin.dataError", "admin.dataErrorBody"]
       : state === "forbidden"
         ? ["admin.permissionTitle", "admin.permissionBody"]
         : ["admin.emptyTitle", "admin.emptyBody"];

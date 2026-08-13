@@ -548,6 +548,7 @@ export const fr = {
   "admin.noScopeBody": "Aucun périmètre de tenant ou de marchand n’est attribué à votre compte.",
   "admin.dataLoading": "Chargement des données autorisées…",
   "admin.dataError": "Les données autorisées n’ont pas pu être chargées.",
+  "admin.dataErrorBody": "Réessayez. Aucune donnée opérationnelle ne sera modifiée.",
   "admin.emptyTitle": "Aucun enregistrement",
   "admin.emptyBody": "Le périmètre autorisé sélectionné ne contient aucun enregistrement.",
   "admin.permissionTitle": "Autorisation requise",

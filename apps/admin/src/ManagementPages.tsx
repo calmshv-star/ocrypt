@@ -54,7 +54,7 @@ function State({ busy, error, empty, permission }: { busy:boolean;error:unknown;
   const { t } = useI18n();
   if (!permission) return <div className="admin-live-state" role="status"><strong>{t("admin.permissionTitle")}</strong><p>{t("admin.permissionBody")}</p></div>;
   if (busy) return <div aria-busy="true" className="admin-live-state" role="status"><strong>{t("admin.dataLoading")}</strong></div>;
-  if (error) return <div className="admin-live-state" role="alert"><strong>{t("admin.dataError")}</strong><p>{t("admin.sessionErrorBody")}</p></div>;
+  if (error) return <div className="admin-live-state" role="alert"><strong>{t("admin.dataError")}</strong><p>{t("admin.dataErrorBody")}</p></div>;
   if (empty) return <div className="admin-live-state" role="status"><strong>{t("admin.emptyTitle")}</strong><p>{t("admin.emptyBody")}</p></div>;
   return null;
 }
