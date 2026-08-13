@@ -46,7 +46,7 @@ func (service Service) processEvent(ctx context.Context, source EventSource, eve
 	if err := json.Unmarshal(event.Payload, &payload); err != nil || payload.EventID != event.EventID || payload.Sequence != event.Sequence {
 		return service.Repository.ClassifyEvent(ctx, source.ConfigID, event.Sequence, event.EventID, "invalid_payload", service.now())
 	}
-	if event.EventType != "payment.settled" || payload.EventType != "payment.settled" || payload.Settlement == nil {
+	if !legacyPaidEvent(event.EventType, payload.EventType) || payload.Settlement == nil {
 		return service.Repository.ClassifyEvent(ctx, source.ConfigID, event.Sequence, event.EventID, "no_legacy_callback", service.now())
 	}
 	mapping, err := service.Repository.LookupMappingByIntent(ctx, source.ConfigID, payload.PaymentIntent.ID)
@@ -68,7 +68,7 @@ func (service Service) processEvent(ctx context.Context, source EventSource, eve
 			break
 		}
 	}
-	if route.ID == "" || intent.Status != "settled" {
+	if route.ID == "" || !legacyPaidState(event.EventType, intent.Status) {
 		return service.Repository.ClassifyEvent(ctx, source.ConfigID, event.Sequence, event.EventID, "state_mismatch", service.now())
 	}
 	secret, err := service.Secrets.Read(credential.LegacySecretRef)
@@ -83,7 +83,7 @@ func (service Service) processEvent(ctx context.Context, source EventSource, eve
 }
 
 func FreezeCallback(mapping Mapping, credential Credential, route CoreRoute, event webhook.Event, secret []byte) (FrozenCallback, error) {
-	if event.Settlement == nil || event.EventType != "payment.settled" || mapping.NotifyURL == "" {
+	if event.Settlement == nil || (event.EventType != "payment.settled" && event.EventType != "payment.overpaid") || mapping.NotifyURL == "" {
 		return FrozenCallback{}, ErrInvalid
 	}
 	if mapping.Protocol == ProtocolFormMD5 {
@@ -128,6 +128,14 @@ func FreezeCallback(mapping Mapping, credential Credential, route CoreRoute, eve
 		return FrozenCallback{}, err
 	}
 	return FrozenCallback{HTTPMethod: http.MethodPost, ContentType: "application/json", TargetURL: mapping.NotifyURL, Body: body, CredentialVersionID: credential.CredentialVersionID, CallbackKeyID: credential.CallbackKeyID}, nil
+}
+
+func legacyPaidEvent(envelopeType, payloadType string) bool {
+	return envelopeType == payloadType && (payloadType == "payment.settled" || payloadType == "payment.overpaid")
+}
+
+func legacyPaidState(eventType, intentStatus string) bool {
+	return eventType == "payment.settled" && intentStatus == "settled" || eventType == "payment.overpaid" && intentStatus == "overpaid"
 }
 
 type CallbackSender struct {

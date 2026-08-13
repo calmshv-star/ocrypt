@@ -143,6 +143,16 @@ func TestFreezeJSONMD5CallbackGolden(t *testing.T) {
 	}
 }
 
+func TestFreezeLegacyOverpaymentAsSuccessfulImmutableCallback(t *testing.T) {
+	mapping := Mapping{Protocol: ProtocolJSONMD5, TradeID: "AAAAAAAAAAAAAAAAAAAAAA", OrderID: "order-overpaid", Amount: "499.00", NotifyURL: "https://merchant.example/callback"}
+	credential := Credential{PID: "1000", LegacyToken: "ETH", CredentialVersionID: "cred", CallbackKeyID: "legacy-v1"}
+	event := webhook.Event{EventType: "payment.overpaid", Settlement: &webhook.Settlement{TransactionHash: "0xoverpaid"}}
+	frozen, err := FreezeCallback(mapping, credential, CoreRoute{DisplayAmount: "0.0031", Address: "0xmerchant"}, event, []byte("legacy-secret-0001"))
+	if err != nil || !strings.Contains(string(frozen.Body), `"status":2`) || !strings.Contains(string(frozen.Body), `"block_transaction_id":"0xoverpaid"`) {
+		t.Fatalf("overpayment was not frozen as a paid legacy callback: body=%s err=%v", frozen.Body, err)
+	}
+}
+
 func TestFreezeFormMD5CallbackPinsCredentialVersion(t *testing.T) {
 	mapping := Mapping{Protocol: ProtocolFormMD5, TradeID: "AAAAAAAAAAAAAAAAAAAAAA", OrderID: "order", Amount: "1", Name: "VIP", PaymentType: "usdt.tron", NotifyURL: "https://merchant.example/callback"}
 	credential := Credential{PID: "1000", CredentialVersionID: "cred-v1", CallbackKeyID: "legacy-v1"}

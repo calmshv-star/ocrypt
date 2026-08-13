@@ -1,6 +1,6 @@
 # JSON-MD5/Form-MD5 migration
 
-The legacy adapter is a temporary, disabled-by-default bridge. It creates ordinary core payment intents and routes, reads status from PostgreSQL-backed core APIs, and sends a legacy callback only after the canonical `payment.settled` event. It cannot mark an order paid or write the ledger.
+The legacy adapter is a temporary, disabled-by-default bridge. It creates ordinary core payment intents and routes, reads status from PostgreSQL-backed core APIs, and sends a legacy paid callback only after a canonical `payment.settled` or `payment.overpaid` event. It cannot mark an order paid or write the ledger.
 
 Apply migration `000018_legacy_compatibility` before requesting admission.
 

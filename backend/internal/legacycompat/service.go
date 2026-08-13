@@ -162,6 +162,11 @@ func LegacyStatus(status string) (int, bool) {
 		return 1, true
 	case "settled":
 		return 2, true
+	case "overpaid":
+		// A finalized overpayment is a successful legacy invoice. Ocrypt keeps
+		// the excess in its internal ledger while the unchanged merchant receives
+		// the same paid status it already understands.
+		return 2, true
 	case "expired", "cancelled":
 		return 3, true
 	default:

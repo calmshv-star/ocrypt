@@ -30,13 +30,13 @@ func TestDirectPeerAndDecimalSafety(t *testing.T) {
 }
 
 func TestLegacyStatusFailsClosed(t *testing.T) {
-	for status, want := range map[string]int{"pending": 1, "settled": 2, "expired": 3, "cancelled": 3} {
+	for status, want := range map[string]int{"pending": 1, "settled": 2, "overpaid": 2, "expired": 3, "cancelled": 3} {
 		got, ok := LegacyStatus(status)
 		if !ok || got != want {
 			t.Fatalf("%s=%d,%v", status, got, ok)
 		}
 	}
-	for _, status := range []string{"needs_review", "overpaid", "reorg_review", "reversed", "paid"} {
+	for _, status := range []string{"needs_review", "reorg_review", "reversed", "paid"} {
 		if _, ok := LegacyStatus(status); ok {
 			t.Fatalf("accepted %s", status)
 		}
