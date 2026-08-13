@@ -55,6 +55,41 @@ func TestAutomatedMatchingAcceptsConfiguredShortfallImmediatelyAndCollectsTheRes
 	}
 }
 
+func TestAutomatedMatchingFivePercentShortfallAndUnboundedOverpaymentPolicy(t *testing.T) {
+	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	route, policy := automatedRoute(now), automatedPolicy()
+	policy.UnderpaymentToleranceBPS = 500
+	policy.OverpaymentMode = OverpaymentCreditExpected
+
+	boundary, err := EvaluateAutomatedMatch(route, []domain.TransferEvent{automatedEvent("under-five", "95", now)}, now, policy)
+	if err != nil || boundary.Outcome != AutomatedSettle || boundary.Class != ExceptionUnderpaid || boundary.Credited.String() != "95" {
+		t.Fatalf("five-percent shortfall was not accepted: %#v %v", boundary, err)
+	}
+	outside, err := EvaluateAutomatedMatch(route, []domain.TransferEvent{automatedEvent("under-more", "94", now)}, now, policy)
+	if err != nil || outside.Outcome != AutomatedCollect || outside.Class != ExceptionPartial {
+		t.Fatalf("shortfall above five percent did not remain collectible: %#v %v", outside, err)
+	}
+	hugeOverpayment, err := EvaluateAutomatedMatch(route, []domain.TransferEvent{automatedEvent("over-unbounded", "1000000", now)}, now, policy)
+	if err != nil || hugeOverpayment.Outcome != AutomatedSettle || hugeOverpayment.Class != ExceptionOverpaid || hugeOverpayment.Received.String() != "1000000" || hugeOverpayment.Credited.String() != "100" {
+		t.Fatalf("unambiguous overpayment was not settled at the expected invoice value: %#v %v", hugeOverpayment, err)
+	}
+}
+
+func TestAutomatedMatchingDeduplicatesIdenticalIdentityAndRejectsConflictingFacts(t *testing.T) {
+	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	route, policy := automatedRoute(now), automatedPolicy()
+	event := automatedEvent("duplicate", "100", now)
+	decision, err := EvaluateAutomatedMatch(route, []domain.TransferEvent{event, event}, now, policy)
+	if err != nil || decision.Outcome != AutomatedSettle || decision.Received.String() != "100" || len(decision.Allocations) != 1 {
+		t.Fatalf("identical transfer identity was double-counted: %#v %v", decision, err)
+	}
+	conflict := event
+	conflict.Amount = money.MustParse("101")
+	if _, err := EvaluateAutomatedMatch(route, []domain.TransferEvent{event, conflict}, now, policy); !errors.Is(err, domain.ErrInvariantViolation) {
+		t.Fatalf("conflicting duplicate identity did not fail closed: %v", err)
+	}
+}
+
 func TestAutomatedMatchingUnderOverAndLateAreVersionedFailClosed(t *testing.T) {
 	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
 	route, policy := automatedRoute(now), automatedPolicy()

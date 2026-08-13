@@ -23,6 +23,13 @@ const fixtureRoutes: Route[] = [
 ];
 const explorerBases: Record<string, string> = {
   "tron:mainnet": "https://tronscan.org/#/transaction/",
+  "eip155:1": "https://etherscan.io/tx/",
+  "eip155:8453": "https://basescan.org/tx/",
+  "eip155:42161": "https://arbiscan.io/tx/",
+  "eip155:10": "https://optimistic.etherscan.io/tx/",
+  "eip155:43114": "https://snowtrace.io/tx/",
+  "eip155:137": "https://polygonscan.com/tx/",
+  "eip155:56": "https://bscscan.com/tx/",
   "ethereum:mainnet": "https://etherscan.io/tx/",
   "solana:mainnet": "https://solscan.io/tx/",
   "bitcoin:mainnet": "https://mempool.space/tx/",

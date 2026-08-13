@@ -79,6 +79,28 @@ func (s *Store) IngestAndSettle(ctx context.Context, event domain.TransferEvent)
 				classification = "ambiguous_exact_routes"
 				result.Outcome = application.SettlementAmbiguous
 			}
+			dust := false
+			if len(candidates) == 0 {
+				dust, err = belowUnmatchedDustThreshold(ctx, tx, event)
+				if err != nil {
+					return err
+				}
+			}
+			if dust {
+				unmatchedID, err := ids.New()
+				if err != nil {
+					return err
+				}
+				_, err = tx.Exec(ctx, `INSERT INTO unmatched_payments
+(id,tenant_id,event_id,classification,status,workflow_version,severity,created_at,updated_at,version)
+VALUES($1,NULL,$2,'dust_below_asset_threshold','ignored',1,'low',clock_timestamp(),clock_timestamp(),1)
+ON CONFLICT(event_id) DO NOTHING`, unmatchedID, eventID)
+				if err != nil {
+					return err
+				}
+				result.Outcome = application.SettlementIgnored
+				return nil
+			}
 			potential, tenantID, potentialClassification, err := findPotentialCandidates(ctx, tx, event, s.now())
 			if err != nil {
 				return err
@@ -261,6 +283,21 @@ func (s *Store) IngestAndSettle(ctx context.Context, event domain.TransferEvent)
 		return nil
 	})
 	return result, err
+}
+
+// belowUnmatchedDustThreshold is evaluated only after exact settlement has
+// failed. A configured threshold therefore suppresses wallet fee rebates and
+// similar economic dust without ever hiding a valid exact payment route.
+func belowUnmatchedDustThreshold(ctx context.Context, tx pgx.Tx, event domain.TransferEvent) (bool, error) {
+	var thresholdText string
+	if err := tx.QueryRow(ctx, `SELECT dust_threshold::text FROM assets WHERE chain_id=$1 AND id=$2`, event.Identity.ChainID, event.Identity.AssetID).Scan(&thresholdText); err != nil {
+		return false, err
+	}
+	threshold, err := money.Parse(thresholdText)
+	if err != nil {
+		return false, err
+	}
+	return !threshold.IsZero() && event.Amount.Cmp(threshold) <= 0, nil
 }
 
 func insertCanonicalTransfer(ctx context.Context, tx pgx.Tx, event domain.TransferEvent) (bool, string, domain.TransferEvent, error) {

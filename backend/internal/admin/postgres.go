@@ -676,7 +676,7 @@ func (r *PostgresRepository) ListUnmatched(ctx context.Context, p Principal, s S
 		}
 		args = append(args, cursorArgs...)
 		args = append(args, limit+1)
-		rows, e := tx.Query(ctx, `SELECT u.id::text,u.event_id::text,u.classification,u.status::text,u.severity,coalesce(u.assigned_operator_id::text,''),u.version,u.created_at FROM unmatched_payments u WHERE true`+merchantFilter+clause+fmt.Sprintf(" ORDER BY u.id DESC LIMIT $%d", len(args)), args...)
+		rows, e := tx.Query(ctx, `SELECT u.id::text,u.event_id::text,u.classification,u.status::text,u.severity,coalesce(u.assigned_operator_id::text,''),u.version,u.created_at FROM unmatched_payments u WHERE u.status NOT IN ('resolved','ignored','invalid','reorged')`+merchantFilter+clause+fmt.Sprintf(" ORDER BY u.id DESC LIMIT $%d", len(args)), args...)
 		if e != nil {
 			return e
 		}

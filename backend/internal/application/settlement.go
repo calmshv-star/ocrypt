@@ -17,6 +17,7 @@ const (
 	SettlementSettled   SettlementOutcome = "settled"
 	SettlementUnmatched SettlementOutcome = "unmatched"
 	SettlementAmbiguous SettlementOutcome = "ambiguous"
+	SettlementIgnored   SettlementOutcome = "ignored"
 )
 
 type SettlementResult struct {

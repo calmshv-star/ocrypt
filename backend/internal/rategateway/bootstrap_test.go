@@ -14,6 +14,7 @@ func TestStandaloneBootstrapAdmitsCatalogButRuntimeTargetsOnlyRUB(t *testing.T) 
 	bootstrap := readFixture(t, filepath.Join(root, "deploy", "standalone", "bootstrap-rates.sql"))
 	compose := readFixture(t, filepath.Join(root, "deploy", "standalone", "compose.shadow.yaml"))
 	mainBootstrap := readFixture(t, filepath.Join(root, "deploy", "standalone", "bootstrap.sql"))
+	publicGateway := readFixture(t, filepath.Join(root, "deploy", "gateway", "nginx.conf"))
 
 	if !strings.Contains(mainBootstrap, `\ir bootstrap-rates.sql`) {
 		t.Fatal("standalone bootstrap does not automatically admit default rates")
@@ -57,6 +58,9 @@ func TestStandaloneBootstrapAdmitsCatalogButRuntimeTargetsOnlyRUB(t *testing.T) 
 		t.Fatalf("bootstrap assets %v do not match gateway %v", gotAssets, assetIDs)
 	}
 	for _, id := range assetIDs {
+		if !strings.Contains(publicGateway, id) {
+			t.Fatalf("public rate gateway does not admit catalog asset %s", id)
+		}
 		policy := `{"policy_key":"rate-` + id + `-rub"}`
 		if strings.Count(compose, policy) != 1 {
 			t.Fatalf("standalone RUB runtime target %s is missing or duplicated", policy)
