@@ -3,7 +3,7 @@ BEGIN;
 UPDATE assets
 SET dust_threshold=1000000,
     updated_at=clock_timestamp(),
-    version=version+1
+    version=u.version+1
 WHERE id='ton-ton'
   AND chain_id='ton:mainnet'
   AND dust_threshold=0;
