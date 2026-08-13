@@ -43,4 +43,14 @@ func TestReceiptEvidenceIsDigestOnlyImmutableAndQueuesIndependentProof(t *testin
 	if strings.Contains(string(repository), "FROM payment_receipt_evidence WHERE merchant_id=$1 AND idempotency_key=$2 FOR UPDATE") {
 		t.Fatal("immutable receipt evidence must be serialized by advisory lock, not mutable row privilege")
 	}
+	service, err := os.ReadFile("service.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(service), "FindReceiptTransferCandidate(ctx, target, amount.String()") {
+		t.Fatal("hashless receipt no longer discovers a canonical transfer from its visible amount")
+	}
+	if strings.Contains(string(service), "amount.String() == target.ExpectedAmount") {
+		t.Fatal("hashless receipt incorrectly rejects independently verified overpayments")
+	}
 }

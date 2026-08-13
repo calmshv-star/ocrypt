@@ -88,14 +88,13 @@ func (s *Service) SubmitReceipt(ctx context.Context, token, origin, mediaType st
 				occurredAt, _ = time.Parse(time.RFC3339Nano, analysis.OccurredAt)
 				window = 10 * time.Minute
 			}
-			// A screenshot is only a discovery hint. Do not let it redirect an
-			// intent to a different payment merely because the shared receiving
-			// address also saw that amount.
-			if amount.String() == target.ExpectedAmount {
-				candidate, err = s.repository.FindReceiptTransferCandidate(ctx, target, amount.String(), occurredAt.UTC(), window)
-				if err != nil {
-					return ReceiptSubmission{}, false, ErrDependency
-				}
+			// The visible amount is a discovery hint, including for overpayments.
+			// The repository still requires one independently ingested transfer
+			// on the route's exact chain, asset, address, and time window; the
+			// screenshot itself never supplies settlement evidence.
+			candidate, err = s.repository.FindReceiptTransferCandidate(ctx, target, amount.String(), occurredAt.UTC(), window)
+			if err != nil {
+				return ReceiptSubmission{}, false, ErrDependency
 			}
 		}
 	}
