@@ -159,8 +159,16 @@ func EvaluateAutomatedMatch(route domain.PaymentRoute, events []domain.TransferE
 		}
 		anyLate = anyLate || event.OnChainTime.After(route.ExpiresAt)
 		allocation := MatchAllocation{EventID: event.ID, Role: "payment", MatchKind: "partial", Received: event.Amount, Effective: event.Amount, Credited: event.Amount, TransactionID: event.Identity.TransactionID, EventIndex: event.Identity.EventIndex, Sender: event.FromAddress, OnChainTime: event.OnChainTime, BlockHeight: event.BlockHeight, BlockHash: event.BlockHash, ParserVersion: event.ParserVersion, EvidenceHash: event.EvidenceHash}
-		decision.Received, _ = decision.Received.Add(event.Amount)
-		decision.TreasuryReceived, _ = decision.TreasuryReceived.Add(event.Amount)
+		received, err := decision.Received.Add(event.Amount)
+		if err != nil {
+			return AutomatedMatchDecision{}, fmt.Errorf("%w: payment aggregate overflow", domain.ErrInvariantViolation)
+		}
+		treasuryReceived, err := decision.TreasuryReceived.Add(event.Amount)
+		if err != nil {
+			return AutomatedMatchDecision{}, fmt.Errorf("%w: treasury aggregate overflow", domain.ErrInvariantViolation)
+		}
+		decision.Received = received
+		decision.TreasuryReceived = treasuryReceived
 		if event.Kind == "gasfree_permit_transfer" {
 			fee, ok := correlateGasFreeFee(event, byTx[event.Identity.TransactionID], route, collectors, policy)
 			if !ok {
@@ -169,7 +177,11 @@ func EvaluateAutomatedMatch(route domain.PaymentRoute, events []domain.TransferE
 			}
 			used[fee.ID] = true
 			allocation.MatchKind = "gasfree_policy"
-			decision.GasFreeFees, _ = decision.GasFreeFees.Add(fee.Amount)
+			gasFreeFees, err := decision.GasFreeFees.Add(fee.Amount)
+			if err != nil {
+				return AutomatedMatchDecision{}, fmt.Errorf("%w: gas-free fee aggregate overflow", domain.ErrInvariantViolation)
+			}
+			decision.GasFreeFees = gasFreeFees
 			// The sibling fee proves the mechanism but is not money received by
 			// the merchant. It therefore contributes neither invoice value nor
 			// a merchant ledger leg.

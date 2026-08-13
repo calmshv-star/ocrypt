@@ -90,6 +90,19 @@ func TestAutomatedMatchingDeduplicatesIdenticalIdentityAndRejectsConflictingFact
 	}
 }
 
+func TestAutomatedMatchingRejectsAggregateOverflow(t *testing.T) {
+	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	route, policy := automatedRoute(now), automatedPolicy()
+	policy.OverpaymentMode = OverpaymentCreditExpected
+	const maxUint256 = "115792089237316195423570985008687907853269984665640564039457584007913129639935"
+
+	maximum := automatedEvent("maximum", maxUint256, now)
+	one := automatedEvent("overflow", "1", now.Add(time.Second))
+	if _, err := EvaluateAutomatedMatch(route, []domain.TransferEvent{maximum, one}, now.Add(time.Second), policy); !errors.Is(err, domain.ErrInvariantViolation) {
+		t.Fatalf("overflowing payment aggregate did not fail closed: %v", err)
+	}
+}
+
 func TestAutomatedMatchingUnderOverAndLateAreVersionedFailClosed(t *testing.T) {
 	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
 	route, policy := automatedRoute(now), automatedPolicy()
