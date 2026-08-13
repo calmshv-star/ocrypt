@@ -117,11 +117,13 @@
 .admin-unmatched-simple .admin-live-case-list { max-height: min(70vh, 760px); overflow-y: auto; scrollbar-gutter: stable; }
 .admin-unmatched-simple .admin-live-case-list button { min-height: 76px; align-content: center; padding: 13px 14px; }
 .admin-unmatched-simple .admin-live-case-list button strong { font-size: 13px; }
+.admin-unmatched-simple .admin-live-case-list .admin-unmatched-fiat { color: var(--mp-text); font-size: 10px; font-weight: 700; }
 .admin-unmatched-simple .admin-live-case-list time { color: var(--mp-muted); font-size: 9px; }
 .admin-unmatched-payment { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 18px; }
 .admin-unmatched-payment > div { display: grid; gap: 5px; border-radius: 10px; background: var(--mp-surface-soft); padding: 12px; }
 .admin-unmatched-payment span { color: var(--mp-muted); font-size: 9px; }
 .admin-unmatched-payment strong { color: var(--mp-text-strong); font-size: 12px; }
+.admin-unmatched-payment small { color: var(--mp-muted); font-size: 9px; font-weight: 700; }
 .admin-unmatched-orders label { min-height: 54px; align-items: center; border-bottom: 1px solid var(--mp-border); padding: 8px 4px; }
 .admin-unmatched-orders label:last-child { border-bottom: 0; }
 .admin-unmatched-orders label > span { display: grid; gap: 3px; }

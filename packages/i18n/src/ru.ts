@@ -291,6 +291,7 @@ export const ru = {
   "unmatched.ignoreReason": "Игнорировать с указанием причины",
   "unmatched.independentVerification": "Запросить независимую проверку",
   "unmatched.requestResolution": "Отправить на подтверждение",
+  "unmatched.hide": "Скрыть из списка",
   "webhooks.addEndpoint": "Добавить endpoint",
   "webhooks.signedEvents": "Подписанные канонические события",
   "webhooks.backlog": "Очередь",

@@ -46,8 +46,9 @@ export type Overview = {
 };
 export type IntentRow = { id:string;merchant_id:string;merchant_order_id:string;amount_minor:string;currency:string;currency_scale:number;status:string;created_at:string;expires_at:string };
 export type TransferRow = { id:string;chain_id:string;transaction_id:string;asset_id:string;asset_symbol:string;asset_decimals:number;amount_atomic:string;status:string;confirmations:number;observed_at:string };
-export type CandidateRow = { id:string;route_id:string;rank:number;score:number;evidence:unknown;disqualified:boolean;merchant_order_id:string;expected_display:string;asset_symbol:string;order_created_at:string };
+export type CandidateRow = { id:string;route_id:string;rank:number;score:number;evidence:unknown;disqualified:boolean;merchant_order_id:string;expected_display:string;expected_atomic:string;asset_symbol:string;order_amount_minor:string;order_currency:string;order_currency_scale:number;order_created_at:string };
 export type UnmatchedRow = { id:string;event_id:string;classification:string;status:string;severity:string;assigned_operator_id?:string;version:number;created_at:string;chain_id:string;transaction_id:string;asset_symbol:string;asset_decimals:number;amount_atomic:string;on_chain_time:string;candidates:CandidateRow[] };
+export type UnmatchedMutation = { id:string;status:"ignored";version:number };
 export type WebhookRow = { id:string;merchant_id:string;url:string;status:string;failure_count:number;last_success_at?:string };
 export type AssetRow = { asset_id:string;chain_id:string;symbol:string;status:string;required_confirmations:number;open_gaps:number };
 export type FinancialSettingsRoute = { currency:string;chain_id:string;asset_id:string;asset_symbol:string;asset_status:string;chain_status:string;route_status:string;wallet_count:number;active_wallet_count:number;address_count:number;usable_address_count:number;assigned_address_count:number;quarantined_address_count:number };

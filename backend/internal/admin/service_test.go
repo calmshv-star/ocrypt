@@ -118,6 +118,9 @@ func (r *repositoryStub) ClaimUnmatched(context.Context, Principal, Scope, strin
 func (r *repositoryStub) ReleaseUnmatched(context.Context, Principal, Scope, string, int64, string, string) (UnmatchedRow, error) {
 	return UnmatchedRow{}, nil
 }
+func (r *repositoryStub) HideUnmatched(context.Context, Principal, Scope, string, int64, string, string) (UnmatchedMutation, error) {
+	return UnmatchedMutation{Status: "ignored"}, nil
+}
 func (r *repositoryStub) CreateActionRequest(_ context.Context, _ Principal, _ Scope, a ActionRequest, _ string) (ActionRequest, error) {
 	r.action = a
 	return a, nil

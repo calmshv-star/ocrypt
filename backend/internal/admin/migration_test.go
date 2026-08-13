@@ -196,12 +196,28 @@ func TestUnmatchedListExposesOnlyUsefulPaymentAndOrderFacts(t *testing.T) {
 	for _, fragment := range []string{
 		"JOIN transfer_events e ON e.id=u.event_id",
 		"e.chain_id,e.transaction_id,a.symbol,e.asset_decimals,e.amount_atomic::text,e.on_chain_time",
-		"pi.merchant_order_id,pr.display_amount,a.symbol,pi.created_at",
+		"pi.merchant_order_id,pr.display_amount,pr.expected_amount_atomic::text,a.symbol,pi.amount_minor::text,pi.currency,pi.currency_scale,pi.created_at",
 		"JOIN payment_intents pi ON pi.id=pr.intent_id AND pi.tenant_id=pr.tenant_id",
 	} {
 		if !strings.Contains(source, fragment) {
 			t.Errorf("unmatched operator view is missing a useful fact: %q", fragment)
 		}
+	}
+}
+
+func TestHideUnmatchedPreservesEvidenceAndMerchantFence(t *testing.T) {
+	raw, err := os.ReadFile("postgres.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	method := string(raw)
+	for _, fragment := range []string{"func (r *PostgresRepository) HideUnmatched", "SET status='ignored'", "pr.merchant_id=$5", "pr.merchant_id<>$5", "unmatched.hide", `{"attribution":"none"}`} {
+		if !strings.Contains(method, fragment) {
+			t.Errorf("hide unmatched mutation is missing safety fence: %q", fragment)
+		}
+	}
+	if strings.Contains(method, "DELETE FROM unmatched_payments") || strings.Contains(method, "DELETE FROM transfer_events") {
+		t.Fatal("hide unmatched must never delete payment evidence")
 	}
 }
 

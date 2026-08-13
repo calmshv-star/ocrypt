@@ -249,16 +249,26 @@ type TransferRow struct {
 }
 
 type CandidateRow struct {
-	ID              string          `json:"id"`
-	RouteID         string          `json:"route_id"`
-	Rank            int             `json:"rank"`
-	Score           int             `json:"score"`
-	Evidence        json.RawMessage `json:"evidence"`
-	Disqualified    bool            `json:"disqualified"`
-	MerchantOrderID string          `json:"merchant_order_id"`
-	ExpectedDisplay string          `json:"expected_display"`
-	AssetSymbol     string          `json:"asset_symbol"`
-	OrderCreatedAt  time.Time       `json:"order_created_at"`
+	ID                 string          `json:"id"`
+	RouteID            string          `json:"route_id"`
+	Rank               int             `json:"rank"`
+	Score              int             `json:"score"`
+	Evidence           json.RawMessage `json:"evidence"`
+	Disqualified       bool            `json:"disqualified"`
+	MerchantOrderID    string          `json:"merchant_order_id"`
+	ExpectedDisplay    string          `json:"expected_display"`
+	ExpectedAtomic     string          `json:"expected_atomic"`
+	AssetSymbol        string          `json:"asset_symbol"`
+	OrderAmountMinor   string          `json:"order_amount_minor"`
+	OrderCurrency      string          `json:"order_currency"`
+	OrderCurrencyScale int16           `json:"order_currency_scale"`
+	OrderCreatedAt     time.Time       `json:"order_created_at"`
+}
+
+type UnmatchedMutation struct {
+	ID      string `json:"id"`
+	Status  string `json:"status"`
+	Version int64  `json:"version"`
 }
 
 type UnmatchedRow struct {

@@ -257,6 +257,21 @@ function formatOverviewMoney(value:string, scale:number, currency:string, locale
   return `${grouped}${fraction ? `.${fraction}` : ""} ${currency}`;
 }
 
+function approximateUnmatchedMoney(item:UnmatchedRow, locale:string) {
+  const candidate = item.candidates.find((value) => !value.disqualified);
+  if (!candidate) return "";
+  try {
+    const expected = BigInt(candidate.expected_atomic);
+    const received = BigInt(item.amount_atomic);
+    const orderMinor = BigInt(candidate.order_amount_minor);
+    if (expected <= 0n || received < 0n || orderMinor <= 0n) return "";
+    const approximateMinor = (received * orderMinor + expected / 2n) / expected;
+    return `≈ ${formatOverviewMoney(approximateMinor.toString(), candidate.order_currency_scale, candidate.order_currency, locale)}`;
+  } catch {
+    return "";
+  }
+}
+
 function formatOverviewDay(value:string, locale:string) {
   const parsed = Date.parse(`${value}T00:00:00Z`);
   return Number.isFinite(parsed) ? new Intl.DateTimeFormat(locale, { weekday:"short", timeZone:"UTC" }).format(parsed) : value;
@@ -395,6 +410,7 @@ export function LiveUnmatchedPage() {
   const [notice, setNotice] = useState<"success" | "failure" | "stepup" | null>(null);
   const [busy, setBusy] = useState(false);
   const resolutionKey = useRef(newIdempotencyKey());
+  const hideKey = useRef(newIdempotencyKey());
   const cases = query.data?.items ?? [];
   const selected = cases.find((item) => item.id === selectedId) ?? cases[0];
   useEffect(() => {
@@ -413,6 +429,7 @@ export function LiveUnmatchedPage() {
   const requiresLate = classification.includes("late");
   const requiresCrossAsset = classification.includes("wrong_asset") || classification.includes("cross_asset");
   const exceptionConfirmed = (!requiresShortfall || acceptShortfall) && (!requiresLate || acceptLate) && (!requiresCrossAsset || acceptCrossAsset);
+  const canHide = selected ? ["new", "candidates_ready", "conflict"].includes(selected.status) : false;
   const compatibleCandidates = selected?.candidates.filter((candidate) => !candidate.disqualified) ?? [];
   const selectedCandidate = compatibleCandidates.find((candidate) => candidate.route_id === candidateId);
   const requestResolution = async () => {
@@ -430,21 +447,36 @@ export function LiveUnmatchedPage() {
       setBusy(false);
     }
   };
+  const hideUnmatched = async () => {
+    if (!selected || !canHide || !admin.scope || !admin.can("unmatched:claim")) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      await admin.client!.hideUnmatched(admin.scope as AdminScope, selected.id, { version: selected.version, reason: "Hidden by operator without order attribution", idempotency_key: hideKey.current });
+      hideKey.current = newIdempotencyKey();
+      setSelectedId("");
+      await queryClient.invalidateQueries({ queryKey: ["admin", "unmatched"] });
+    } catch (error) {
+      setNotice(isStepUpError(error) ? "stepup" : "failure");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return <div className="admin-page">
     <PageHeader actions={<Button onClick={() => void query.refetch()} variant="secondary"><RefreshCw size={15} />{t("common.refresh")}</Button>} description={t("page.unmatched.description")} title={t("page.unmatched.title")} />
     <PageState permission="unmatched:read" query={query}>
       {cases.length === 0 ? <StatePanel state="empty" /> : <div className="admin-live-split admin-unmatched-simple">
         <SectionCard title={t("unmatched.queue")}>
-          <div className="admin-live-case-list">{cases.map((item) => <button aria-pressed={selected?.id === item.id} className={selected?.id === item.id ? "is-selected" : ""} key={item.id} onClick={() => setSelectedId(item.id)}><strong>{formatAtomic(item.amount_atomic, item.asset_decimals)} {item.asset_symbol}</strong><span>{t(unmatchedReasonKey(item.classification))}</span><time dateTime={item.on_chain_time}>{formatDate(item.on_chain_time, locale)}</time></button>)}</div>
+          <div className="admin-live-case-list">{cases.map((item) => { const approximate = approximateUnmatchedMoney(item, locale); return <button aria-pressed={selected?.id === item.id} className={selected?.id === item.id ? "is-selected" : ""} key={item.id} onClick={() => setSelectedId(item.id)}><strong>{formatAtomic(item.amount_atomic, item.asset_decimals)} {item.asset_symbol}</strong>{approximate && <small className="admin-unmatched-fiat">{approximate}</small>}<span>{t(unmatchedReasonKey(item.classification))}</span><time dateTime={item.on_chain_time}>{formatDate(item.on_chain_time, locale)}</time></button>; })}</div>
         </SectionCard>
         {selected && <SectionCard title={t(unmatchedReasonKey(selected.classification))}>
-          <div className="admin-unmatched-payment"><div><span>{t("common.amount")}</span><strong>{formatAtomic(selected.amount_atomic, selected.asset_decimals)} {selected.asset_symbol}</strong></div><div><span>{t("common.network")}</span><strong>{networkName(selected.chain_id)}</strong></div><div><span>{t("common.time")}</span><strong>{formatDate(selected.on_chain_time, locale)}</strong></div></div>
-          {compatibleCandidates.length > 0 ? <fieldset className="admin-live-fieldset admin-unmatched-orders"><legend>{t("admin.selectCandidate")}</legend>{compatibleCandidates.map((candidate) => <label key={candidate.id}><input checked={candidateId === candidate.route_id} name="candidate" onChange={() => setCandidateId(candidate.route_id)} type="radio" /><span><strong>{short(candidate.merchant_order_id, 8, 6)}</strong><small>{t("admin.exactAmount")}: {candidate.expected_display} {candidate.asset_symbol} · {formatDate(candidate.order_created_at, locale)}</small></span></label>)}</fieldset> : <div className="admin-unmatched-empty"><strong>{t("unmatched.noCandidate")}</strong><p>{t("unmatched.noCandidateBody")}</p></div>}
+          <div className="admin-unmatched-payment"><div><span>{t("common.amount")}</span><strong>{formatAtomic(selected.amount_atomic, selected.asset_decimals)} {selected.asset_symbol}</strong><small>{approximateUnmatchedMoney(selected, locale)}</small></div><div><span>{t("common.network")}</span><strong>{networkName(selected.chain_id)}</strong></div><div><span>{t("common.time")}</span><strong>{formatDate(selected.on_chain_time, locale)}</strong></div></div>
+          {compatibleCandidates.length > 0 ? <fieldset className="admin-live-fieldset admin-unmatched-orders"><legend>{t("admin.selectCandidate")}</legend>{compatibleCandidates.map((candidate) => <label key={candidate.id}><input checked={candidateId === candidate.route_id} name="candidate" onChange={() => setCandidateId(candidate.route_id)} type="radio" /><span><strong>{formatOverviewMoney(candidate.order_amount_minor, candidate.order_currency_scale, candidate.order_currency, locale)}</strong><small>{short(candidate.merchant_order_id, 8, 6)} · {t("admin.exactAmount")}: {candidate.expected_display} {candidate.asset_symbol} · {formatDate(candidate.order_created_at, locale)}</small></span></label>)}</fieldset> : <div className="admin-unmatched-empty"><strong>{t("unmatched.noCandidate")}</strong><p>{t("unmatched.noCandidateBody")}</p></div>}
           {requiresShortfall && <label className="admin-unmatched-confirm"><input checked={acceptShortfall} onChange={(event) => setAcceptShortfall(event.target.checked)} type="checkbox" /><span>{t("admin.acceptShortfall")}</span></label>}
           {requiresLate && <label className="admin-unmatched-confirm"><input checked={acceptLate} onChange={(event) => setAcceptLate(event.target.checked)} type="checkbox" /><span>{t("admin.acceptLate")}</span></label>}
           {requiresCrossAsset && <label className="admin-unmatched-confirm"><input checked={acceptCrossAsset} onChange={(event) => setAcceptCrossAsset(event.target.checked)} type="checkbox" /><span>{t("admin.acceptCrossAsset")}</span></label>}
-          {notice === "success" ? <div aria-live="polite" className="admin-unmatched-success" role="status"><CheckCircle2 aria-hidden="true" size={18}/><span><strong>{t("admin.requestCreated")}</strong><small>{t("admin.secondOperator")}</small></span></div> : <div className="admin-live-actions">{admin.can("resolution:request") && <Button data-testid="request-resolution" disabled={busy || !selectedCandidate || !exceptionConfirmed} onClick={() => void requestResolution()}>{t("unmatched.requestResolution")}</Button>}</div>}
+          {notice === "success" ? <div aria-live="polite" className="admin-unmatched-success" role="status"><CheckCircle2 aria-hidden="true" size={18}/><span><strong>{t("admin.requestCreated")}</strong><small>{t("admin.secondOperator")}</small></span></div> : <div className="admin-live-actions">{admin.can("resolution:request") && <Button data-testid="request-resolution" disabled={busy || !selectedCandidate || !exceptionConfirmed} onClick={() => void requestResolution()}>{t("unmatched.requestResolution")}</Button>}{canHide && admin.can("unmatched:claim") && <Button data-testid="hide-unmatched" disabled={busy} onClick={() => void hideUnmatched()} variant="secondary">{t("unmatched.hide")}</Button>}</div>}
           {notice && notice !== "success" && <div aria-live="polite" className={`admin-live-notice is-${notice}`} role={notice === "failure" ? "alert" : "status"}>{t(notice === "stepup" ? "admin.stepUpBody" : "admin.mutationFailed")}{notice === "stepup" && <a href={admin.client?.stepUpURL(currentReturnPath())}>{t("admin.stepUp")}</a>}</div>}
           <details className="admin-unmatched-technical"><summary>{t("common.details")}</summary><dl><div><dt>{t("admin.transaction")}</dt><dd><code>{short(selected.transaction_id, 18, 14)}</code></dd></div><div><dt>{t("admin.identifier")}</dt><dd><code>{short(selected.event_id)}</code></dd></div></dl></details>
         </SectionCard>}
