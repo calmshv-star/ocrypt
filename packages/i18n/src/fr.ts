@@ -841,8 +841,6 @@ export const fr = {
   "merchant.memberActive": "Actif",
   "merchant.memberDisabled": "Désactivé",
   "merchant.memberRemoved": "Supprimé",
-  "merchant.nonFinancialOnly": "Paramètres non financiers uniquement",
-  "merchant.nonFinancialOnlyBody": "Ce formulaire ne modifie ni règlement, ni portefeuille, ni rapprochement, ni finalité.",
   "merchant.notifications": "Notifications",
   "merchant.oneDay": "Un jour",
   "merchant.oneHour": "Une heure",

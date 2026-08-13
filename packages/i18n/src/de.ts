@@ -841,8 +841,6 @@ export const de = {
   "merchant.memberActive": "Aktiv",
   "merchant.memberDisabled": "Deaktiviert",
   "merchant.memberRemoved": "Entfernt",
-  "merchant.nonFinancialOnly": "Nur nichtfinanzielle Einstellungen",
-  "merchant.nonFinancialOnlyBody": "Abrechnung, Wallets, Zuordnung und Finalität können hier nicht geändert werden.",
   "merchant.notifications": "Benachrichtigungen",
   "merchant.oneDay": "Ein Tag",
   "merchant.oneHour": "Eine Stunde",

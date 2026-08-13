@@ -839,8 +839,6 @@ export const en = {
   "merchant.memberActive": "Active",
   "merchant.memberDisabled": "Disabled",
   "merchant.memberRemoved": "Removed",
-  "merchant.nonFinancialOnly": "Non-financial settings only",
-  "merchant.nonFinancialOnlyBody": "Settlement, wallet, matching and finality policy cannot be changed from this profile form.",
   "merchant.notifications": "Notifications",
   "merchant.oneDay": "One day",
   "merchant.oneHour": "One hour",
