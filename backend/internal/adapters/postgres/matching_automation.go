@@ -296,7 +296,7 @@ func upsertAutomatedAggregate(ctx context.Context, tx pgx.Tx, route automatedMat
 	var effectiveID string
 	err = tx.QueryRow(ctx, `INSERT INTO payment_match_aggregates
 (id,tenant_id,merchant_id,route_id,intent_id,policy_id,policy_version,state,classification,expected_atomic,received_atomic,credited_atomic,treasury_received_atomic,gasfree_fees_atomic,evidence,evidence_hash,created_at,updated_at,settled_at,version)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::numeric,$11::numeric,$12::numeric,$13::numeric,$14::numeric,$15::jsonb,$16,$17,$17,CASE WHEN $8='settled' THEN $17 ELSE NULL END,1)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::numeric,$11::numeric,$12::numeric,$13::numeric,$14::numeric,$15::jsonb,$16,$17::timestamptz,$17::timestamptz,CASE WHEN $8='settled' THEN $17::timestamptz ELSE NULL END,1)
 ON CONFLICT (tenant_id,route_id) WHERE state<>'reversed' DO UPDATE SET state=EXCLUDED.state,classification=EXCLUDED.classification,
  received_atomic=EXCLUDED.received_atomic,credited_atomic=EXCLUDED.credited_atomic,treasury_received_atomic=EXCLUDED.treasury_received_atomic,
  gasfree_fees_atomic=EXCLUDED.gasfree_fees_atomic,evidence=EXCLUDED.evidence,evidence_hash=EXCLUDED.evidence_hash,
@@ -358,7 +358,7 @@ func postAutomatedSettlementLedger(ctx context.Context, tx pgx.Tx, route automat
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO ledger_transactions
 (id,tenant_id,business_type,business_reference,effective_at,booked_at,correlation_id,policy_version)
-VALUES($1,$2,'payment_settlement',$1,$3,$3,$1,$4) ON CONFLICT (tenant_id,business_type,business_reference) DO NOTHING`, aggregateID, route.TenantID, now, decision.PolicyVersion)
+VALUES($1::uuid,$2,'payment_settlement',$1::uuid::text,$3,$3,$1::uuid,$4) ON CONFLICT (tenant_id,business_type,business_reference) DO NOTHING`, aggregateID, route.TenantID, now, decision.PolicyVersion)
 	if err != nil {
 		return err
 	}

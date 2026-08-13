@@ -83,3 +83,28 @@ func TestAutomatedMatchingApproximateAmountRequiresOneOverlappingRoute(t *testin
 		}
 	}
 }
+
+func TestAutomatedAggregateTimestampParameterIsExplicitlyTyped(t *testing.T) {
+	source, err := os.ReadFile("matching_automation.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(source), "$17::timestamptz,$17::timestamptz,CASE WHEN $8='settled' THEN $17::timestamptz") {
+		t.Fatal("aggregate insert must type its reused timestamp parameter explicitly")
+	}
+}
+
+func TestSettlementUUIDIsExplicitlyCastWhenReusedAsBusinessReference(t *testing.T) {
+	for _, name := range []string{"matching_automation.go", "resolution_settlement.go", "hosted_settlement.go"} {
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(source), "'payment_settlement',$1,") || strings.Contains(string(source), "'payment_settlement', $1,") {
+			t.Fatalf("%s reuses UUID parameter as text without an explicit cast", name)
+		}
+		if !strings.Contains(string(source), "$1::uuid::text") {
+			t.Fatalf("%s must infer the reused settlement parameter as UUID before converting it to text", name)
+		}
+	}
+}

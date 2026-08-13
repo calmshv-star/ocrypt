@@ -47,10 +47,27 @@ func BuildCandidates(event domain.TransferEvent, routes []domain.PaymentRoute, n
 			continue
 		}
 		cmp := event.Amount.Cmp(route.ExpectedAmount)
+		inWindow := !event.OnChainTime.Before(route.StartsAt) && !event.OnChainTime.After(route.ExpiresAt)
 		late := event.OnChainTime.After(route.ExpiresAt)
+		switch {
+		case inWindow:
+			// Address leases can be reused. The route that owned the address at
+			// the on-chain payment time must outrank older, amount-adjacent routes.
+			c.Score += 40
+			c.Reasons = append(c.Reasons, "within_payment_window")
+		case late && !event.OnChainTime.After(route.GraceEndsAt):
+			c.Score += 5
+			c.Reasons = append(c.Reasons, "within_late_grace")
+		default:
+			c.Score -= 10
+			if event.OnChainTime.Before(route.StartsAt) {
+				c.Reasons = append(c.Reasons, "before_route_start")
+			} else {
+				c.Reasons = append(c.Reasons, "after_late_grace")
+			}
+		}
 		if late {
 			c.Class = ExceptionLate
-			c.Score += 15
 			c.Reasons = append(c.Reasons, "after_expiry")
 		}
 		switch {
@@ -112,6 +129,14 @@ func BuildCandidates(event domain.TransferEvent, routes []domain.PaymentRoute, n
 
 type IndependentVerifier interface {
 	VerifyTransfer(context.Context, domain.EventIdentity) (domain.TransferEvent, error)
+}
+
+// ExpectedTransferVerifier can re-read the exact finalized block that already
+// contains the canonical event. Normalized gateways commonly expose range
+// reads but not a transaction lookup endpoint; the full expected event supplies
+// the immutable block height without weakening quorum verification.
+type ExpectedTransferVerifier interface {
+	VerifyExpectedTransfer(context.Context, domain.TransferEvent) (domain.TransferEvent, error)
 }
 type ResolutionStore interface {
 	ApplyVerifiedResolution(context.Context, domain.ManualResolution, domain.TransferEvent) error
@@ -189,7 +214,13 @@ func (s *ResolutionService) Resolve(ctx context.Context, resolution domain.Manua
 	if resolution.Reason == "" || !resolution.ApprovalIsValid() {
 		return fmt.Errorf("%w: valid reason and independent approval are required", domain.ErrValidation)
 	}
-	verified, err := s.verifier.VerifyTransfer(ctx, expected.Identity)
+	var verified domain.TransferEvent
+	var err error
+	if verifier, ok := s.verifier.(ExpectedTransferVerifier); ok {
+		verified, err = verifier.VerifyExpectedTransfer(ctx, expected)
+	} else {
+		verified, err = s.verifier.VerifyTransfer(ctx, expected.Identity)
+	}
 	if err != nil {
 		return err
 	}

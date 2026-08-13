@@ -102,7 +102,7 @@ func (s *Store) ApplyVerifiedResolution(ctx context.Context, resolution domain.M
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO ledger_transactions (id,tenant_id,business_type,business_reference,effective_at,booked_at,correlation_id,policy_version) VALUES ($1,$2,'payment_settlement',$1,$3,$4,$5,1)`, settlementID, financial.TenantID, verified.OnChainTime, now, verified.ID)
+		_, err = tx.Exec(ctx, `INSERT INTO ledger_transactions (id,tenant_id,business_type,business_reference,effective_at,booked_at,correlation_id,policy_version) VALUES ($1::uuid,$2,'payment_settlement',$1::uuid::text,$3,$4,$5,1)`, settlementID, financial.TenantID, verified.OnChainTime, now, verified.ID)
 		if err != nil {
 			return classify(err)
 		}

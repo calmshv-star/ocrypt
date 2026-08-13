@@ -107,14 +107,7 @@ func main() {
 	}
 	var resolutionWorker *application.ResolutionWorker
 	if roles["resolutions"] {
-		chainID := os.Getenv("VERIFIER_CHAIN_ID")
-		providers := splitNonempty(os.Getenv("VERIFIER_PROVIDER_URLS"))
-		quorum, err := positiveInt("VERIFIER_QUORUM", 2)
-		if err != nil {
-			slog.Error("invalid VERIFIER_QUORUM", "error", err)
-			os.Exit(1)
-		}
-		verifier, err := scanner.NewQuorumHTTPSource(chainID, providers, quorum, os.Getenv("VERIFIER_PROVIDER_TOKEN"), nil)
+		verifier, err := newResolutionVerifier()
 		if err != nil {
 			slog.Error("resolution verifier initialization failed", "error", err)
 			os.Exit(1)
