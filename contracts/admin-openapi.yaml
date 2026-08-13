@@ -1230,7 +1230,7 @@ components:
     FinancialSettingsRoute:
       type: object
       additionalProperties: false
-      required: [currency,chain_id,asset_id,asset_symbol,asset_status,chain_status,route_status,wallet_count,active_wallet_count,address_count,available_address_count,assigned_address_count,quarantined_address_count]
+      required: [currency,chain_id,asset_id,asset_symbol,asset_status,chain_status,route_status,wallet_count,active_wallet_count,address_count,usable_address_count,assigned_address_count,quarantined_address_count]
       properties:
         currency: {type: string, pattern: '^[A-Z]{3}$'}
         chain_id: {type: string, minLength: 1, maxLength: 128}
@@ -1242,7 +1242,7 @@ components:
         wallet_count: {type: integer, minimum: 0}
         active_wallet_count: {type: integer, minimum: 0}
         address_count: {type: integer, minimum: 0}
-        available_address_count: {type: integer, minimum: 0}
+        usable_address_count: {type: integer, minimum: 0}
         assigned_address_count: {type: integer, minimum: 0}
         quarantined_address_count: {type: integer, minimum: 0}
     FinancialSettingsInventory:

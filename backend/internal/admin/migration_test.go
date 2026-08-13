@@ -119,6 +119,38 @@ func TestFinancialSettingsInventoryIsReadOnlyAndSecretFree(t *testing.T) {
 	}
 }
 
+func TestFinancialSettingsCountsReusableWatchOnlyAddressesAsUsable(t *testing.T) {
+	raw, err := os.ReadFile("../../migrations/000041_financial_settings_usable_capacity.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	for _, fragment := range []string{
+		"DROP FUNCTION admin_financial_settings_inventory(uuid,uuid)",
+		"CREATE FUNCTION admin_financial_settings_inventory",
+		"usable_address_count",
+		"w.custody_mode='watch_only' AND a.status='assigned'",
+		"w.status='active'",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("usable capacity missing %q", fragment)
+		}
+	}
+	down, err := os.ReadFile("../../migrations/000041_financial_settings_usable_capacity.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{
+		"DROP FUNCTION admin_financial_settings_inventory(uuid,uuid)",
+		"CREATE FUNCTION admin_financial_settings_inventory",
+		"available_address_count",
+	} {
+		if !strings.Contains(string(down), fragment) {
+			t.Errorf("usable capacity rollback missing %q", fragment)
+		}
+	}
+}
+
 func TestTransferRowsExposeHumanAmountMetadata(t *testing.T) {
 	repository, err := os.ReadFile("postgres.go")
 	if err != nil {
