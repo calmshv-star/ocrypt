@@ -138,7 +138,7 @@ function AdminApplication() {
     "settings:read", "webhook_settings:read", "reconciliation:read", "audit:read", "management_audit:read",
     "matching_policy:read", "api_clients:read", "team:read", "infrastructure:read", "platform_config:read",
     "webhook_settings:disable", "api_clients:revoke"
-  ].some((permission) => admin.can(permission as Parameters<typeof admin.can>[0]));
+  ].some((permission) => admin.can(permission));
   const settings = [
     canOpenSettings && { label: t("nav.settings"), href: "#/settings", icon: Settings2, active: settingsPaths.has(location.pathname), keywords: ["integration", "security", "access", "configuration"] }
   ].filter(Boolean) as ShellNavGroup["items"];
