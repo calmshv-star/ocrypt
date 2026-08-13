@@ -124,6 +124,22 @@ services:
       WORKER_HEALTH_ADDRESS: ":9090"
     networks: [data]
 
+  callback-worker:
+    <<: *runtime
+    profiles: [webhook-delivery]
+    image: ocrypt-worker:20260813-unified-webhook-runtime-v2
+    container_name: ocrypt-callback-worker
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database-url
+      WEBHOOK_ENVELOPE_KEY_FILE: /run/secrets/webhook-envelope-key
+      WORKER_ID: ocrypt-callback-1
+      WORKER_ROLES: callbacks
+      WORKER_HEALTH_ADDRESS: ":9090"
+    volumes:
+      - /opt/ocrypt/secrets/ocrypt_callback-dsn.runtime:/run/secrets/database-url:ro
+      - /opt/ocrypt/secrets/ocrypt_callback-webhook-key.runtime:/run/secrets/webhook-envelope-key:ro
+    networks: [data, edge]
+
   scanner-tron:
     <<: *runtime
     image: ocrypt-scanner:20260812-watch6

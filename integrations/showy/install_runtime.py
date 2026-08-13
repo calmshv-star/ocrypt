@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Idempotently install the reviewed Showy webhook wiring.
+"""Idempotently stage or finalize the reviewed Showy webhook wiring.
 
-The installer refuses source drift instead of guessing. Run it from the Ocrypt
-checkout with the Showy project root as its only argument.
+The installer refuses source drift instead of guessing. Receiver staging keeps
+polling as a recovery channel. Finalization removes polling only after an
+acknowledged delivery has been proven.
 """
 
 from __future__ import annotations
@@ -102,14 +103,34 @@ def replace_once(path: pathlib.Path, old: str, new: str) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: install_runtime.py /path/to/showy")
+    if len(sys.argv) != 3 or sys.argv[1] not in {"receiver", "finalize"}:
+        raise SystemExit("usage: install_runtime.py receiver|finalize /path/to/showy")
+    phase = sys.argv[1]
     integration = pathlib.Path(__file__).resolve().parent
     sdk = integration.parents[1] / "sdk" / "python" / "src" / "merchant_platform"
-    root = pathlib.Path(sys.argv[1]).resolve()
+    root = pathlib.Path(sys.argv[2]).resolve()
     api = root / "server" / "api"
     if not (api / "urls.py").is_file() or not sdk.is_dir():
         raise SystemExit("Showy root or Ocrypt SDK source is missing")
+
+    if phase == "finalize":
+        if not (api / "ocrypt_webhook.py").is_file():
+            raise SystemExit("refusing finalization before receiver staging")
+        replace_once(
+            root / "server/conf/settings.py",
+            '''    "poll-showy-crypto-orders": {
+        "task": "api.tasks.poll_showy_crypto_orders",
+        "schedule": crontab(minute="*", hour="*"),
+    },
+''',
+            "",
+        )
+        tasks_path = api / "tasks.py"
+        tasks_text = tasks_path.read_text()
+        if PROVISION_TASK not in tasks_text:
+            raise SystemExit("refusing finalization before provisioning task staging")
+        replace_once(tasks_path, POLL_TASK + "\n", "")
+        return
 
     (api / "migrations").mkdir(parents=True, exist_ok=True)
     shutil.copy2(integration / "server/api/ocrypt_webhook.py", api / "ocrypt_webhook.py")
@@ -137,16 +158,10 @@ def main() -> None:
         '    path("healthz/", healthz, name="healthz"),\n'
         '    path("ocrypt/webhook/", ocrypt_webhook, name="ocrypt_webhook"),\n',
     )
-    replace_once(
-        root / "server/conf/settings.py",
-        '''    "poll-showy-crypto-orders": {
-        "task": "api.tasks.poll_showy_crypto_orders",
-        "schedule": crontab(minute="*", hour="*"),
-    },
-''',
-        "",
-    )
-    replace_once(api / "tasks.py", POLL_TASK, PROVISION_TASK)
+    # The provisioning task is installed during staging so a settled webhook
+    # can never commit without its durable post-commit work being available.
+    # The polling task and schedule remain until the explicit finalize phase.
+    replace_once(api / "tasks.py", POLL_TASK, POLL_TASK + "\n" + PROVISION_TASK)
     replace_once(
         root / "docker-compose.yml",
         "    volumes: *lampac-media-volume\n    shm_size: \"512mb\"\n",

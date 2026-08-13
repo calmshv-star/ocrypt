@@ -115,12 +115,18 @@ TLS 1.3 is mandatory. The in-process public capability limiter is only a
 per-instance safety bound; production ingress must enforce a cluster-wide rate
 limit without trusting caller-supplied forwarding headers.
 
-`go run ./cmd/worker` requires `DATABASE_URL`, `WORKER_ID`, and comma-separated
+`go run ./cmd/worker` requires exactly one of `DATABASE_URL` or
+`DATABASE_URL_FILE`, plus `WORKER_ID`, and comma-separated
 `WORKER_ROLES` chosen from `settlements`, `callbacks`, `outbox`, `resolutions`,
 `proofs`, and `plans`. The `plans` role releases expired, unbound quote/address
 leases left by a process crash. Relevant role configuration is:
 
-- callbacks: `WEBHOOK_ENVELOPE_KEY`;
+- callbacks: exactly one of `WEBHOOK_ENVELOPE_KEY` or
+  `WEBHOOK_ENVELOPE_KEY_FILE`; production mounts both the database URL and
+  envelope key as read-only files. The credentialed database login must inherit
+  only `merchant_callback_worker`; callback transactions explicitly assume that
+  fixed capability role because PostgreSQL does not inherit `BYPASSRLS` through
+  ordinary role membership;
 - outbox: explicit `OUTBOX_PUBLISHER=https|jetstream` and
   `OUTBOX_MAX_RETRY_DELAY`; HTTPS requires `OUTBOX_PUBLISH_URL` plus
   `OUTBOX_PUBLISH_TOKEN_FILE`, while JetStream uses only the file/TLS/stream

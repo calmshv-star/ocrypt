@@ -267,14 +267,22 @@ contracts.each do |name, contract|
     declared
   end
   abort("runtime source no longer declares #{name} env: #{absent_source_keys.join(', ')}") unless absent_source_keys.empty?
-  database_env = contract.fetch("requiredEnv").find { |key| key.end_with?("DATABASE_URL") }
+  database_env = contract.fetch("requiredEnv").find { |key| key.end_with?("DATABASE_URL") || key.end_with?("DATABASE_URL_FILE") }
   abort("runtime contract #{name} has no database env") unless database_env
   source = contract.fetch("composeDatabaseVariable")
-  compose_value = services.fetch(name).fetch("environment").fetch(database_env).to_s
+  if database_env.end_with?("_FILE")
+    database_path = services.fetch(name).fetch("environment").fetch(database_env).to_s
+    compose_mount = services.fetch(name).fetch("secrets").find { |item| database_path.end_with?("/#{item.fetch('target')}") }
+    abort("Compose #{name} has no database Secret mount") unless compose_mount
+    compose_value = compose.fetch("secrets").fetch(compose_mount.fetch("source")).fetch("file").to_s
+  else
+    compose_value = services.fetch(name).fetch("environment").fetch(database_env).to_s
+  end
   abort("Compose #{name} does not use isolated #{source}") unless compose_value.include?("${#{source}")
   abort("Compose database source reused: #{source}") if compose_database_sources.key?(source)
   compose_database_sources[source] = name
   secret_item = helm.fetch("secretEnv").find { |item| item.fetch("name") == database_env }
+  secret_item ||= helm.fetch("secretFiles").find { |item| helm.fetch("env")[database_env] == item.fetch("path") }
   abort("Helm #{name} has no database Secret ref") unless secret_item
   secret_name = secret_item.fetch("secretRef").fetch("name")
   abort("Helm database Secret reused by #{helm_database_secrets[secret_name]} and #{name}") if helm_database_secrets.key?(secret_name)

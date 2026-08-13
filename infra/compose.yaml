@@ -282,7 +282,10 @@ services:
   callback-worker:
     <<: *worker
     build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: worker}}
-    environment: {DATABASE_URL: "${CALLBACK_DATABASE_URL:-}", WEBHOOK_ENVELOPE_KEY: "${WEBHOOK_ENVELOPE_KEY:-}", WORKER_ID: compose-callback-1, WORKER_ROLES: callbacks, WORKER_HEALTH_ADDRESS: ":9090"}
+    environment: {DATABASE_URL_FILE: /run/secrets/callback-database-url, WEBHOOK_ENVELOPE_KEY_FILE: /run/secrets/webhook-envelope-key, WORKER_ID: compose-callback-1, WORKER_ROLES: callbacks, WORKER_HEALTH_ADDRESS: ":9090"}
+    secrets:
+      - {source: callback_database_url, target: callback-database-url}
+      - {source: webhook_envelope_key, target: webhook-envelope-key}
     networks: [data, edge]
   outbox-worker:
     <<: *worker
@@ -730,6 +733,7 @@ volumes:
 # Defaults make static Compose validation possible but cannot start a protected
 # workload. Real files must be supplied through an untracked .env.
 secrets:
+  callback_database_url: {file: "${CALLBACK_DATABASE_URL_FILE:-/dev/null}"}
   webhook_envelope_key: {file: "${WEBHOOK_ENVELOPE_KEY_FILE:-/dev/null}"}
   api_credential_envelope_key: {file: "${API_CREDENTIAL_ENVELOPE_KEY_FILE:-/dev/null}"}
   management_response_key: {file: "${MANAGEMENT_RESPONSE_KEY_FILE:-/dev/null}"}

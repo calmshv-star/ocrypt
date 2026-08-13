@@ -113,6 +113,8 @@ jobs:
                OR NOT has_table_privilege('merchant_plan_worker','callback_events','INSERT')
                OR NOT has_table_privilege('merchant_plan_worker','outbox_events','INSERT')
                OR NOT has_table_privilege('merchant_api_runtime','callback_events','INSERT')
+               OR NOT has_table_privilege('merchant_api_runtime','management_webhook_verifications','SELECT')
+               OR has_table_privilege('merchant_api_runtime','management_webhook_verifications','INSERT,UPDATE,DELETE')
                OR NOT has_table_privilege('merchant_reconciliation_worker','reconciliation_reports','UPDATE')
                OR NOT has_table_privilege('merchant_settings_api_runtime','merchant_members','UPDATE')
                OR NOT has_table_privilege('merchant_settings_api_runtime','merchant_session_revocation_signals','INSERT')

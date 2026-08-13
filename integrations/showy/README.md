@@ -18,9 +18,10 @@ Showy uses the same production protocol as every other merchant:
 - `server/api/ocrypt_webhook.py` is the Showy receiver.
 - `server/api/migrations/0134_ocrypt_webhook_inbox.py` creates its durable inbox.
 - `server/api/test_ocrypt_webhook.py` covers challenge, signature and rejection.
-- `install_runtime.py` fail-closed installs the endpoint, removes minute
-  polling, adds asynchronous post-payment provisioning and mounts the keyring
-  read-only. It refuses unreviewed Showy source drift.
+- `install_runtime.py receiver` fail-closed stages the endpoint, durable inbox,
+  asynchronous provisioning and read-only keyring while keeping recovery
+  polling active. `install_runtime.py finalize` removes polling only after an
+  acknowledged delivery is proven. Both refuse unreviewed Showy source drift.
 
 The official Python verifier from `sdk/python/src/merchant_platform` must be
 copied into the Showy image. Configure only file references and public identity:
@@ -42,6 +43,9 @@ signed with that key are acknowledged.
 
 ## Cutover order
 
-Deploy the receiver and inbox first, create and challenge-verify the endpoint,
-start the Ocrypt callback worker, prove an acknowledged delivery, and only then
-apply the polling-removal portion. Existing open orders remain valid throughout.
+1. Run `python3 integrations/showy/install_runtime.py receiver /path/to/showy`,
+   review the exact diff, migrate and deploy the receiver.
+2. Create and challenge-verify the endpoint, start the Ocrypt callback worker,
+   and prove an acknowledged delivery plus duplicate safety.
+3. Run `python3 integrations/showy/install_runtime.py finalize /path/to/showy`
+   and deploy the polling removal. Existing open orders remain valid throughout.

@@ -33,6 +33,17 @@ type claimedDelivery struct {
 	encryptedSecret []byte
 }
 
+// PostgreSQL does not inherit BYPASSRLS from a NOLOGIN group role. Callback
+// logins inherit only membership in merchant_callback_worker, so every
+// cross-tenant queue transaction must explicitly assume that fixed capability
+// role. Keeping the role name static prevents caller-controlled role changes.
+const callbackRuntimeRoleSQL = `SET LOCAL ROLE merchant_callback_worker`
+
+func assumeCallbackRuntimeRole(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, callbackRuntimeRoleSQL)
+	return err
+}
+
 const callbackClaimSQL = `SELECT
  d.id::text,e.id::text,w.endpoint_url,d.signing_key_id,k.encrypted_secret,
  e.canonical_body,d.attempt_count+1
@@ -53,6 +64,9 @@ func (s *CallbackStore) Claim(ctx context.Context, workerID string, now time.Tim
 	}
 	var claimed []claimedDelivery
 	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
+		if err := assumeCallbackRuntimeRole(ctx, tx); err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, callbackClaimSQL, now, limit)
 		if err != nil {
 			return err
@@ -124,6 +138,9 @@ func (s *CallbackStore) recordOutcome(ctx context.Context, deliveryID, claimToke
 		return domainConflict("callback claim token is required")
 	}
 	return pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
+		if err := assumeCallbackRuntimeRole(ctx, tx); err != nil {
+			return err
+		}
 		var attempt int
 		err := tx.QueryRow(ctx, `UPDATE callback_deliveries SET status=$3::delivery_status,next_attempt_at=COALESCE($4,next_attempt_at),last_http_status=$5,last_error_category=NULLIF($6,''),acknowledged_at=CASE WHEN $3='acknowledged' THEN clock_timestamp() ELSE acknowledged_at END,locked_by=NULL,locked_until=NULL,lease_token=NULL,updated_at=clock_timestamp(),version=version+1 WHERE id=$1 AND status='leased' AND lease_token=$2 RETURNING attempt_count`, deliveryID, claimToken, state, next, httpStatus, reason).Scan(&attempt)
 		if err == pgx.ErrNoRows {
