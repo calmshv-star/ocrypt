@@ -75,6 +75,7 @@ func TestAutomatedMatchingApproximateAmountRequiresOneOverlappingRoute(t *testin
 	for _, check := range []string{
 		"other.id<>$7",
 		"te.on_chain_time BETWEEN other.starts_at AND other.grace_ends_at",
+		"te.on_chain_time>=$8 OR te.on_chain_time BETWEEN other.starts_at AND other.expires_at",
 		"JOIN payment_route_policy_bindings",
 		"multiple_policy_bound_routes_overlap",
 	} {

@@ -254,7 +254,12 @@ ORDER BY te.on_chain_time,te.id FOR UPDATE OF te`, route.Route.ChainID, route.Ro
  WHERE te.chain_id=$1 AND te.asset_id=$2 AND te.to_address=$3 AND te.event_kind<>'gasfree_fee'
    AND te.status='finalized' AND te.confirmations>=$4 AND te.on_chain_time BETWEEN $5 AND $6
    AND other.id<>$7 AND other.status IN ('active','expired') AND te.on_chain_time BETWEEN other.starts_at AND other.grace_ends_at
-)`, route.Route.ChainID, route.Route.AssetID, route.Route.Address, route.Route.RequiredFinality, route.Route.StartsAt, route.Route.GraceEndsAt, route.RouteID).Scan(&ambiguous)
+   -- A payment made inside this route's primary window must not be made
+   -- ambiguous solely by an older route's observation grace.  Grace remains
+   -- relevant when the payment itself is late, and simultaneous primary
+   -- windows still fail closed.
+   AND (te.on_chain_time>=$8 OR te.on_chain_time BETWEEN other.starts_at AND other.expires_at)
+)`, route.Route.ChainID, route.Route.AssetID, route.Route.Address, route.Route.RequiredFinality, route.Route.StartsAt, route.Route.GraceEndsAt, route.RouteID, route.Route.ExpiresAt).Scan(&ambiguous)
 	return events, ambiguous, err
 }
 
