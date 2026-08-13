@@ -40,8 +40,9 @@ management-api and applies per-source request/connection limits. Its core API
 location is an explicit non-overlapping allowlist. Production ingress must
 provide equivalent rate limiting and longest-prefix ownership guarantees.
 
-Each `*_DATABASE_URL` must be a different login inheriting exactly one NOLOGIN
-role from `deploy/postgres/bootstrap-roles.sql`. Never use the PostgreSQL bootstrap
+Each `*_DATABASE_URL` or `*_DATABASE_URL_FILE` must contain a different login
+inheriting exactly one NOLOGIN role from `deploy/postgres/bootstrap-roles.sql`.
+Callback credentials are mounted only through the file form. Never use the PostgreSQL bootstrap
 superuser as a migration or runtime URL. The rate profile additionally requires
 an enabled UUID in `rate_runtime_identities`, global-only targets, and read-only
 provider credential files.

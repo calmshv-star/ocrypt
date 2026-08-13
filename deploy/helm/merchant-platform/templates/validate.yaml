@@ -26,6 +26,12 @@
 {{- $cfg := index $.Values.workloads $name }}
 {{- if and $cfg.enabled (empty $cfg.network.httpsEgressPeers) }}{{- fail (printf "enabled %s requires explicit HTTPS egress peers" $name) }}{{- end }}
 {{- end }}
+{{- $callbacks := index .Values.workloads "callback-worker" -}}
+{{- if $callbacks.enabled }}
+{{- if or (hasKey $callbacks.env "DATABASE_URL") (hasKey $callbacks.env "WEBHOOK_ENVELOPE_KEY") }}{{- fail "callback worker secrets must not be exposed as environment values" }}{{- end }}
+{{- if or (ne (toString $callbacks.env.DATABASE_URL_FILE) "/run/secrets/database-url") (ne (toString $callbacks.env.WEBHOOK_ENVELOPE_KEY_FILE) "/run/secrets/webhook-envelope-key") }}{{- fail "callback worker must use fixed read-only secret file paths" }}{{- end }}
+{{- if or (not (empty $callbacks.secretEnv)) (ne (len $callbacks.secretFiles) 2) }}{{- fail "callback worker requires exactly database and envelope-key file Secrets" }}{{- end }}
+{{- end }}
 {{- $legacy := index .Values.workloads "legacy-gateway" -}}
 {{- if $legacy.enabled }}
 {{- if $legacy.service.enabled }}{{- fail "legacy compatibility requires a separately admitted source-preserving listener; chart Service stays disabled" }}{{- end }}

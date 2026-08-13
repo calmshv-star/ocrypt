@@ -111,7 +111,7 @@ GRANT SELECT ON
   event_history,transfer_events,payment_matches,ledger_accounts,
   ledger_transactions,ledger_entries,unmatched_payments,match_candidates,
   callback_events,callback_deliveries,outbox_events,payment_intent_versions,
-  webhook_endpoints,payment_match_aggregates
+  webhook_endpoints,management_webhook_verifications,payment_match_aggregates
 TO merchant_api_runtime;
 GRANT SELECT,INSERT ON reconciliation_reports,outbox_events TO merchant_api_runtime;
 GRANT INSERT ON payment_intent_versions,callback_events,callback_deliveries TO merchant_api_runtime;

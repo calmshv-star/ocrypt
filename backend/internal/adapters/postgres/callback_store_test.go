@@ -50,3 +50,16 @@ func TestCallbackClaimHasNoCurrentKeyFallback(t *testing.T) {
 		t.Fatal("a frozen delivery key must never fall back to an endpoint's current key")
 	}
 }
+
+func TestCallbackTransactionsAssumeFixedCrossTenantCapabilityRole(t *testing.T) {
+	if callbackRuntimeRoleSQL != "SET LOCAL ROLE merchant_callback_worker" {
+		t.Fatalf("unexpected callback runtime role statement %q", callbackRuntimeRoleSQL)
+	}
+	source, err := os.ReadFile("callback_store.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count := strings.Count(string(source), "assumeCallbackRuntimeRole(ctx, tx)"); count != 2 {
+		t.Fatalf("callback claim and outcome transactions must both assume the capability role; got %d calls", count)
+	}
+}

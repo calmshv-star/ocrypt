@@ -56,9 +56,11 @@ func (s *Store) CreateIntentInTx(ctx context.Context, tx pgx.Tx, cmd application
 	var webhookReady bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(
 SELECT 1
-FROM webhook_endpoints
-WHERE tenant_id=$1 AND merchant_id=$2 AND status='active'
-  AND ('*'=ANY(event_types) OR event_types @> `+requiredWebhookEventTypesSQL+`)
+FROM webhook_endpoints w
+JOIN management_webhook_verifications v
+  ON v.endpoint_id=w.id AND v.tenant_id=w.tenant_id AND v.verified_at IS NOT NULL
+WHERE w.tenant_id=$1 AND w.merchant_id=$2 AND w.status='active'
+  AND ('*'=ANY(w.event_types) OR w.event_types @> `+requiredWebhookEventTypesSQL+`)
 )`, cmd.Principal.TenantID, cmd.Principal.MerchantID).Scan(&webhookReady); err != nil {
 		return domain.PaymentIntent{}, err
 	}

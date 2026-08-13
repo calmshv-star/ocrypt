@@ -264,10 +264,11 @@ workloads:
       - {name: DATABASE_URL, secretRef: {name: merchant-platform-matching-worker, key: database-url}}
   callback-worker:
     <<: *coreWorker
-    env: {WORKER_ROLES: callbacks, WORKER_HEALTH_ADDRESS: ":9090"}
-    secretEnv:
-      - {name: DATABASE_URL, secretRef: {name: merchant-platform-callback-worker, key: database-url}}
-      - {name: WEBHOOK_ENVELOPE_KEY, secretRef: {name: merchant-platform-callback-worker, key: webhook-envelope-key}}
+    env: {DATABASE_URL_FILE: /run/secrets/database-url, WEBHOOK_ENVELOPE_KEY_FILE: /run/secrets/webhook-envelope-key, WORKER_ROLES: callbacks, WORKER_HEALTH_ADDRESS: ":9090"}
+    secretEnv: []
+    secretFiles:
+      - {path: /run/secrets/database-url, secretRef: {name: merchant-platform-callback-worker, key: database-url}}
+      - {path: /run/secrets/webhook-envelope-key, secretRef: {name: merchant-platform-callback-worker, key: webhook-envelope-key}}
   outbox-worker:
     <<: *coreWorker
     # JetStream delivery is opt-in and must point at a separately provisioned,
