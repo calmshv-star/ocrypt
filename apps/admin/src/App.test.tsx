@@ -247,13 +247,15 @@ describe("admin application", () => {
         asset_decimals: 6,
         amount_atomic: "9500000",
         on_chain_time: new Date().toISOString(),
-        candidates: [{ id: "20000000-0000-4000-8000-000000000005", route_id: routeId, rank: 1, score: 96, evidence: {}, disqualified: false, merchant_order_id: "ORDER-1042", expected_display: "10", asset_symbol: "USDT", order_created_at: new Date().toISOString() }]
+        candidates: [{ id: "20000000-0000-4000-8000-000000000005", route_id: routeId, rank: 1, score: 96, evidence: {}, disqualified: false, merchant_order_id: "ORDER-1042", expected_display: "10", expected_atomic: "10000000", asset_symbol: "USDT", order_amount_minor: "64000", order_currency: "RUB", order_currency_scale: 2, order_created_at: new Date().toISOString() }]
       }] }),
       requestResolution
     });
     renderApp("/unmatched", { client: liveClient, preview: false });
     expect(await screen.findByRole("heading", { name: "Payments to review" })).toBeInTheDocument();
-    expect(await screen.findByText("ORDER-1042")).toBeInTheDocument();
+    expect(await screen.findByRole("radio", { name:/ORDER-1042/ })).toBeInTheDocument();
+    expect(screen.getByText("640.00 RUB")).toBeInTheDocument();
+    expect(screen.getAllByText("≈ 608.00 RUB").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/USDT/).length).toBeGreaterThan(0);
     expect(screen.queryByText("underpaid")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send for confirmation" })).toBeDisabled();
@@ -262,6 +264,22 @@ describe("admin application", () => {
     await waitFor(() => expect(requestResolution).toHaveBeenCalledTimes(1));
     expect(requestResolution).toHaveBeenCalledWith({ tenantId, merchantId }, caseId, expect.objectContaining({ version: 8, target_route_id: routeId, reason: "Manual review: payment matched to order ORDER-1042", accept_shortfall: true, accept_late_payment: false, accept_cross_asset: false, idempotency_key: expect.stringMatching(/.{8,}/) }));
     expect(screen.getByText("Another administrator will check it before the payment is credited.")).toBeInTheDocument();
+  });
+
+  it("hides an unmatched payment without assigning it to an order", async () => {
+    const caseId = "20000000-0000-4000-8000-000000000011";
+    const routeId = "20000000-0000-4000-8000-000000000012";
+    const hideUnmatched = vi.fn().mockResolvedValue({ id:caseId, status:"ignored", version:5 });
+    const liveClient = client({
+      unmatched: vi.fn().mockResolvedValue({ items: [{
+        id:caseId,event_id:"20000000-0000-4000-8000-000000000013",classification:"ambiguous",status:"candidates_ready",severity:"low",version:4,created_at:new Date().toISOString(),chain_id:"tron",transaction_id:"abcdef",asset_symbol:"USDT",asset_decimals:6,amount_atomic:"6028000",on_chain_time:new Date().toISOString(),
+        candidates:[{id:"20000000-0000-4000-8000-000000000014",route_id:routeId,rank:1,score:80,evidence:{},disqualified:false,merchant_order_id:"ORDER-2042",expected_display:"6.028",expected_atomic:"6028000",asset_symbol:"USDT",order_amount_minor:"49900",order_currency:"RUB",order_currency_scale:2,order_created_at:new Date().toISOString()}]
+      }] }),
+      hideUnmatched
+    });
+    renderApp("/unmatched", { client:liveClient, preview:false });
+    fireEvent.click(await screen.findByRole("button", { name:"Hide from list" }));
+    await waitFor(() => expect(hideUnmatched).toHaveBeenCalledWith({tenantId,merchantId},caseId,expect.objectContaining({version:4,reason:"Hidden by operator without order attribution",idempotency_key:expect.stringMatching(/.{8,}/)})));
   });
 
   it("revokes a production session before returning to the sign-in state", async () => {

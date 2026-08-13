@@ -291,6 +291,7 @@ export const de = {
   "unmatched.ignoreReason": "Mit Begründung ignorieren",
   "unmatched.independentVerification": "Unabhängige Prüfung anfordern",
   "unmatched.requestResolution": "Zur Bestätigung senden",
+  "unmatched.hide": "Aus der Liste ausblenden",
   "webhooks.addEndpoint": "Endpunkt hinzufügen",
   "webhooks.signedEvents": "Signierte kanonische Ereignisse",
   "webhooks.backlog": "Rückstand",

@@ -300,6 +300,20 @@ func TestOperatorHandlersExposeConflictAndDenySelfApproval(t *testing.T) {
 	}
 }
 
+func TestHideUnmatchedUsesScopedAuditedMutation(t *testing.T) {
+	handler, repo, raw, csrf, tenant := serverFixture(t, false)
+	repo.identity.Bindings[0].Permissions[PermissionUnmatchedClaim] = true
+	id := "018f22b0-4db4-7c58-8f18-4d2f9d7b6a55"
+	request := mutationRequest(http.MethodPost, "/admin/v1/unmatched/"+id+"/hide", `{"version":3,"reason":"Hidden by operator without order attribution","idempotency_key":"hide-case-001"}`, raw, csrf)
+	request.Header.Set("X-Admin-Tenant-ID", tenant)
+	request.Header.Set("X-Admin-Merchant-ID", repo.identity.Bindings[0].MerchantID)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"ignored"`) {
+		t.Fatalf("hide expected 200 ignored, got %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestSecurityHeadersAndUnavailablePagesFailClosed(t *testing.T) {
 	handler, _, raw, csrf, _ := serverFixture(t, false)
 	request := httptest.NewRequest(http.MethodGet, "https://admin.example/admin/v1/payment-links", nil)

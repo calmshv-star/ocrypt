@@ -254,6 +254,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /admin/v1/financial/reconciliation-runs/{id}/execute", s.authenticated(s.mutating(s.financialHandler())))
 	s.mux.Handle("POST /admin/v1/unmatched/{id}/claim", s.authenticated(s.mutating(http.HandlerFunc(s.claim))))
 	s.mux.Handle("POST /admin/v1/unmatched/{id}/release", s.authenticated(s.mutating(http.HandlerFunc(s.release))))
+	s.mux.Handle("POST /admin/v1/unmatched/{id}/hide", s.authenticated(s.mutating(http.HandlerFunc(s.hideUnmatched))))
 	s.mux.Handle("POST /admin/v1/unmatched/{id}/resolution-requests", s.authenticated(s.mutating(http.HandlerFunc(s.requestResolution))))
 	s.mux.Handle("GET /admin/v1/action-requests/{id}", s.authenticated(http.HandlerFunc(s.getAction)))
 	s.mux.Handle("POST /admin/v1/action-requests/{id}/approve", s.authenticated(s.mutating(http.HandlerFunc(s.approveAction))))
@@ -776,6 +777,23 @@ func (s *Server) release(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	value, err := s.repository.ReleaseUnmatched(request.Context(), auth.Principal, scope, request.PathValue("id"), input.Version, input.Reason, input.IdempotencyKey)
+	respond(w, value, err)
+}
+
+func (s *Server) hideUnmatched(w http.ResponseWriter, request *http.Request) {
+	auth, scope, ok := s.authorize(w, request, PermissionUnmatchedClaim)
+	if !ok {
+		return
+	}
+	var input operatorInput
+	if !s.decode(w, request, &input) {
+		return
+	}
+	if !validOperatorInput(input) {
+		writeProblem(w, http.StatusBadRequest, "invalid_request", "A valid version, reason, and idempotency key are required.")
+		return
+	}
+	value, err := s.repository.HideUnmatched(request.Context(), auth.Principal, scope, request.PathValue("id"), input.Version, input.Reason, input.IdempotencyKey)
 	respond(w, value, err)
 }
 

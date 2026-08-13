@@ -705,7 +705,7 @@ WHERE u.status NOT IN ('resolved','ignored','invalid','reorged')`+merchantFilter
 		for i := range page.Items {
 			v := &page.Items[i]
 			candidateSQL := `SELECT mc.id::text,mc.route_id::text,mc.rank,mc.score,mc.evidence,cardinality(mc.disqualifiers)>0,
-pi.merchant_order_id,pr.display_amount,a.symbol,pi.created_at
+pi.merchant_order_id,pr.display_amount,pr.expected_amount_atomic::text,a.symbol,pi.amount_minor::text,pi.currency,pi.currency_scale,pi.created_at
 FROM match_candidates mc
 JOIN payment_routes pr ON pr.id=mc.route_id AND pr.tenant_id=mc.tenant_id
 JOIN payment_intents pi ON pi.id=pr.intent_id AND pi.tenant_id=pr.tenant_id
@@ -726,7 +726,7 @@ JOIN assets a ON a.id=pr.asset_id AND a.chain_id=pr.chain_id`
 			}
 			for crows.Next() {
 				var c CandidateRow
-				if e := crows.Scan(&c.ID, &c.RouteID, &c.Rank, &c.Score, &c.Evidence, &c.Disqualified, &c.MerchantOrderID, &c.ExpectedDisplay, &c.AssetSymbol, &c.OrderCreatedAt); e != nil {
+				if e := crows.Scan(&c.ID, &c.RouteID, &c.Rank, &c.Score, &c.Evidence, &c.Disqualified, &c.MerchantOrderID, &c.ExpectedDisplay, &c.ExpectedAtomic, &c.AssetSymbol, &c.OrderAmountMinor, &c.OrderCurrency, &c.OrderCurrencyScale, &c.OrderCreatedAt); e != nil {
 					crows.Close()
 					return e
 				}
@@ -912,6 +912,48 @@ func (r *PostgresRepository) ClaimUnmatched(ctx context.Context, p Principal, s 
 func (r *PostgresRepository) ReleaseUnmatched(ctx context.Context, p Principal, s Scope, id string, version int64, reason, key string) (UnmatchedRow, error) {
 	return r.assignUnmatched(ctx, p, s, id, version, reason, key, false)
 }
+
+func (r *PostgresRepository) HideUnmatched(ctx context.Context, p Principal, s Scope, id string, version int64, reason, key string) (value UnmatchedMutation, err error) {
+	if !ids.Valid(id) || s.MerchantID == "" {
+		return value, ErrInvalid
+	}
+	hash := requestDigest(map[string]any{"id": id, "version": version, "reason": reason})
+	err = r.withinScopeWrite(ctx, p, s, func(tx pgx.Tx) error {
+		_, found, e := readAdminIdempotency(ctx, tx, s.TenantID, p.UserID, "unmatched.hide", key, hash, &value)
+		if e != nil || found {
+			return e
+		}
+		e = tx.QueryRow(ctx, `UPDATE unmatched_payments u
+SET status='ignored',assigned_operator_id=$1,updated_at=clock_timestamp(),version=version+1
+WHERE u.id=$2 AND u.tenant_id=$3 AND u.version=$4
+  AND u.status IN ('new','candidates_ready','conflict')
+  AND EXISTS(
+    SELECT 1 FROM match_candidates mc
+    JOIN payment_routes pr ON pr.id=mc.route_id AND pr.tenant_id=mc.tenant_id
+    WHERE mc.unmatched_id=u.id AND cardinality(mc.disqualifiers)=0 AND pr.merchant_id=$5
+      AND mc.candidate_set_version=(SELECT max(latest.candidate_set_version) FROM match_candidates latest WHERE latest.unmatched_id=u.id AND latest.tenant_id=u.tenant_id)
+  )
+  AND NOT EXISTS(
+    SELECT 1 FROM match_candidates mc
+    JOIN payment_routes pr ON pr.id=mc.route_id AND pr.tenant_id=mc.tenant_id
+    WHERE mc.unmatched_id=u.id AND cardinality(mc.disqualifiers)=0 AND pr.merchant_id<>$5
+      AND mc.candidate_set_version=(SELECT max(latest.candidate_set_version) FROM match_candidates latest WHERE latest.unmatched_id=u.id AND latest.tenant_id=u.tenant_id)
+  )
+RETURNING u.id::text,u.status::text,u.version`, p.UserID, id, s.TenantID, version, s.MerchantID).Scan(&value.ID, &value.Status, &value.Version)
+		if errors.Is(e, pgx.ErrNoRows) {
+			return ErrConflict
+		}
+		if e != nil {
+			return e
+		}
+		if e = writeAdminIdempotency(ctx, tx, s.TenantID, p.UserID, "unmatched.hide", key, hash, value); e != nil {
+			return e
+		}
+		return r.appendAuditTx(ctx, tx, AuditEntry{TenantID: s.TenantID, MerchantID: s.MerchantID, ActorUserID: p.UserID, SessionID: p.SessionID, Action: "unmatched.hide", ResourceType: "unmatched_payment", ResourceID: id, RequestID: key, Reason: reason, AfterDigest: requestDigest(value), Details: json.RawMessage(`{"attribution":"none"}`), OccurredAt: time.Now().UTC()})
+	})
+	return value, classifyAdminDB(err)
+}
+
 func (r *PostgresRepository) assignUnmatched(ctx context.Context, p Principal, s Scope, id string, version int64, reason, key string, claim bool) (value UnmatchedRow, err error) {
 	if !ids.Valid(id) {
 		return value, ErrInvalid

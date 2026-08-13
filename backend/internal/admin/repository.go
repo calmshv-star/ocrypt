@@ -55,6 +55,7 @@ type ReadRepository interface {
 type OperatorRepository interface {
 	ClaimUnmatched(context.Context, Principal, Scope, string, int64, string, string) (UnmatchedRow, error)
 	ReleaseUnmatched(context.Context, Principal, Scope, string, int64, string, string) (UnmatchedRow, error)
+	HideUnmatched(context.Context, Principal, Scope, string, int64, string, string) (UnmatchedMutation, error)
 	CreateActionRequest(context.Context, Principal, Scope, ActionRequest, string) (ActionRequest, error)
 	GetActionRequest(context.Context, Principal, Scope, string) (ActionRequest, error)
 	DecideActionRequest(context.Context, Principal, Scope, string, string, string, time.Time) (ActionRequest, error)

@@ -291,6 +291,7 @@ export const zhCN = {
   "unmatched.ignoreReason": "填写原因后忽略",
   "unmatched.independentVerification": "请求独立验证",
   "unmatched.requestResolution": "提交确认",
+  "unmatched.hide": "从列表中隐藏",
   "webhooks.addEndpoint": "添加端点",
   "webhooks.signedEvents": "签名规范事件",
   "webhooks.backlog": "积压",

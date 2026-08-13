@@ -179,6 +179,7 @@ export const en = {
   "unmatched.ignoreReason": "Ignore with reason",
   "unmatched.independentVerification": "Request independent verification",
   "unmatched.requestResolution": "Send for confirmation",
+  "unmatched.hide": "Hide from list",
   "unmatched.candidateScore": "Candidate score {score}%",
   "webhooks.endpoint": "Endpoint",
   "webhooks.delivery": "Delivery",

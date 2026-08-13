@@ -206,6 +206,18 @@ paths:
       responses:
         '200': {description: Updated case, content: {application/json: {schema: {$ref: '#/components/schemas/Unmatched'}}}}
         '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/unmatched/{id}/hide:
+    post:
+      tags: [Operations]
+      summary: Hide an unmatched transfer without attributing it to an order
+      description: Keeps immutable transfer evidence and an admin audit entry, but removes the case from the active review queue. It never credits an order.
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
+      requestBody: {$ref: '#/components/requestBodies/OperatorCommand'}
+      responses:
+        '200': {description: Hidden case marker, content: {application/json: {schema: {$ref: '#/components/schemas/UnmatchedMutation'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
   /admin/v1/unmatched/{id}/resolution-requests:
     post:
       tags: [Operations]
@@ -1223,8 +1235,9 @@ components:
         recent_intents: {type: array, maxItems: 6, items: {$ref: '#/components/schemas/Intent'}}
     Intent: {type: object, required: [id,merchant_id,merchant_order_id,amount_minor,currency,currency_scale,status,created_at,expires_at], properties: {id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, merchant_order_id: {type: string}, amount_minor: {type: string, pattern: '^[0-9]+$'}, currency: {type: string}, currency_scale: {type: integer}, status: {type: string}, created_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time}}}
     Transfer: {type: object, required: [id,chain_id,transaction_id,asset_id,amount_atomic,status,confirmations,observed_at], properties: {id: {$ref: '#/components/schemas/UUID'}, chain_id: {type: string}, transaction_id: {type: string}, asset_id: {type: string}, amount_atomic: {type: string, pattern: '^[0-9]+$'}, status: {type: string}, confirmations: {type: integer}, observed_at: {type: string, format: date-time}}}
-    Candidate: {type: object, required: [id,route_id,rank,score,evidence,disqualified,merchant_order_id,expected_display,asset_symbol,order_created_at], properties: {id: {$ref: '#/components/schemas/UUID'}, route_id: {$ref: '#/components/schemas/UUID'}, rank: {type: integer}, score: {type: integer}, evidence: {type: object}, disqualified: {type: boolean}, merchant_order_id: {type: string}, expected_display: {type: string}, asset_symbol: {type: string}, order_created_at: {type: string, format: date-time}}}
+    Candidate: {type: object, required: [id,route_id,rank,score,evidence,disqualified,merchant_order_id,expected_display,expected_atomic,asset_symbol,order_amount_minor,order_currency,order_currency_scale,order_created_at], properties: {id: {$ref: '#/components/schemas/UUID'}, route_id: {$ref: '#/components/schemas/UUID'}, rank: {type: integer}, score: {type: integer}, evidence: {type: object}, disqualified: {type: boolean}, merchant_order_id: {type: string}, expected_display: {type: string}, expected_atomic: {type: string, pattern: '^[0-9]+$'}, asset_symbol: {type: string}, order_amount_minor: {type: string, pattern: '^[0-9]+$'}, order_currency: {type: string, pattern: '^[A-Z]{3}$'}, order_currency_scale: {type: integer, minimum: 0, maximum: 9}, order_created_at: {type: string, format: date-time}}}
     Unmatched: {type: object, required: [id,event_id,classification,status,severity,version,created_at,chain_id,transaction_id,asset_symbol,asset_decimals,amount_atomic,on_chain_time,candidates], properties: {id: {$ref: '#/components/schemas/UUID'}, event_id: {$ref: '#/components/schemas/UUID'}, classification: {type: string}, status: {type: string}, severity: {type: string}, assigned_operator_id: {$ref: '#/components/schemas/UUID'}, version: {type: integer}, created_at: {type: string, format: date-time}, chain_id: {type: string}, transaction_id: {type: string}, asset_symbol: {type: string}, asset_decimals: {type: integer}, amount_atomic: {type: string, pattern: '^[0-9]+$'}, on_chain_time: {type: string, format: date-time}, candidates: {type: array, items: {$ref: '#/components/schemas/Candidate'}}}}
+    UnmatchedMutation: {type: object, additionalProperties: false, required: [id,status,version], properties: {id: {$ref: '#/components/schemas/UUID'}, status: {const: ignored}, version: {type: integer, minimum: 1}}}
     Webhook: {type: object, required: [id,merchant_id,url,status,failure_count], properties: {id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, url: {type: string, format: uri}, status: {type: string}, failure_count: {type: integer}, last_success_at: {type: string, format: date-time}}}
     Asset: {type: object, required: [asset_id,chain_id,symbol,status,required_confirmations,open_gaps], properties: {asset_id: {type: string}, chain_id: {type: string}, symbol: {type: string}, status: {type: string}, required_confirmations: {type: integer}, open_gaps: {type: integer}}}
     FinancialSettingsRoute:
