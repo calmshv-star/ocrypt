@@ -23,10 +23,10 @@ import (
 )
 
 func main() {
-	databaseURL := os.Getenv("DATABASE_URL")
+	databaseURL, databaseErr := secretEnvOrFile("DATABASE_URL", "DATABASE_URL_FILE")
 	workerID := os.Getenv("WORKER_ID")
-	if databaseURL == "" || workerID == "" {
-		slog.Error("DATABASE_URL and WORKER_ID are required")
+	if databaseErr != nil || workerID == "" {
+		slog.Error("database credential and WORKER_ID are required")
 		os.Exit(1)
 	}
 	roles := roleSet(os.Getenv("WORKER_ROLES"))
@@ -402,22 +402,34 @@ func decodeKey(raw string) ([]byte, error) {
 }
 
 func webhookEnvelopeKey() ([]byte, error) {
-	raw := strings.TrimSpace(os.Getenv("WEBHOOK_ENVELOPE_KEY"))
-	path := strings.TrimSpace(os.Getenv("WEBHOOK_ENVELOPE_KEY_FILE"))
-	if raw != "" && path != "" {
-		return nil, errors.New("WEBHOOK_ENVELOPE_KEY and WEBHOOK_ENVELOPE_KEY_FILE are mutually exclusive")
-	}
-	if path != "" {
-		encoded, err := os.ReadFile(path)
-		if err != nil {
-			return nil, errors.New("WEBHOOK_ENVELOPE_KEY_FILE cannot be read")
-		}
-		raw = strings.TrimSpace(string(encoded))
-		if strings.ContainsAny(raw, "\r\n") {
-			return nil, errors.New("WEBHOOK_ENVELOPE_KEY_FILE must contain one key")
-		}
+	raw, err := secretEnvOrFile("WEBHOOK_ENVELOPE_KEY", "WEBHOOK_ENVELOPE_KEY_FILE")
+	if err != nil {
+		return nil, err
 	}
 	return decodeKey(raw)
+}
+
+func secretEnvOrFile(environmentName, fileEnvironmentName string) (string, error) {
+	raw := strings.TrimSpace(os.Getenv(environmentName))
+	path := strings.TrimSpace(os.Getenv(fileEnvironmentName))
+	if raw != "" && path != "" {
+		return "", errors.New(environmentName + " and " + fileEnvironmentName + " are mutually exclusive")
+	}
+	if path == "" {
+		if raw == "" {
+			return "", errors.New(environmentName + " or " + fileEnvironmentName + " is required")
+		}
+		return raw, nil
+	}
+	encoded, err := os.ReadFile(path)
+	if err != nil {
+		return "", errors.New(fileEnvironmentName + " cannot be read")
+	}
+	raw = strings.TrimSpace(string(encoded))
+	if raw == "" || strings.ContainsAny(raw, "\r\n") {
+		return "", errors.New(fileEnvironmentName + " must contain one value")
+	}
+	return raw, nil
 }
 
 func env(key, fallback string) string {
