@@ -288,19 +288,19 @@ type AssetRow struct {
 }
 
 type FinancialSettingsRoute struct {
-	Currency                  string `json:"currency"`
-	ChainID                   string `json:"chain_id"`
-	AssetID                   string `json:"asset_id"`
-	AssetSymbol               string `json:"asset_symbol"`
-	AssetStatus               string `json:"asset_status"`
-	ChainStatus               string `json:"chain_status"`
-	RouteStatus               string `json:"route_status"`
-	WalletCount               int64  `json:"wallet_count"`
-	ActiveWalletCount         int64  `json:"active_wallet_count"`
-	AddressCount              int64  `json:"address_count"`
-	AvailableAddressCount     int64  `json:"available_address_count"`
-	AssignedAddressCount      int64  `json:"assigned_address_count"`
-	QuarantinedAddressCount   int64  `json:"quarantined_address_count"`
+	Currency                string `json:"currency"`
+	ChainID                 string `json:"chain_id"`
+	AssetID                 string `json:"asset_id"`
+	AssetSymbol             string `json:"asset_symbol"`
+	AssetStatus             string `json:"asset_status"`
+	ChainStatus             string `json:"chain_status"`
+	RouteStatus             string `json:"route_status"`
+	WalletCount             int64  `json:"wallet_count"`
+	ActiveWalletCount       int64  `json:"active_wallet_count"`
+	AddressCount            int64  `json:"address_count"`
+	AvailableAddressCount   int64  `json:"available_address_count"`
+	AssignedAddressCount    int64  `json:"assigned_address_count"`
+	QuarantinedAddressCount int64  `json:"quarantined_address_count"`
 }
 
 type FinancialSettingsInventory struct {

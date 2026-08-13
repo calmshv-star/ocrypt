@@ -32,7 +32,6 @@ const UnavailablePage = lazy(() => import("./LiveAdminPages").then((module) => (
 const PaymentLinksManagementPage = lazy(() => import("./ManagementPages").then((module) => ({ default: module.PaymentLinksManagementPage })));
 const APIClientsManagementPage = lazy(() => import("./ManagementPages").then((module) => ({ default: module.APIClientsManagementPage })));
 const WebhookManagementPage = lazy(() => import("./ManagementPages").then((module) => ({ default: module.WebhookManagementPage })));
-const ManagementAuditPage = lazy(() => import("./ManagementPages").then((module) => ({ default: module.ManagementAuditPage })));
 const ManagementActionsPage = lazy(() => import("./ManagementPages").then((module) => ({ default: module.ManagementActionsPage })));
 const PlatformControlPage = lazy(() => import("./PlatformControlPage").then((module) => ({ default: module.PlatformControlPage })));
 const MatchingPolicyPage = lazy(() => import("./MatchingPolicyPage").then((module) => ({ default: module.MatchingPolicyPage })));

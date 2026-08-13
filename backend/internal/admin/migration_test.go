@@ -98,7 +98,7 @@ func TestOverviewWebhookHealthIsMerchantScopedAndReadable(t *testing.T) {
 }
 
 func TestFinancialSettingsInventoryIsReadOnlyAndSecretFree(t *testing.T) {
-	raw, err := os.ReadFile("../../migrations/000041_admin_financial_settings_read.up.sql")
+	raw, err := os.ReadFile("../../migrations/000040_admin_financial_settings_read.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
