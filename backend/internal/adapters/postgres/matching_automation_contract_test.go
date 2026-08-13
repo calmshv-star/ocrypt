@@ -95,6 +95,16 @@ func TestAutomatedAggregateTimestampParameterIsExplicitlyTyped(t *testing.T) {
 	}
 }
 
+func TestAutomatedAllocationTimestampParameterIsExplicitlyTyped(t *testing.T) {
+	source, err := os.ReadFile("matching_automation.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(source), "$13::timestamptz,CASE WHEN $10='finalized' THEN $13::timestamptz ELSE NULL::timestamptz END") {
+		t.Fatal("payment match insert must type its reused timestamp parameter explicitly")
+	}
+}
+
 func TestSettlementUUIDIsExplicitlyCastWhenReusedAsBusinessReference(t *testing.T) {
 	for _, name := range []string{"matching_automation.go", "resolution_settlement.go", "hosted_settlement.go"} {
 		source, err := os.ReadFile(name)
