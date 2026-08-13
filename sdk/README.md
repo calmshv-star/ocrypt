@@ -73,6 +73,11 @@ Clients send `Merchant-Key-Id`, `Merchant-Timestamp`, `Merchant-Nonce`, `Content
 
 Webhook delivery is at least once and may be out of order. Verify the untouched body, commit `(event_id, body_digest)`, the order update, and fulfillment outbox in one transaction, then return `{"acknowledged_event_id":"…"}`. Persist the last contiguous merchant `sequence`; repair gaps using `listEvents(afterSequence)`, and use `getEvent` when exact canonical bytes are needed. Only `payment.settled` normally grants a product.
 
+In live mode a command credential is not a complete integration by itself.
+Before creating an order, the merchant must have an active webhook covering the
+required payment lifecycle states. Polling is not a production status channel;
+event reads exist only for explicit sequence-gap recovery.
+
 `payment.observed`, `payment.confirming`, and pre-settlement `payment.reorged` carry the bounded `observation` object (canonical transfer, current/required confirmations, finality, and evidence digest). `payment.resolution.updated` carries a secret-free `resolution` object. Treat both as informational; they never authorize fulfillment.
 
 ## Domain-safe integration helpers

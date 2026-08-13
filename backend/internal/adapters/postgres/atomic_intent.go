@@ -11,6 +11,19 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// A live merchant integration is incomplete until terminal and exception
+// payment states have a durable push channel. Command credentials create
+// orders; they are not a substitute for lifecycle delivery.
+const requiredWebhookEventTypesSQL = `ARRAY[
+  'payment.partially_paid',
+  'payment.needs_review',
+  'payment.settled',
+  'payment.overpaid',
+  'payment.expired',
+  'payment.cancelled',
+  'payment.reorged'
+]::text[]`
+
 // CheckoutSessionInsert is the typed capability passed to CreateIntentInTx.
 // It cannot execute arbitrary SQL and contains only checkout-safe fields.
 type CheckoutSessionInsert struct {
@@ -39,6 +52,18 @@ func (s *Store) CreateIntentInTx(ctx context.Context, tx pgx.Tx, cmd application
 	}
 	if err := setCorrelation(ctx, tx, cmd.CorrelationID); err != nil {
 		return domain.PaymentIntent{}, err
+	}
+	var webhookReady bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(
+SELECT 1
+FROM webhook_endpoints
+WHERE tenant_id=$1 AND merchant_id=$2 AND status='active'
+  AND ('*'=ANY(event_types) OR event_types @> `+requiredWebhookEventTypesSQL+`)
+)`, cmd.Principal.TenantID, cmd.Principal.MerchantID).Scan(&webhookReady); err != nil {
+		return domain.PaymentIntent{}, err
+	}
+	if !webhookReady {
+		return domain.PaymentIntent{}, fmt.Errorf("%w: an active webhook covering required payment lifecycle events is required", domain.ErrStateConflict)
 	}
 	metadata := cmd.Metadata
 	if len(metadata) == 0 {

@@ -139,7 +139,7 @@ describe("admin application", () => {
     renderApp("/settings", { client: client({ me: vi.fn().mockResolvedValue(settingsPrincipal) }), preview: false });
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
     const settingsPage = screen.getByTestId("merchant-settings-page");
-    for (const name of ["Financial settings", "Webhooks", "API clients", "Matching policies", "Audit log"]) {
+    for (const name of ["Financial settings", "Webhooks", "Integration credentials", "Matching policies", "Audit log"]) {
       expect(within(settingsPage).getByRole("link", { name: new RegExp(name) })).toBeInTheDocument();
     }
     for (const name of ["Management audit", "Assets & RPC", "Platform configuration", "Reconciliation"]) {
@@ -181,7 +181,7 @@ describe("admin application", () => {
     const liveClient=client({me:vi.fn().mockResolvedValue(webhookPrincipal),webhookEndpoints:vi.fn().mockResolvedValue({data:null})});
     renderApp("/webhooks",{client:liveClient,preview:false});
     expect(await screen.findByRole("heading",{name:"Webhook delivery"})).toBeInTheDocument();
-    expect(await screen.findByText("No webhook endpoints are configured. Integrations can still work by polling payment status through the merchant API.")).toBeInTheDocument();
+    expect(await screen.findByText("Integration is incomplete: configure and verify a signed webhook. New live orders are blocked without it.")).toBeInTheDocument();
   });
 
   it("shows directly provisioned merchant credentials without offering unsafe mutations", async () => {
@@ -190,9 +190,9 @@ describe("admin application", () => {
       id:"20000000-0000-4000-8000-000000000030",name:"mk_live_existing",managed:false,status:"active",scopes:["payments:read","payments:write"],versions:[{id:"20000000-0000-4000-8000-000000000030",key_id:"mk_live_existing",number:1,status:"current",valid_from:"2026-08-11T00:00:00Z"}],created_at:"2026-08-11T00:00:00Z",updated_at:"2026-08-11T00:00:00Z",version:1
     }]})});
     renderApp("/api-clients",{client:liveClient,preview:false});
-    expect(await screen.findByText("Direct merchant API")).toBeInTheDocument();
+    expect(await screen.findByText("System integration credential")).toBeInTheDocument();
     expect(screen.getByText("mk_live_existing")).toBeInTheDocument();
-    expect(screen.getByText(/shown read-only/)).toBeInTheDocument();
+    expect(screen.getByText(/read-only because it was provisioned outside this console/)).toBeInTheDocument();
     expect(screen.queryByRole("button",{name:"Rotate secret"})).not.toBeInTheDocument();
     expect(screen.queryByRole("button",{name:"Request revocation"})).not.toBeInTheDocument();
   });
