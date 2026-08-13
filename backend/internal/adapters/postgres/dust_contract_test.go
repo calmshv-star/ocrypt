@@ -15,7 +15,10 @@ func TestUnmatchedDustRemainsAuditableButStaysOutOfOperatorQueues(t *testing.T) 
 	for _, fragment := range []string{
 		"if len(candidates) == 0",
 		"belowUnmatchedDustThreshold(ctx, tx, event)",
-		"SELECT dust_threshold::text FROM assets",
+		"SELECT a.dust_threshold::text",
+		"payment_route_policy_bindings",
+		"underpayment_tolerance_bps",
+		"!plausiblePayment",
 		"'dust_below_asset_threshold','ignored'",
 		"SettlementIgnored",
 	} {
@@ -35,6 +38,41 @@ func TestUnmatchedDustRemainsAuditableButStaysOutOfOperatorQueues(t *testing.T) 
 	}
 	if !strings.Contains(string(admin), "u.status NOT IN ('resolved','ignored','invalid','reorged')") {
 		t.Fatal("terminal dust records can leak into the operator unmatched queue")
+	}
+}
+
+func TestDustExpansionCoversEveryConfiguredAssetAndPreservesPlausiblePayments(t *testing.T) {
+	raw, err := os.ReadFile("../../../migrations/000043_expand_unmatched_asset_dust.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	assets := []string{
+		"eth-ethereum", "usdc-ethereum", "usdt-ethereum",
+		"sol-solana", "usdc-solana", "usdt-solana",
+		"ton-ton", "usdt-ton", "trx-tron", "usdt-tron",
+		"eth-base", "usdc-base", "eth-arbitrum", "usdc-arbitrum",
+		"eth-optimism", "usdc-optimism", "avax-avalanche", "usdc-avalanche",
+		"pol-polygon", "usdc-polygon", "bnb-bsc",
+	}
+	for _, asset := range assets {
+		if !strings.Contains(sql, "'"+asset+"'") {
+			t.Errorf("dust expansion is missing %s", asset)
+		}
+	}
+	for _, fragment := range []string{
+		"e.amount_atomic<=a.dust_threshold",
+		"payment_matches pm",
+		"payment_route_policy_bindings b",
+		"underpayment_tolerance_bps",
+		"accept_late_within_grace",
+		"e.amount_atomic*10000 >= r.expected_amount_atomic",
+		"status='ignored'",
+		"assigned_operator_id=NULL",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("dust expansion is missing %q", fragment)
+		}
 	}
 }
 

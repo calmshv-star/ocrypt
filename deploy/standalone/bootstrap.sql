@@ -38,11 +38,19 @@ VALUES
 ('usdt-tron','tron:mainnet','USDT','Tether USD','fungible_token','TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',6,'active',clock_timestamp(),clock_timestamp())
 ON CONFLICT(id) DO NOTHING;
 
--- Native TON transfers at or below 0.001 TON are fee rebates/economic dust
--- unless they exactly match a live payment route. Settlement keeps the chain
--- event for audit while excluding unmatched dust from operator queues.
-UPDATE assets SET dust_threshold=1000000,updated_at=clock_timestamp(),version=version+1
-WHERE id='ton-ton' AND chain_id='ton:mainnet' AND dust_threshold=0;
+-- Keep economically meaningless transfers out of operator queues. Settlement
+-- still preserves every chain event and checks plausible payment routes first.
+WITH desired(asset_id,chain_id,dust_threshold) AS (
+  VALUES
+    ('eth-ethereum','eip155:1',1000000000::numeric),
+    ('sol-solana','solana:mainnet',100::numeric),
+    ('ton-ton','ton:mainnet',1000000::numeric),
+    ('trx-tron','tron:mainnet',100::numeric),
+    ('usdt-tron','tron:mainnet',100::numeric)
+)
+UPDATE assets a SET dust_threshold=GREATEST(a.dust_threshold,d.dust_threshold),updated_at=clock_timestamp(),version=version+1
+FROM desired d
+WHERE a.id=d.asset_id AND a.chain_id=d.chain_id AND a.dust_threshold<d.dust_threshold;
 
 INSERT INTO wallets(id,tenant_id,merchant_id,chain_id,custody_mode,status,created_at,updated_at)
 VALUES

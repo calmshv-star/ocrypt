@@ -67,6 +67,29 @@ ON CONFLICT(id) DO UPDATE SET
   canonical_contract=EXCLUDED.canonical_contract,decimals=EXCLUDED.decimals,
   status='active',updated_at=clock_timestamp();
 
+WITH desired(asset_id,chain_id,dust_threshold) AS (
+  VALUES
+    ('usdc-ethereum','eip155:1',100::numeric),
+    ('usdt-ethereum','eip155:1',100::numeric),
+    ('usdc-solana','solana:mainnet',100::numeric),
+    ('usdt-solana','solana:mainnet',100::numeric),
+    ('usdt-ton','ton:mainnet',100::numeric),
+    ('eth-base','eip155:8453',1000000000::numeric),
+    ('usdc-base','eip155:8453',100::numeric),
+    ('eth-arbitrum','eip155:42161',1000000000::numeric),
+    ('usdc-arbitrum','eip155:42161',100::numeric),
+    ('eth-optimism','eip155:10',1000000000::numeric),
+    ('usdc-optimism','eip155:10',100::numeric),
+    ('avax-avalanche','eip155:43114',1000000000::numeric),
+    ('usdc-avalanche','eip155:43114',100::numeric),
+    ('pol-polygon','eip155:137',1000000000::numeric),
+    ('usdc-polygon','eip155:137',100::numeric),
+    ('bnb-bsc','eip155:56',1000000000::numeric)
+)
+UPDATE assets a SET dust_threshold=GREATEST(a.dust_threshold,d.dust_threshold),updated_at=clock_timestamp(),version=version+1
+FROM desired d
+WHERE a.id=d.asset_id AND a.chain_id=d.chain_id AND a.dust_threshold<d.dust_threshold;
+
 INSERT INTO wallets(id,tenant_id,merchant_id,chain_id,custody_mode,status,created_at,updated_at)
 SELECT wallet_id,'0198a100-0000-7000-8000-000000000001','0198a100-0000-7000-8000-000000000002',chain_id,
        'watch_only','active',clock_timestamp(),clock_timestamp()

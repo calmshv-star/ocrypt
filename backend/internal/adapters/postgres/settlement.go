@@ -290,14 +290,40 @@ ON CONFLICT(event_id) DO NOTHING`, unmatchedID, eventID)
 // similar economic dust without ever hiding a valid exact payment route.
 func belowUnmatchedDustThreshold(ctx context.Context, tx pgx.Tx, event domain.TransferEvent) (bool, error) {
 	var thresholdText string
-	if err := tx.QueryRow(ctx, `SELECT dust_threshold::text FROM assets WHERE chain_id=$1 AND id=$2`, event.Identity.ChainID, event.Identity.AssetID).Scan(&thresholdText); err != nil {
+	var plausiblePayment bool
+	if err := tx.QueryRow(ctx, `SELECT a.dust_threshold::text,
+EXISTS(
+  SELECT 1
+  FROM payment_routes r
+  JOIN payment_intents i ON i.id=r.intent_id AND i.tenant_id=r.tenant_id
+  JOIN payment_route_policy_bindings b ON b.route_id=r.id AND b.tenant_id=r.tenant_id
+  WHERE r.provider='on_chain'
+    AND r.chain_id=$1
+    AND r.asset_id=$2
+    AND r.receiving_address=$3
+    AND r.status IN ('active','expired')
+    AND i.status IN ('pending','observed','partially_paid','confirmed','expired','needs_review','reorg_review')
+    AND (
+      $5::timestamptz BETWEEN r.starts_at AND r.expires_at
+      OR (
+        COALESCE((b.policy_snapshot->>'accept_late_within_grace')::boolean,false)
+        AND $5::timestamptz>r.expires_at
+        AND $5::timestamptz<=r.grace_ends_at
+      )
+    )
+    AND $4::numeric*10000 >= r.expected_amount_atomic*(
+      10000-LEAST(10000,GREATEST(0,COALESCE((b.policy_snapshot->>'underpayment_tolerance_bps')::numeric,0)))
+    )
+)
+FROM assets a
+WHERE a.chain_id=$1 AND a.id=$2`, event.Identity.ChainID, event.Identity.AssetID, event.Identity.ToAddress, event.Amount.String(), event.OnChainTime).Scan(&thresholdText, &plausiblePayment); err != nil {
 		return false, err
 	}
 	threshold, err := money.Parse(thresholdText)
 	if err != nil {
 		return false, err
 	}
-	return !threshold.IsZero() && event.Amount.Cmp(threshold) <= 0, nil
+	return !plausiblePayment && !threshold.IsZero() && event.Amount.Cmp(threshold) <= 0, nil
 }
 
 func insertCanonicalTransfer(ctx context.Context, tx pgx.Tx, event domain.TransferEvent) (bool, string, domain.TransferEvent, error) {
