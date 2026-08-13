@@ -679,13 +679,18 @@ func (r *PostgresRepository) ListUnmatched(ctx context.Context, p Principal, s S
 		}
 		args = append(args, cursorArgs...)
 		args = append(args, limit+1)
-		rows, e := tx.Query(ctx, `SELECT u.id::text,u.event_id::text,u.classification,u.status::text,u.severity,coalesce(u.assigned_operator_id::text,''),u.version,u.created_at FROM unmatched_payments u WHERE u.status NOT IN ('resolved','ignored','invalid','reorged')`+merchantFilter+clause+fmt.Sprintf(" ORDER BY u.id DESC LIMIT $%d", len(args)), args...)
+		rows, e := tx.Query(ctx, `SELECT u.id::text,u.event_id::text,u.classification,u.status::text,u.severity,coalesce(u.assigned_operator_id::text,''),u.version,u.created_at,
+e.chain_id,e.transaction_id,a.symbol,e.asset_decimals,e.amount_atomic::text,e.on_chain_time
+FROM unmatched_payments u
+JOIN transfer_events e ON e.id=u.event_id
+JOIN assets a ON a.id=e.asset_id AND a.chain_id=e.chain_id
+WHERE u.status NOT IN ('resolved','ignored','invalid','reorged')`+merchantFilter+clause+fmt.Sprintf(" ORDER BY u.id DESC LIMIT $%d", len(args)), args...)
 		if e != nil {
 			return e
 		}
 		for rows.Next() {
 			var v UnmatchedRow
-			if e := rows.Scan(&v.ID, &v.EventID, &v.Classification, &v.Status, &v.Severity, &v.AssignedOperatorID, &v.Version, &v.CreatedAt); e != nil {
+			if e := rows.Scan(&v.ID, &v.EventID, &v.Classification, &v.Status, &v.Severity, &v.AssignedOperatorID, &v.Version, &v.CreatedAt, &v.ChainID, &v.TransactionID, &v.AssetSymbol, &v.AssetDecimals, &v.AmountAtomic, &v.OnChainTime); e != nil {
 				rows.Close()
 				return e
 			}
@@ -699,10 +704,14 @@ func (r *PostgresRepository) ListUnmatched(ctx context.Context, p Principal, s S
 		trimPage(&page.Items, &page.NextCursor, limit, func(v UnmatchedRow) string { return v.ID })
 		for i := range page.Items {
 			v := &page.Items[i]
-			candidateSQL := `SELECT mc.id::text,mc.route_id::text,mc.rank,mc.score,mc.evidence,cardinality(mc.disqualifiers)>0 FROM match_candidates mc`
+			candidateSQL := `SELECT mc.id::text,mc.route_id::text,mc.rank,mc.score,mc.evidence,cardinality(mc.disqualifiers)>0,
+pi.merchant_order_id,pr.display_amount,a.symbol,pi.created_at
+FROM match_candidates mc
+JOIN payment_routes pr ON pr.id=mc.route_id AND pr.tenant_id=mc.tenant_id
+JOIN payment_intents pi ON pi.id=pr.intent_id AND pi.tenant_id=pr.tenant_id
+JOIN assets a ON a.id=pr.asset_id AND a.chain_id=pr.chain_id`
 			candidateArgs := []any{v.ID}
 			if s.MerchantID != "" {
-				candidateSQL += ` JOIN payment_routes pr ON pr.id=mc.route_id AND pr.tenant_id=mc.tenant_id`
 				candidateArgs = append(candidateArgs, s.MerchantID)
 			}
 			candidateSQL += ` WHERE mc.unmatched_id=$1`
@@ -717,7 +726,7 @@ func (r *PostgresRepository) ListUnmatched(ctx context.Context, p Principal, s S
 			}
 			for crows.Next() {
 				var c CandidateRow
-				if e := crows.Scan(&c.ID, &c.RouteID, &c.Rank, &c.Score, &c.Evidence, &c.Disqualified); e != nil {
+				if e := crows.Scan(&c.ID, &c.RouteID, &c.Rank, &c.Score, &c.Evidence, &c.Disqualified, &c.MerchantOrderID, &c.ExpectedDisplay, &c.AssetSymbol, &c.OrderCreatedAt); e != nil {
 					crows.Close()
 					return e
 				}

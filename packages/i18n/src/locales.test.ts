@@ -18,7 +18,7 @@ describe("locale catalog", () => {
   });
 
   it("translates known strings", () => {
-    expect(translate("ru", "page.unmatched.title")).toBe("Очередь неопознанных");
+    expect(translate("ru", "page.unmatched.title")).toBe("Платежи на проверке");
     expect(translate("zh-CN", "landing.hero.primary")).toBe("体验沙盒");
   });
 });

@@ -187,6 +187,24 @@ func TestUnmatchedListDrainsPageBeforeCandidateQueries(t *testing.T) {
 	}
 }
 
+func TestUnmatchedListExposesOnlyUsefulPaymentAndOrderFacts(t *testing.T) {
+	raw, err := os.ReadFile("postgres.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	for _, fragment := range []string{
+		"JOIN transfer_events e ON e.id=u.event_id",
+		"e.chain_id,e.transaction_id,a.symbol,e.asset_decimals,e.amount_atomic::text,e.on_chain_time",
+		"pi.merchant_order_id,pr.display_amount,a.symbol,pi.created_at",
+		"JOIN payment_intents pi ON pi.id=pr.intent_id AND pi.tenant_id=pr.tenant_id",
+	} {
+		if !strings.Contains(source, fragment) {
+			t.Errorf("unmatched operator view is missing a useful fact: %q", fragment)
+		}
+	}
+}
+
 func TestManualResolutionBridgePersistsAndRechecksCandidateVersion(t *testing.T) {
 	raw, err := os.ReadFile("postgres.go")
 	if err != nil {

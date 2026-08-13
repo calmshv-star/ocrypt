@@ -1,10 +1,10 @@
 import { useI18n, type MessageKey } from "@merchant/i18n";
 import { Badge, Button, DataTable, Input, PageHeader, SectionCard, StatCard, StatusBadge, type DataTableColumn } from "@merchant/ui";
 import { useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ArrowRight, CheckCircle2, CircleDollarSign, Clock3, FileClock, Fingerprint, RadioTower, RefreshCw, Scale, Webhook } from "lucide-react";
+import { Activity, AlertTriangle, ArrowRight, CheckCircle2, CircleDollarSign, Clock3, FileClock, RadioTower, RefreshCw, Scale, Webhook } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { isStepUpError, useAdmin, useAdminQuery } from "./AdminProvider";
-import type { ActionRequest, AdminScope, AssetRow, AuditRow, IntentRow, Overview, Page, Permission, ReconciliationRow, TransferRow, UnmatchedRow, WebhookRow } from "./api/types";
+import type { AdminScope, AssetRow, AuditRow, IntentRow, Overview, Page, Permission, ReconciliationRow, TransferRow, UnmatchedRow, WebhookRow } from "./api/types";
 
 type Resource = "intents" | "transfers" | "assets" | "reconciliation" | "audit";
 type DisplayRow = { id: string; cells: ReactNode[] };
@@ -56,6 +56,38 @@ function formatExactMinor(value: string, scale: number) {
   if (scale <= 0) return digits;
   const padded = digits.padStart(scale + 1, "0");
   return `${padded.slice(0, -scale)}.${padded.slice(-scale)}`;
+}
+
+function formatAtomic(value: string, scale: number) {
+  const exact = formatExactMinor(value, scale);
+  return exact.includes(".") ? exact.replace(/0+$/, "").replace(/\.$/, "") : exact;
+}
+
+function unmatchedReasonKey(classification: string): MessageKey {
+  if (classification.includes("partial") || classification.includes("underpaid")) return "unmatched.underpaid";
+  if (classification.includes("late")) return "unmatched.late";
+  if (classification.includes("wrong_asset") || classification.includes("cross_asset")) return "unmatched.wrongAsset";
+  if (classification.includes("ambiguous")) return "unmatched.ambiguous";
+  return "status.needsReview";
+}
+
+function networkName(chainID: string) {
+  const names: Record<string, string> = {
+    tron: "Tron (TRC-20)",
+    "tron:mainnet": "Tron (TRC-20)",
+    ton: "TON",
+    "ton:mainnet": "TON",
+    solana: "Solana",
+    "solana:mainnet": "Solana",
+    "eip155:1": "Ethereum",
+    "eip155:10": "Optimism",
+    "eip155:56": "BNB Smart Chain",
+    "eip155:137": "Polygon",
+    "eip155:42161": "Arbitrum",
+    "eip155:43114": "Avalanche",
+    "eip155:8453": "Base",
+  };
+  return names[chainID] ?? chainID;
 }
 
 function formatDate(value: string | undefined, locale: string) {
@@ -346,9 +378,6 @@ function newIdempotencyKey() {
   return globalThis.crypto?.randomUUID?.() ?? `admin-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-type AdminMutation = () =>
-  Promise<unknown>;
-
 function currentReturnPath() {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }
@@ -360,15 +389,11 @@ export function LiveUnmatchedPage() {
   const query = useAdminQuery<Page<UnmatchedRow>>("unmatched", "unmatched:read", (client, scope) => client.unmatched(scope));
   const [selectedId, setSelectedId] = useState("");
   const [candidateId, setCandidateId] = useState("");
-  const [reason, setReason] = useState("");
   const [acceptShortfall, setAcceptShortfall] = useState(false);
   const [acceptLate, setAcceptLate] = useState(false);
   const [acceptCrossAsset, setAcceptCrossAsset] = useState(false);
-  const [actionId, setActionId] = useState("");
-  const [action, setAction] = useState<ActionRequest | null>(null);
   const [notice, setNotice] = useState<"success" | "failure" | "stepup" | null>(null);
   const [busy, setBusy] = useState(false);
-  const commandKey = useRef(newIdempotencyKey());
   const resolutionKey = useRef(newIdempotencyKey());
   const cases = query.data?.items ?? [];
   const selected = cases.find((item) => item.id === selectedId) ?? cases[0];
@@ -376,19 +401,27 @@ export function LiveUnmatchedPage() {
     if (!selected) return;
     setSelectedId(selected.id);
     setCandidateId((current) => selected.candidates.some((candidate) => candidate.route_id === current && !candidate.disqualified) ? current : selected.candidates.find((candidate) => !candidate.disqualified)?.route_id ?? "");
-    commandKey.current = newIdempotencyKey();
     resolutionKey.current = newIdempotencyKey();
+    setAcceptShortfall(false);
+    setAcceptLate(false);
+    setAcceptCrossAsset(false);
+    setNotice(null);
   }, [selected?.id]);
 
-  const mutate = async (
-    operation: AdminMutation,
-    resetKey?: () => void
-  ) => {
+  const classification = selected?.classification ?? "";
+  const requiresShortfall = classification.includes("partial") || classification.includes("underpaid");
+  const requiresLate = classification.includes("late");
+  const requiresCrossAsset = classification.includes("wrong_asset") || classification.includes("cross_asset");
+  const exceptionConfirmed = (!requiresShortfall || acceptShortfall) && (!requiresLate || acceptLate) && (!requiresCrossAsset || acceptCrossAsset);
+  const compatibleCandidates = selected?.candidates.filter((candidate) => !candidate.disqualified) ?? [];
+  const selectedCandidate = compatibleCandidates.find((candidate) => candidate.route_id === candidateId);
+  const requestResolution = async () => {
+    if (!selected || !selectedCandidate || !admin.scope || !exceptionConfirmed || !admin.can("resolution:request")) return;
     setBusy(true);
     setNotice(null);
     try {
-      await operation();
-      resetKey?.();
+      await admin.client!.requestResolution(admin.scope as AdminScope, selected.id, { version: selected.version, target_route_id: candidateId, reason: `Manual review: payment matched to order ${selectedCandidate.merchant_order_id}`, idempotency_key: resolutionKey.current, accept_shortfall: acceptShortfall, accept_late_payment: acceptLate, accept_cross_asset: acceptCrossAsset });
+      resolutionKey.current = newIdempotencyKey();
       setNotice("success");
       await queryClient.invalidateQueries({ queryKey: ["admin", "unmatched"] });
     } catch (error) {
@@ -397,53 +430,26 @@ export function LiveUnmatchedPage() {
       setBusy(false);
     }
   };
-  const command = (kind: "claim" | "release") => {
-    if (!selected || !admin.scope || reason.trim().length < 8 || !admin.can("unmatched:claim")) return;
-    const input = { version: selected.version, reason: reason.trim(), idempotency_key: commandKey.current };
-    void mutate(() => kind === "claim" ? admin.client!.claimUnmatched(admin.scope as AdminScope, selected.id, input) : admin.client!.releaseUnmatched(admin.scope as AdminScope, selected.id, input), () => { commandKey.current = newIdempotencyKey(); });
-  };
-  const requestResolution = () => {
-    if (!selected || !candidateId || !admin.scope || reason.trim().length < 8 || !admin.can("resolution:request")) return;
-    void mutate(async () => {
-      const created = await admin.client!.requestResolution(admin.scope as AdminScope, selected.id, { version: selected.version, target_route_id: candidateId, reason: reason.trim(), idempotency_key: resolutionKey.current, accept_shortfall: acceptShortfall, accept_late_payment: acceptLate, accept_cross_asset: acceptCrossAsset });
-      setAction(created);
-      setActionId(created.id);
-    }, () => { resolutionKey.current = newIdempotencyKey(); });
-  };
-  const loadAction = async () => {
-    if (!admin.scope || !actionId) return;
-    setBusy(true); setNotice(null);
-    try { setAction(await admin.client!.action(admin.scope, actionId)); } catch { setAction(null); setNotice("failure"); } finally { setBusy(false); }
-  };
-  const decide = (decision: "approve" | "reject") => {
-    if (!action || !admin.scope || reason.trim().length < 8 || action.requested_by === admin.principal?.user_id || !admin.can("resolution:approve")) return;
-    void mutate(async () => {
-      const updated = decision === "approve" ? await admin.client!.approveAction(admin.scope as AdminScope, action.id, reason.trim()) : await admin.client!.rejectAction(admin.scope as AdminScope, action.id, reason.trim());
-      setAction(updated);
-    });
-  };
-  const actionOwn = action?.requested_by === admin.principal?.user_id;
+
   return <div className="admin-page">
-    <PageHeader actions={<Button onClick={() => void query.refetch()} variant="secondary"><RefreshCw size={15} />{t("common.refresh")}</Button>} description={t("page.unmatched.description")} eyebrow={<><Fingerprint size={13} />{t("admin.connected")}</>} title={t("page.unmatched.title")} />
+    <PageHeader actions={<Button onClick={() => void query.refetch()} variant="secondary"><RefreshCw size={15} />{t("common.refresh")}</Button>} description={t("page.unmatched.description")} title={t("page.unmatched.title")} />
     <PageState permission="unmatched:read" query={query}>
-      {cases.length === 0 ? <StatePanel state="empty" /> : <div className="admin-live-split">
+      {cases.length === 0 ? <StatePanel state="empty" /> : <div className="admin-live-split admin-unmatched-simple">
         <SectionCard title={t("unmatched.queue")}>
-          <div className="admin-live-case-list">{cases.map((item) => <button aria-pressed={selected?.id === item.id} className={selected?.id === item.id ? "is-selected" : ""} key={item.id} onClick={() => setSelectedId(item.id)}><strong>{item.classification}</strong><span><StatusBadge status={item.status}>{item.status}</StatusBadge> · {item.severity}</span><code>{short(item.event_id)}</code></button>)}</div>
+          <div className="admin-live-case-list">{cases.map((item) => <button aria-pressed={selected?.id === item.id} className={selected?.id === item.id ? "is-selected" : ""} key={item.id} onClick={() => setSelectedId(item.id)}><strong>{formatAtomic(item.amount_atomic, item.asset_decimals)} {item.asset_symbol}</strong><span>{t(unmatchedReasonKey(item.classification))}</span><time dateTime={item.on_chain_time}>{formatDate(item.on_chain_time, locale)}</time></button>)}</div>
         </SectionCard>
-        {selected && <SectionCard title={short(selected.event_id)}>
-          <dl className="admin-live-facts"><div><dt>{t("admin.objectVersion")}</dt><dd>{selected.version}</dd></div><div><dt>{t("admin.assignedOperator")}</dt><dd>{selected.assigned_operator_id ? short(selected.assigned_operator_id) : t("common.unassigned")}</dd></div><div><dt>{t("admin.createdAt")}</dt><dd>{formatDate(selected.created_at, locale)}</dd></div></dl>
-          <fieldset className="admin-live-fieldset"><legend>{t("admin.selectCandidate")}</legend>{selected.candidates.map((candidate) => <label key={candidate.id}><input checked={candidateId === candidate.route_id} disabled={candidate.disqualified} name="candidate" onChange={() => setCandidateId(candidate.route_id)} type="radio" /><span><code>{short(candidate.route_id)}</code> · {t("unmatched.candidateScore", { score: candidate.score })}</span></label>)}</fieldset>
-          <label className="admin-live-label"><span>{t("admin.claimReason")}</span><textarea data-testid="operator-reason" onChange={(event) => setReason(event.target.value)} rows={3} value={reason} /></label>
-          <div className="admin-live-checks"><label><input checked={acceptShortfall} onChange={(event) => setAcceptShortfall(event.target.checked)} type="checkbox" />{t("admin.acceptShortfall")}</label><label><input checked={acceptLate} onChange={(event) => setAcceptLate(event.target.checked)} type="checkbox" />{t("admin.acceptLate")}</label><label><input checked={acceptCrossAsset} onChange={(event) => setAcceptCrossAsset(event.target.checked)} type="checkbox" />{t("admin.acceptCrossAsset")}</label></div>
-          <div className="admin-live-actions">{admin.can("unmatched:claim") && <><Button disabled={busy || reason.trim().length < 8} onClick={() => command("claim")} variant="secondary">{t("unmatched.claim")}</Button><Button disabled={busy || reason.trim().length < 8} onClick={() => command("release")} variant="secondary">{t("admin.release")}</Button></>}{admin.can("resolution:request") && <Button data-testid="request-resolution" disabled={busy || reason.trim().length < 8 || !candidateId} onClick={requestResolution}>{t("unmatched.requestResolution")}</Button>}</div>
+        {selected && <SectionCard title={t(unmatchedReasonKey(selected.classification))}>
+          <div className="admin-unmatched-payment"><div><span>{t("common.amount")}</span><strong>{formatAtomic(selected.amount_atomic, selected.asset_decimals)} {selected.asset_symbol}</strong></div><div><span>{t("common.network")}</span><strong>{networkName(selected.chain_id)}</strong></div><div><span>{t("common.time")}</span><strong>{formatDate(selected.on_chain_time, locale)}</strong></div></div>
+          {compatibleCandidates.length > 0 ? <fieldset className="admin-live-fieldset admin-unmatched-orders"><legend>{t("admin.selectCandidate")}</legend>{compatibleCandidates.map((candidate) => <label key={candidate.id}><input checked={candidateId === candidate.route_id} name="candidate" onChange={() => setCandidateId(candidate.route_id)} type="radio" /><span><strong>{candidate.merchant_order_id}</strong><small>{t("admin.exactAmount")}: {candidate.expected_display} {candidate.asset_symbol} · {formatDate(candidate.order_created_at, locale)}</small></span></label>)}</fieldset> : <div className="admin-unmatched-empty"><strong>{t("unmatched.noCandidate")}</strong><p>{t("unmatched.noCandidateBody")}</p></div>}
+          {requiresShortfall && <label className="admin-unmatched-confirm"><input checked={acceptShortfall} onChange={(event) => setAcceptShortfall(event.target.checked)} type="checkbox" /><span>{t("admin.acceptShortfall")}</span></label>}
+          {requiresLate && <label className="admin-unmatched-confirm"><input checked={acceptLate} onChange={(event) => setAcceptLate(event.target.checked)} type="checkbox" /><span>{t("admin.acceptLate")}</span></label>}
+          {requiresCrossAsset && <label className="admin-unmatched-confirm"><input checked={acceptCrossAsset} onChange={(event) => setAcceptCrossAsset(event.target.checked)} type="checkbox" /><span>{t("admin.acceptCrossAsset")}</span></label>}
+          {notice === "success" ? <div aria-live="polite" className="admin-unmatched-success" role="status"><CheckCircle2 aria-hidden="true" size={18}/><span><strong>{t("admin.requestCreated")}</strong><small>{t("admin.secondOperator")}</small></span></div> : <div className="admin-live-actions">{admin.can("resolution:request") && <Button data-testid="request-resolution" disabled={busy || !selectedCandidate || !exceptionConfirmed} onClick={() => void requestResolution()}>{t("unmatched.requestResolution")}</Button>}</div>}
+          {notice && notice !== "success" && <div aria-live="polite" className={`admin-live-notice is-${notice}`} role={notice === "failure" ? "alert" : "status"}>{t(notice === "stepup" ? "admin.stepUpBody" : "admin.mutationFailed")}{notice === "stepup" && <a href={admin.client?.stepUpURL(currentReturnPath())}>{t("admin.stepUp")}</a>}</div>}
+          <details className="admin-unmatched-technical"><summary>{t("common.details")}</summary><dl><div><dt>{t("admin.transaction")}</dt><dd><code>{short(selected.transaction_id, 18, 14)}</code></dd></div><div><dt>{t("admin.identifier")}</dt><dd><code>{short(selected.event_id)}</code></dd></div></dl></details>
         </SectionCard>}
       </div>}
     </PageState>
-    <SectionCard title={t("admin.actionRequest")}>
-      <div className="admin-live-inline"><Input aria-label={t("admin.actionId")} onChange={(event) => setActionId(event.target.value)} placeholder={t("admin.actionId")} value={actionId} /><Button disabled={busy || !actionId} onClick={() => void loadAction()} variant="secondary">{t("admin.loadAction")}</Button></div>
-      {action && <div className="admin-live-action"><dl className="admin-live-facts"><div><dt>{t("common.status")}</dt><dd><StatusBadge status={action.status}>{action.status}</StatusBadge></dd></div><div><dt>{t("admin.objectVersion")}</dt><dd>{action.object_version}</dd></div><div><dt>{t("admin.actor")}</dt><dd><code>{short(action.requested_by)}</code></dd></div></dl>{actionOwn && <p>{t("admin.secondOperator")}</p>}{admin.can("resolution:approve") && <div className="admin-live-actions"><Button disabled={busy || actionOwn || reason.trim().length < 8} onClick={() => decide("approve")}>{t("admin.approve")}</Button><Button disabled={busy || actionOwn || reason.trim().length < 8} onClick={() => decide("reject")} variant="secondary">{t("admin.reject")}</Button></div>}</div>}
-      {notice && <div aria-live="polite" className={`admin-live-notice is-${notice}`} role={notice === "failure" ? "alert" : "status"}>{t(notice === "success" ? "admin.mutationSucceeded" : notice === "stepup" ? "admin.stepUpBody" : "admin.mutationFailed")}{notice === "stepup" && <a href={admin.client?.stepUpURL(currentReturnPath())}>{t("admin.stepUp")}</a>}</div>}
-    </SectionCard>
   </div>;
 }
 

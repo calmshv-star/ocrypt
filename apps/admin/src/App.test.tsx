@@ -213,10 +213,9 @@ describe("admin application", () => {
     expect(captured?.aborted).toBe(true);
   });
 
-  it("submits versioned, reasoned and idempotent unmatched operations", async () => {
+  it("presents a plain-language unmatched review and submits a fenced resolution", async () => {
     const caseId = "20000000-0000-4000-8000-000000000001";
     const routeId = "20000000-0000-4000-8000-000000000002";
-    const claimUnmatched = vi.fn().mockResolvedValue(undefined);
     const requestResolution = vi.fn().mockResolvedValue({
       id: "20000000-0000-4000-8000-000000000003",
       tenant_id: tenantId,
@@ -242,21 +241,27 @@ describe("admin application", () => {
         severity: "medium",
         version: 8,
         created_at: new Date().toISOString(),
-        candidates: [{ id: "20000000-0000-4000-8000-000000000005", route_id: routeId, rank: 1, score: 96, evidence: {}, disqualified: false }]
+        chain_id: "tron",
+        transaction_id: "0123456789abcdef0123456789abcdef",
+        asset_symbol: "USDT",
+        asset_decimals: 6,
+        amount_atomic: "9500000",
+        on_chain_time: new Date().toISOString(),
+        candidates: [{ id: "20000000-0000-4000-8000-000000000005", route_id: routeId, rank: 1, score: 96, evidence: {}, disqualified: false, merchant_order_id: "ORDER-1042", expected_display: "10", asset_symbol: "USDT", order_created_at: new Date().toISOString() }]
       }] }),
-      claimUnmatched,
       requestResolution
     });
     renderApp("/unmatched", { client: liveClient, preview: false });
-    const reason = await screen.findByTestId("operator-reason");
-    fireEvent.change(reason, { target: { value: "Verified immutable payment evidence" } });
-    fireEvent.click(screen.getByRole("button", { name: "Claim case" }));
-    await waitFor(() => expect(claimUnmatched).toHaveBeenCalledTimes(1));
-    expect(claimUnmatched).toHaveBeenCalledWith({ tenantId, merchantId }, caseId, expect.objectContaining({ version: 8, reason: "Verified immutable payment evidence", idempotency_key: expect.stringMatching(/.{8,}/) }));
-    fireEvent.click(screen.getByRole("button", { name: "Request resolution" }));
+    expect(await screen.findByRole("heading", { name: "Payments to review" })).toBeInTheDocument();
+    expect(await screen.findByText("ORDER-1042")).toBeInTheDocument();
+    expect(screen.getAllByText(/USDT/).length).toBeGreaterThan(0);
+    expect(screen.queryByText("underpaid")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send for confirmation" })).toBeDisabled();
+    fireEvent.click(screen.getByLabelText("The amount is lower than expected — credit it anyway"));
+    fireEvent.click(screen.getByRole("button", { name: "Send for confirmation" }));
     await waitFor(() => expect(requestResolution).toHaveBeenCalledTimes(1));
-    expect(requestResolution).toHaveBeenCalledWith({ tenantId, merchantId }, caseId, expect.objectContaining({ version: 8, target_route_id: routeId, accept_shortfall: false, accept_late_payment: false, accept_cross_asset: false, idempotency_key: expect.stringMatching(/.{8,}/) }));
-    expect(screen.getByText("The requesting operator cannot approve or reject their own request.")).toBeInTheDocument();
+    expect(requestResolution).toHaveBeenCalledWith({ tenantId, merchantId }, caseId, expect.objectContaining({ version: 8, target_route_id: routeId, reason: "Manual review: payment matched to order ORDER-1042", accept_shortfall: true, accept_late_payment: false, accept_cross_asset: false, idempotency_key: expect.stringMatching(/.{8,}/) }));
+    expect(screen.getByText("Another administrator will check it before the payment is credited.")).toBeInTheDocument();
   });
 
   it("revokes a production session before returning to the sign-in state", async () => {
