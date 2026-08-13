@@ -340,7 +340,7 @@ func persistAutomatedAllocations(ctx context.Context, tx pgx.Tx, route automated
 		command, err := tx.Exec(ctx, `INSERT INTO payment_matches
 (id,tenant_id,event_id,route_id,intent_id,match_kind,expected_atomic,received_atomic,credited_atomic,state,evidence,policy_version,created_at,finalized_at,aggregate_id,allocation_role)
 VALUES($1,$2,$3,$4,$5,$6,$7::numeric,$8::numeric,$9::numeric,$10,$11::jsonb,$12,$13::timestamptz,CASE WHEN $10='finalized' THEN $13::timestamptz ELSE NULL::timestamptz END,$14,$15)
-ON CONFLICT (event_id) WHERE state<>'reversed' DO UPDATE SET
+ON CONFLICT (event_id) WHERE state<>'reversed' AND event_id IS NOT NULL DO UPDATE SET
  credited_atomic=EXCLUDED.credited_atomic,state=EXCLUDED.state,evidence=EXCLUDED.evidence,
  finalized_at=CASE WHEN EXCLUDED.state='finalized' THEN EXCLUDED.finalized_at ELSE payment_matches.finalized_at END
 WHERE payment_matches.route_id=EXCLUDED.route_id AND payment_matches.intent_id=EXCLUDED.intent_id
