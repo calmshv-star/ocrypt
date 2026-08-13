@@ -360,10 +360,9 @@ func getIntent(ctx context.Context, tx pgx.Tx, p application.Principal, id strin
 	return i, err
 }
 func getRoutes(ctx context.Context, tx pgx.Tx, tenantID, intentID string) ([]domain.PaymentRoute, error) {
-	rows, err := tx.Query(ctx, `SELECT r.id::text,r.intent_id::text,COALESCE(r.quote_id::text,''),COALESCE(r.address_assignment_id::text,''),COALESCE(r.chain_id,''),r.asset_id,r.provider,COALESCE(r.provider_id,''),COALESCE(r.provider_order_id::text,''),COALESCE(r.provider_reference,''),COALESCE(r.payment_url,''),r.expected_amount_atomic::text,r.asset_decimals,r.display_amount,COALESCE(r.receiving_address,''),COALESCE(r.memo,''),r.required_finality,r.status::text,r.version,r.starts_at,r.expires_at,r.grace_ends_at,COALESCE(pma.received_atomic,0)::text,COALESCE(progress.payment_count,0)
+	rows, err := tx.Query(ctx, `SELECT r.id::text,r.intent_id::text,COALESCE(r.quote_id::text,''),COALESCE(r.address_assignment_id::text,''),COALESCE(r.chain_id,''),r.asset_id,r.provider,COALESCE(r.provider_id,''),COALESCE(r.provider_order_id::text,''),COALESCE(r.provider_reference,''),COALESCE(r.payment_url,''),r.expected_amount_atomic::text,r.asset_decimals,r.display_amount,COALESCE(r.receiving_address,''),COALESCE(r.memo,''),r.required_finality,r.status::text,r.version,r.starts_at,r.expires_at,r.grace_ends_at,COALESCE(progress.received_atomic,0)::text,COALESCE(progress.payment_count,0)
 FROM payment_routes r
-LEFT JOIN payment_match_aggregates pma ON pma.tenant_id=r.tenant_id AND pma.route_id=r.id AND pma.state<>'reversed'
-LEFT JOIN LATERAL(SELECT count(*)::bigint AS payment_count FROM payment_matches matched WHERE matched.tenant_id=r.tenant_id AND matched.route_id=r.id AND matched.state<>'reversed' AND matched.allocation_role='payment')progress ON true
+LEFT JOIN LATERAL(SELECT count(*)::bigint AS payment_count,COALESCE(sum(matched.received_atomic),0) AS received_atomic FROM payment_matches matched WHERE matched.tenant_id=r.tenant_id AND matched.route_id=r.id AND matched.state<>'reversed' AND matched.allocation_role='payment')progress ON true
 WHERE r.tenant_id=$1 AND r.intent_id=$2 ORDER BY r.created_at,r.id`, tenantID, intentID)
 	if err != nil {
 		return nil, err

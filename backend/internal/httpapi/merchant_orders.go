@@ -197,7 +197,15 @@ func (s *Server) resolveMerchantAsset(ctx context.Context, principal application
 }
 
 func (s *Server) merchantResponse(intent domain.PaymentIntent, checkoutToken string) merchantOrderResponse {
-	result := merchantOrderResponse{PaymentID: intent.ID, OrderID: intent.MerchantOrderID, CustomerID: intent.CustomerReference, Status: string(intent.Status), StatusReason: intent.StatusReason, Amount: formatMinorAmount(intent.AmountMinor.String(), intent.CurrencyScale), Currency: intent.Currency, ExpiresAt: intent.ExpiresAt, UpdatedAt: intent.UpdatedAt, Version: intent.Version}
+	status := string(intent.Status)
+	if intent.Status == domain.IntentOverpaid {
+		// The merchant-order facade is deliberately fulfillment-oriented: once
+		// Ocrypt has finalized an overpayment, the invoice is paid. The internal
+		// intent, audit trail, excess amount and payment.overpaid event retain the
+		// financial distinction for reconciliation.
+		status = string(domain.IntentSettled)
+	}
+	result := merchantOrderResponse{PaymentID: intent.ID, OrderID: intent.MerchantOrderID, CustomerID: intent.CustomerReference, Status: status, StatusReason: intent.StatusReason, Amount: formatMinorAmount(intent.AmountMinor.String(), intent.CurrencyScale), Currency: intent.Currency, ExpiresAt: intent.ExpiresAt, UpdatedAt: intent.UpdatedAt, Version: intent.Version}
 	if len(intent.Routes) == 1 {
 		route := intent.Routes[0]
 		result.Payment = &merchantPayment{RouteID: route.ID, Network: route.ChainID, Asset: route.AssetID, Address: route.Address, Memo: route.Memo, Amount: route.DisplayAmount, ExpectedAmountAtomic: route.ExpectedAmount.String(), ReceivedAmount: route.ReceivedAmount, RemainingAmount: route.RemainingAmount, ExcessAmount: route.ExcessAmount, PaymentCount: route.PaymentCount, RequiredFinality: route.RequiredFinality, TopUpAllowed: intent.Status == domain.IntentPartiallyPaid && route.RemainingAmount != "" && route.RemainingAmount != "0" && time.Now().UTC().Before(route.ExpiresAt)}
