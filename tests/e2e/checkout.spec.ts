@@ -20,11 +20,15 @@ if (!checkoutUrl) {
       const amount = page.locator('[data-testid="payment-amount"]');
       const address = page.locator('[data-testid="payment-address"]');
       const network = page.locator('[data-testid="payment-network"]');
+      const fiatEquivalent = page.locator('[data-testid="payment-fiat-equivalent"]');
+      const feeWarning = page.locator('[data-testid="payment-fee-warning"]');
       const status = page.locator('[role="status"], [aria-live="polite"], [aria-live="assertive"]').first();
       await expect(amount).toBeVisible();
       await expect(amount).toContainText(/\d/);
       await expect(address).toBeVisible();
       await expect(network).toBeVisible();
+      await expect(fiatEquivalent).toContainText(/\d/);
+      await expect(feeWarning).toBeVisible();
       await expect(status).toBeVisible();
       await expect(status).not.toBeEmpty();
 

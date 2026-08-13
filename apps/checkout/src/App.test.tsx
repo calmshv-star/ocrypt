@@ -80,6 +80,11 @@ describe("hosted checkout", () => {
     expect(screen.getByRole("heading", { name: "Complete your payment" })).toBeInTheDocument();
     expect(screen.getAllByText("Demo Store").length).toBeGreaterThan(0);
     expect(screen.getByText("1280.00 USD")).toBeInTheDocument();
+    expect(screen.getByTestId("payment-fiat-equivalent")).toHaveTextContent("≈ 1280.00 USD");
+    expect(screen.getByText("This QR code contains only the receiving address. Enter the amount separately.")).toBeInTheDocument();
+    expect(screen.getByTestId("payment-fee-warning")).toHaveTextContent("wallet or exchange may add or deduct its fee");
+    expect(screen.getByRole("status")).toHaveTextContent("update the payment status automatically");
+    expect(screen.getByText(/Time remaining to pay:/)).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Select a payment route" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Copy address" }));
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("TWb4A6kVtQJ4z9Yp2mR7sX8cN1hL5uD3eF");
@@ -122,7 +127,7 @@ describe("hosted checkout", () => {
     expect(screen.getByTestId("payment-remaining")).toHaveTextContent("1.5 usdt-tron");
     expect(screen.getByTestId("payment-amount")).toHaveTextContent("1.5 usdt-tron");
     expect(screen.getByTestId("top-up-instruction")).toHaveTextContent("same address on the same network");
-    expect(screen.getByTestId("top-up-instruction")).toHaveTextContent("recipient must receive the exact remaining amount");
+    expect(screen.getByTestId("payment-fee-warning")).toHaveTextContent("recipient receives the amount shown above");
     fireEvent.click(screen.getByRole("button", { name: "Copy amount" }));
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("1.5");
     expect(screen.queryByRole("combobox", { name: "Select a payment route" })).not.toBeInTheDocument();
