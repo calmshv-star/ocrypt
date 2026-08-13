@@ -31,3 +31,20 @@ func TestWebhookEnvelopeKeyRejectsAmbiguousSources(t *testing.T) {
 		t.Fatal("ambiguous webhook key sources were accepted")
 	}
 }
+
+func TestDatabaseURLLoadsFromFileWithoutEnvironmentExposure(t *testing.T) {
+	t.Setenv("DATABASE_URL", "")
+	path := filepath.Join(t.TempDir(), "database-url")
+	value := "postgresql://worker:secret@postgres:5432/merchant?sslmode=disable"
+	if err := os.WriteFile(path, []byte(value+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DATABASE_URL_FILE", path)
+	got, err := secretEnvOrFile("DATABASE_URL", "DATABASE_URL_FILE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != value {
+		t.Fatal("database URL does not match")
+	}
+}
