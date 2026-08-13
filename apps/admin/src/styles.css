@@ -114,6 +114,7 @@
 .admin-live-split { display: grid; grid-template-columns: minmax(240px, .7fr) minmax(400px, 1.3fr); gap: 14px; align-items: start; }
 .admin-live-case-list { display: grid; gap: 7px; }.admin-live-case-list button { display: grid; gap: 6px; border: 1px solid var(--mp-border); border-radius: 10px; background: var(--mp-surface); padding: 11px; color: var(--mp-text); text-align: left; }.admin-live-case-list button:hover, .admin-live-case-list button.is-selected { border-color: var(--mp-primary); background: var(--mp-primary-soft); }.admin-live-case-list button strong { color: var(--mp-text-strong); }.admin-live-case-list button span { color: var(--mp-muted); font-size: 10px; }.admin-live-case-list code { font-size: 9px; }
 .admin-unmatched-simple { grid-template-columns: minmax(260px, .62fr) minmax(480px, 1.38fr); }
+.admin-unmatched-simple .admin-live-case-list { max-height: min(70vh, 760px); overflow-y: auto; scrollbar-gutter: stable; }
 .admin-unmatched-simple .admin-live-case-list button { min-height: 76px; align-content: center; padding: 13px 14px; }
 .admin-unmatched-simple .admin-live-case-list button strong { font-size: 13px; }
 .admin-unmatched-simple .admin-live-case-list time { color: var(--mp-muted); font-size: 9px; }
