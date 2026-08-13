@@ -292,6 +292,8 @@ grants = File.read("deploy/postgres/runtime-grants.sql")
 %w[platform_route_runtime_admission platform_wallet_runtime_admission sandbox_test_credential_admitted sandbox_workspaces sandbox_idempotency scanner_runtime_config_evidence list_current_admin_merchant_memberships platform_outbox_publisher].each do |admission|
   abort("runtime grants omit #{admission}") unless grants.include?(admission)
 end
+abort("matching worker cannot append idempotent decisions") unless grants.include?("GRANT SELECT,INSERT ON automated_matching_decisions TO merchant_matching_worker")
+abort("matching worker cannot consume forced-RLS reservations") unless grants.include?("GRANT SELECT,UPDATE ON amount_reservations TO merchant_matching_worker")
 retention_runtime_functions = %w[retention_claim_archive_batch retention_acknowledge_archive retention_fail_archive retention_claim_prune retention_advance_prune retention_worker_health]
 retention_control_functions = %w[create_retention_policy_version create_retention_legal_hold release_retention_legal_hold]
 retention_runtime_functions.each { |name| abort("retention runtime grants omit #{name}") unless grants.include?(name) }

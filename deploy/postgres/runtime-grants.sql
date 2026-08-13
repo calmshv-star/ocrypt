@@ -410,8 +410,11 @@ GRANT SELECT,UPDATE ON automated_matching_jobs,payment_intents,payment_routes,tr
 GRANT INSERT ON payment_intent_versions TO merchant_matching_worker;
 GRANT SELECT,INSERT,UPDATE ON payment_match_aggregates,payment_matches TO merchant_matching_worker;
 GRANT SELECT,INSERT ON ledger_accounts,ledger_entries,callback_events TO merchant_matching_worker;
-GRANT INSERT ON automated_matching_decisions,ledger_transactions,callback_deliveries,outbox_events TO merchant_matching_worker;
-GRANT UPDATE ON amount_reservations TO merchant_matching_worker;
+-- ON CONFLICT and forced-RLS updates read the target row even when the worker
+-- only appends a decision or consumes a reservation.
+GRANT SELECT,INSERT ON automated_matching_decisions TO merchant_matching_worker;
+GRANT INSERT ON ledger_transactions,callback_deliveries,outbox_events TO merchant_matching_worker;
+GRANT SELECT,UPDATE ON amount_reservations TO merchant_matching_worker;
 GRANT SELECT ON payment_route_policy_bindings,automated_matching_policies TO merchant_matching_worker;
 GRANT SELECT,UPDATE ON webhook_endpoints TO merchant_matching_worker;
 GRANT SELECT ON callback_events,webhook_endpoints,management_webhook_signing_keys TO merchant_callback_worker;
