@@ -360,6 +360,21 @@
 .settings-hub__link strong { color: var(--mp-text-strong); font-size: 12px; }
 .settings-hub__link small { color: var(--mp-muted); font-size: 10.5px; line-height: 1.5; }
 .settings-hub__link > svg { color: var(--mp-subtle); }
+.financial-settings-summary { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.financial-settings-summary article { display: grid; gap: 6px; border: 1px solid var(--mp-border); border-radius: 14px; background: var(--mp-surface); padding: 16px; box-shadow: var(--mp-shadow-xs); }
+.financial-settings-summary small, .financial-settings-summary span { color: var(--mp-muted); font-size: 10px; }
+.financial-settings-summary strong { color: var(--mp-text-strong); font-size: 20px; }
+.financial-settings-routes { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.financial-settings-routes article { display: grid; gap: 14px; border: 1px solid var(--mp-border); border-radius: 14px; padding: 15px; background: var(--mp-surface); }
+.financial-settings-routes header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.financial-settings-routes header strong, .financial-settings-routes header small { display: block; }
+.financial-settings-routes header strong { color: var(--mp-text-strong); font-size: 13px; }
+.financial-settings-routes header small { margin-top: 3px; color: var(--mp-muted); font-size: 9px; overflow-wrap: anywhere; }
+.financial-settings-routes dl { display: grid; gap: 8px; margin: 0; }
+.financial-settings-routes dl div { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--mp-border); padding-top: 8px; }
+.financial-settings-routes dt { color: var(--mp-muted); font-size: 10px; }
+.financial-settings-routes dd { margin: 0; color: var(--mp-text); font-size: 10px; }
+@media (max-width: 800px) { .financial-settings-summary,.financial-settings-routes { grid-template-columns: 1fr; } }
 .admin-management-card { display: grid; align-content: start; gap: 14px; min-width: 0; border: 1px solid var(--mp-border); border-radius: 15px; background: var(--mp-surface); padding: 16px; box-shadow: var(--mp-shadow-xs); }
 .admin-management-card.is-selected { border-color: var(--mp-primary); box-shadow: 0 0 0 3px var(--mp-primary-soft); }
 .admin-management-card > header, .admin-management-card__select { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 12px; }

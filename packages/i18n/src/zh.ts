@@ -653,6 +653,9 @@ export const zhCN = {
   "management.validUntilOptional": "有效期至（可选）",
   "management.scopesComma": "权限范围，以逗号分隔",
   "management.keyVersions": "密钥版本",
+  "management.directMerchantAPI": "Merchant API 直连",
+  "management.directMerchantAPIReadOnly": "现有集成。此凭据由管理控制台之外配置，因此仅供查看。",
+  "management.noWebhooksPollingNote": "尚未配置 Webhook。集成仍可通过 Merchant API 轮询支付状态。",
   "management.rotateSecret": "轮换密钥",
   "management.approvalBridgePending": "在服务器附加独立批准之前，此破坏性操作会保持阻止状态。",
   "management.revokeRequiresApproval": "撤销 · 需要批准",
@@ -1142,4 +1145,27 @@ export const zhCN = {
   "migrationControl.runs": "迁移任务",
   "migrationControl.noPendingAction": "无待处理执行器动作",
   "migrationControl.empty": "此租户没有迁移任务。"
+  ,"financialSettings.title": "财务设置"
+  ,"financialSettings.description": "该商户当前生效的法币、加密支付路由和收款容量。"
+  ,"financialSettings.active": "已启用"
+  ,"financialSettings.disabled": "已停用"
+  ,"financialSettings.merchantScope": "请选择商户工作区。"
+  ,"financialSettings.fiat": "法币"
+  ,"financialSettings.settlement": "结算货币：{currency}"
+  ,"financialSettings.routes": "支付路由"
+  ,"financialSettings.effectiveOnly": "仅显示当前获准的支付路由"
+  ,"financialSettings.walletPools": "收款网络"
+  ,"financialSettings.addressesHidden": "地址和签名数据已隐藏"
+  ,"financialSettings.routesTitle": "加密路由和收款容量"
+  ,"financialSettings.routesBody": "创建支付订单时使用的只读生产状态。"
+  ,"financialSettings.asset": "资产"
+  ,"financialSettings.network": "网络"
+  ,"financialSettings.wallets": "活跃钱包"
+  ,"financialSettings.addressCapacity": "地址容量"
+  ,"financialSettings.addressCapacityValue": "{total} 个中有 {available} 个可用"
+  ,"financialSettings.empty": "该商户未配置活跃支付路由。"
+  ,"financialSettings.safetyTitle": "此处绝不接收私钥"
+  ,"financialSettings.safetyBody": "此页面不显示或接收助记词、私钥、签名引用或完整收款地址。"
+  ,"financialSettings.changesTitle": "当前有意保持只读"
+  ,"financialSettings.changesBody": "在具备验证、独立审批、受保护激活和回滚前，操作控件不会开放。"
 } satisfies Messages;

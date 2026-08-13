@@ -653,6 +653,9 @@ export const de = {
   "management.validUntilOptional": "Gültig bis (optional)",
   "management.scopesComma": "Berechtigungen durch Kommas getrennt",
   "management.keyVersions": "Schlüsselversionen",
+  "management.directMerchantAPI": "Direkte Merchant-API-Anbindung",
+  "management.directMerchantAPIReadOnly": "Bestehende Integration. Dieser Zugang ist schreibgeschützt, da er außerhalb dieser Konsole eingerichtet wurde.",
+  "management.noWebhooksPollingNote": "Es sind keine Webhooks eingerichtet. Die Integration kann den Zahlungsstatus weiterhin über die Merchant API abfragen.",
   "management.rotateSecret": "Secret rotieren",
   "management.approvalBridgePending": "Diese destruktive Aktion bleibt gesperrt, bis der Server eine unabhängige Genehmigung zuordnet.",
   "management.revokeRequiresApproval": "Widerrufen · Genehmigung erforderlich",
@@ -1142,4 +1145,27 @@ export const de = {
   "migrationControl.runs": "Migrationsläufe",
   "migrationControl.noPendingAction": "Keine ausstehende Aktuatoraktion",
   "migrationControl.empty": "Für diesen Mandanten gibt es keine Migration."
+  ,"financialSettings.title": "Finanzeinstellungen"
+  ,"financialSettings.description": "Wirksame Fiat-Währungen, Krypto-Routen und Empfangskapazität dieses Händlers."
+  ,"financialSettings.active": "Aktiv"
+  ,"financialSettings.disabled": "Deaktiviert"
+  ,"financialSettings.merchantScope": "Wählen Sie einen Händler-Arbeitsbereich."
+  ,"financialSettings.fiat": "Fiat-Währungen"
+  ,"financialSettings.settlement": "Abrechnungswährung: {currency}"
+  ,"financialSettings.routes": "Zahlungsrouten"
+  ,"financialSettings.effectiveOnly": "Nur aktuell zugelassene Zahlungsrouten"
+  ,"financialSettings.walletPools": "Empfangsnetzwerke"
+  ,"financialSettings.addressesHidden": "Adressen und Signierdaten sind verborgen"
+  ,"financialSettings.routesTitle": "Krypto-Routen und Empfangskapazität"
+  ,"financialSettings.routesBody": "Schreibgeschützter Produktionszustand für Zahlungsaufträge."
+  ,"financialSettings.asset": "Asset"
+  ,"financialSettings.network": "Netzwerk"
+  ,"financialSettings.wallets": "Aktive Wallets"
+  ,"financialSettings.addressCapacity": "Adresskapazität"
+  ,"financialSettings.addressCapacityValue": "{available} von {total} verfügbar"
+  ,"financialSettings.empty": "Keine aktiven Zahlungsrouten konfiguriert."
+  ,"financialSettings.safetyTitle": "Private Schlüssel werden hier nie akzeptiert"
+  ,"financialSettings.safetyBody": "Diese Seite zeigt oder akzeptiert keine Seed-Phrasen, privaten Schlüssel, Signierer-Referenzen oder vollständigen Empfangsadressen."
+  ,"financialSettings.changesTitle": "Änderungen sind derzeit absichtlich schreibgeschützt"
+  ,"financialSettings.changesBody": "Bedienelemente bleiben bis zu Validierung, getrennter Freigabe, abgesicherter Aktivierung und Rollback deaktiviert."
 } satisfies Messages;

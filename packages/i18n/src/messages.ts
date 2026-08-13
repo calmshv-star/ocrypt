@@ -651,6 +651,9 @@ export const en = {
   "management.validUntilOptional": "Valid until (optional)",
   "management.scopesComma": "Scopes, separated by commas",
   "management.keyVersions": "Key versions",
+  "management.directMerchantAPI": "Direct merchant API",
+  "management.directMerchantAPIReadOnly": "Existing integration. This credential is shown read-only because it was provisioned outside the management console.",
+  "management.noWebhooksPollingNote": "No webhook endpoints are configured. Integrations can still work by polling payment status through the merchant API.",
   "management.rotateSecret": "Rotate secret",
   "management.approvalBridgePending": "This destructive action remains blocked until an independently approved action is attached by the server.",
   "management.revokeRequiresApproval": "Revoke · approval required",
@@ -1140,6 +1143,29 @@ export const en = {
   "migrationControl.runs": "Migration runs",
   "migrationControl.noPendingAction": "No pending actuator action",
   "migrationControl.empty": "No migration runs exist for this tenant."
+  ,"financialSettings.title": "Financial settings"
+  ,"financialSettings.description": "Effective fiat currencies, crypto routes and receiving capacity for this merchant."
+  ,"financialSettings.active": "Active"
+  ,"financialSettings.disabled": "Disabled"
+  ,"financialSettings.merchantScope": "Select a merchant workspace to view its financial configuration."
+  ,"financialSettings.fiat": "Fiat currencies"
+  ,"financialSettings.settlement": "Settlement currency: {currency}"
+  ,"financialSettings.routes": "Payment routes"
+  ,"financialSettings.effectiveOnly": "Only routes currently admitted for payments"
+  ,"financialSettings.walletPools": "Receiving networks"
+  ,"financialSettings.addressesHidden": "Addresses and signer data are hidden"
+  ,"financialSettings.routesTitle": "Crypto routes and receiving capacity"
+  ,"financialSettings.routesBody": "Read-only production state used when creating payment orders."
+  ,"financialSettings.asset": "Asset"
+  ,"financialSettings.network": "Network"
+  ,"financialSettings.wallets": "Active wallets"
+  ,"financialSettings.addressCapacity": "Address capacity"
+  ,"financialSettings.addressCapacityValue": "{available} available of {total}"
+  ,"financialSettings.empty": "No active payment routes are configured for this merchant."
+  ,"financialSettings.safetyTitle": "Private keys are never accepted here"
+  ,"financialSettings.safetyBody": "This page never displays or accepts seed phrases, private keys, signer references or full receiving addresses."
+  ,"financialSettings.changesTitle": "Changes are intentionally read-only for now"
+  ,"financialSettings.changesBody": "The current backend has no safe merchant-scoped approval contract for adding wallets or switching fiat and crypto routes. Controls will remain unavailable until that contract provides validation, separate approval, activation fencing and rollback."
 } as const;
 
 export type MessageKey = keyof typeof en;

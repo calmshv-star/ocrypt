@@ -162,6 +162,15 @@ paths:
       parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
       responses:
         '200': {description: Assets, content: {application/json: {schema: {$ref: '#/components/schemas/AssetPage'}}}}
+  /admin/v1/financial-settings:
+    get:
+      tags: [Read models]
+      summary: Effective merchant financial configuration without wallet addresses or secrets
+      description: Read-only inventory of admitted fiat and crypto routes plus aggregate receiving capacity. Private keys, signer references and full addresses are never returned.
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
+      responses:
+        '200': {description: Effective financial configuration, content: {application/json: {schema: {$ref: '#/components/schemas/FinancialSettingsInventory'}}}}
+        '403': {$ref: '#/components/responses/Problem'}
   /admin/v1/reconciliation:
     get:
       tags: [Read models]
@@ -1218,6 +1227,32 @@ components:
     Unmatched: {type: object, required: [id,event_id,classification,status,severity,version,created_at,candidates], properties: {id: {$ref: '#/components/schemas/UUID'}, event_id: {$ref: '#/components/schemas/UUID'}, classification: {type: string}, status: {type: string}, severity: {type: string}, assigned_operator_id: {$ref: '#/components/schemas/UUID'}, version: {type: integer}, created_at: {type: string, format: date-time}, candidates: {type: array, items: {$ref: '#/components/schemas/Candidate'}}}}
     Webhook: {type: object, required: [id,merchant_id,url,status,failure_count], properties: {id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, url: {type: string, format: uri}, status: {type: string}, failure_count: {type: integer}, last_success_at: {type: string, format: date-time}}}
     Asset: {type: object, required: [asset_id,chain_id,symbol,status,required_confirmations,open_gaps], properties: {asset_id: {type: string}, chain_id: {type: string}, symbol: {type: string}, status: {type: string}, required_confirmations: {type: integer}, open_gaps: {type: integer}}}
+    FinancialSettingsRoute:
+      type: object
+      additionalProperties: false
+      required: [currency,chain_id,asset_id,asset_symbol,asset_status,chain_status,route_status,wallet_count,active_wallet_count,address_count,available_address_count,assigned_address_count,quarantined_address_count]
+      properties:
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        chain_id: {type: string, minLength: 1, maxLength: 128}
+        asset_id: {type: string, minLength: 1, maxLength: 128}
+        asset_symbol: {type: string, minLength: 1, maxLength: 32}
+        asset_status: {type: string}
+        chain_status: {type: string}
+        route_status: {type: string}
+        wallet_count: {type: integer, minimum: 0}
+        active_wallet_count: {type: integer, minimum: 0}
+        address_count: {type: integer, minimum: 0}
+        available_address_count: {type: integer, minimum: 0}
+        assigned_address_count: {type: integer, minimum: 0}
+        quarantined_address_count: {type: integer, minimum: 0}
+    FinancialSettingsInventory:
+      type: object
+      additionalProperties: false
+      required: [settlement_currency,accepted_currencies,routes]
+      properties:
+        settlement_currency: {type: string, pattern: '^[A-Z]{3}$'}
+        accepted_currencies: {type: array, maxItems: 64, uniqueItems: true, items: {type: string, pattern: '^[A-Z]{3}$'}}
+        routes: {type: array, maxItems: 512, items: {$ref: '#/components/schemas/FinancialSettingsRoute'}}
     Reconciliation: {type: object, required: [id,run_type,status,started_at], properties: {id: {$ref: '#/components/schemas/UUID'}, run_type: {type: string}, status: {type: string}, started_at: {type: string, format: date-time}, ended_at: {type: string, format: date-time}}}
     Audit: {type: object, required: [event_id,actor_user_id,action,resource_type,resource_id,reason,details,occurred_at,entry_hash], properties: {event_id: {$ref: '#/components/schemas/UUID'}, actor_user_id: {$ref: '#/components/schemas/UUID'}, action: {type: string}, resource_type: {type: string}, resource_id: {type: string}, reason: {type: string}, details: {type: object}, occurred_at: {type: string, format: date-time}, entry_hash: {type: string, pattern: '^[0-9a-f]{64}$'}}}
     Action: {type: object, required: [id,tenant_id,kind,resource_type,resource_id,object_version,requested_by,reason,payload,status,requires_step_up,created_at,expires_at], properties: {id: {$ref: '#/components/schemas/UUID'}, tenant_id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, kind: {const: manual_resolution}, resource_type: {type: string}, resource_id: {type: string}, object_version: {type: integer}, requested_by: {$ref: '#/components/schemas/UUID'}, approved_by: {$ref: '#/components/schemas/UUID'}, rejected_by: {$ref: '#/components/schemas/UUID'}, reason: {type: string}, payload: {type: object}, status: {type: string}, requires_step_up: {type: boolean}, created_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time}}}

@@ -196,6 +196,8 @@ GRANT INSERT,UPDATE ON admin_action_requests,admin_operator_idempotency,
   manual_resolutions,unmatched_payments,callback_deliveries TO merchant_admin_runtime;
 GRANT EXECUTE ON FUNCTION append_admin_audit(uuid,uuid,uuid,uuid,uuid,text,text,text,text,text,bytea,bytea,jsonb,inet,bytea,timestamptz)
 TO merchant_admin_runtime;
+GRANT EXECUTE ON FUNCTION admin_financial_settings_inventory(uuid,uuid)
+TO merchant_admin_runtime;
 -- Converge the BFF's merchant-settings authority even if a pre-existing role
 -- had accumulated grants. Authorization is read-only; all mutation remains in
 -- the private settings API and its request-bound assertion contract.

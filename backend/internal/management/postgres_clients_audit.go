@@ -55,28 +55,57 @@ func (s *PostgresRepository) CreateAPIClient(ctx context.Context, p Principal, i
 
 func (s *PostgresRepository) ListAPIClients(ctx context.Context, p Principal, cursor string, limit int) (page Page[APIClient], err error) {
 	err = s.withinTenant(ctx, p.TenantID, func(tx pgx.Tx) error {
-		rows, e := tx.Query(ctx, `SELECT id::text FROM management_api_clients WHERE tenant_id=$1 AND merchant_id=$2 AND ($3='' OR id<$3::uuid) ORDER BY id DESC LIMIT $4`, p.TenantID, p.MerchantID, cursor, limit+1)
+		// The core merchant API predates the management surface. Include those
+		// independently provisioned credentials as read-only inventory so an
+		// owner can see every integration that can authenticate successfully.
+		// Managed versions are excluded from the second branch to avoid showing
+		// the same credential twice.
+		rows, e := tx.Query(ctx, `
+SELECT id::text,managed FROM (
+  SELECT c.id,true AS managed
+    FROM management_api_clients c
+   WHERE c.tenant_id=$1 AND c.merchant_id=$2
+  UNION ALL
+  SELECT a.id,false AS managed
+    FROM api_clients a
+   WHERE a.tenant_id=$1 AND a.merchant_id=$2
+     AND NOT EXISTS(
+       SELECT 1 FROM management_api_client_versions v
+        WHERE v.tenant_id=a.tenant_id AND v.api_client_id=a.id)
+) inventory
+WHERE ($3='' OR id<$3::uuid)
+ORDER BY id DESC
+LIMIT $4`, p.TenantID, p.MerchantID, cursor, limit+1)
 		if e != nil {
 			return e
 		}
 		defer rows.Close()
-		var list []string
+		type inventoryItem struct {
+			id      string
+			managed bool
+		}
+		var list []inventoryItem
 		for rows.Next() {
-			var id string
-			if e = rows.Scan(&id); e != nil {
+			var item inventoryItem
+			if e = rows.Scan(&item.id, &item.managed); e != nil {
 				return e
 			}
-			list = append(list, id)
+			list = append(list, item)
 		}
 		if e = rows.Err(); e != nil {
 			return e
 		}
 		if len(list) > limit {
-			page.NextCursor = list[limit-1]
+			page.NextCursor = list[limit-1].id
 			list = list[:limit]
 		}
-		for _, id := range list {
-			item, e := loadAPIClient(ctx, tx, p, id)
+		for _, inventory := range list {
+			var item APIClient
+			if inventory.managed {
+				item, e = loadAPIClient(ctx, tx, p, inventory.id)
+			} else {
+				item, e = loadUnmanagedAPIClient(ctx, tx, p, inventory.id, s.now())
+			}
 			if e != nil {
 				return e
 			}
@@ -192,6 +221,7 @@ func (s *PostgresRepository) RevokeAPIClient(ctx context.Context, p Principal, i
 }
 
 func loadAPIClient(ctx context.Context, tx pgx.Tx, p Principal, id string) (result APIClient, err error) {
+	result.Managed = true
 	err = tx.QueryRow(ctx, `SELECT id::text,name,status,created_at,updated_at,version FROM management_api_clients WHERE id=$1 AND tenant_id=$2 AND merchant_id=$3`, id, p.TenantID, p.MerchantID).Scan(&result.ID, &result.Name, &result.Status, &result.CreatedAt, &result.UpdatedAt, &result.Version)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return result, ErrNotFound
@@ -224,6 +254,36 @@ func loadAPIClient(ctx context.Context, tx pgx.Tx, p Principal, id string) (resu
 	}
 	sortStrings(result.Scopes)
 	return
+}
+
+func loadUnmanagedAPIClient(ctx context.Context, tx pgx.Tx, p Principal, id string, now time.Time) (result APIClient, err error) {
+	var keyID string
+	var validFrom time.Time
+	var validUntil, revokedAt *time.Time
+	result.Managed = false
+	err = tx.QueryRow(ctx, `SELECT id::text,key_id,scopes,valid_from,valid_until,revoked_at,created_at,updated_at,version FROM api_clients WHERE id=$1 AND tenant_id=$2 AND merchant_id=$3`, id, p.TenantID, p.MerchantID).Scan(&result.ID, &keyID, &result.Scopes, &validFrom, &validUntil, &revokedAt, &result.CreatedAt, &result.UpdatedAt, &result.Version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return result, ErrNotFound
+	}
+	if err != nil {
+		return result, err
+	}
+	result.Name = keyID
+	keyStatus := unmanagedAPIKeyStatus(validFrom, validUntil, revokedAt, now)
+	result.Status = "active"
+	if keyStatus == "revoked" {
+		result.Status = "revoked"
+	}
+	result.Versions = []APIKeyVersion{{ID: result.ID, KeyID: keyID, Number: result.Version, Status: keyStatus, ValidFrom: validFrom, ValidUntil: validUntil, RevokedAt: revokedAt}}
+	sortStrings(result.Scopes)
+	return result, nil
+}
+
+func unmanagedAPIKeyStatus(validFrom time.Time, validUntil, revokedAt *time.Time, now time.Time) string {
+	if revokedAt != nil || validFrom.After(now) || validUntil != nil && !validUntil.After(now) {
+		return "revoked"
+	}
+	return "current"
 }
 
 func (s *PostgresRepository) ListAudit(ctx context.Context, p Principal, cursor string, limit int) (page Page[AuditEvent], err error) {

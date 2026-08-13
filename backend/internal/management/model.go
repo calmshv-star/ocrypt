@@ -262,6 +262,7 @@ type WebhookDelivery struct {
 type APIClient struct {
 	ID        string          `json:"id"`
 	Name      string          `json:"name"`
+	Managed   bool            `json:"managed"`
 	Status    string          `json:"status"`
 	Scopes    []string        `json:"scopes"`
 	Versions  []APIKeyVersion `json:"versions"`

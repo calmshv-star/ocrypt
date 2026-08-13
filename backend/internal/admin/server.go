@@ -148,6 +148,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /admin/v1/webhooks/endpoints/{id}/deliveries", s.authenticated(s.managementHandler(PermissionWebhookSettingsRead, false)))
 	s.mux.Handle("POST /admin/v1/webhook-deliveries/{id}/retry", s.authenticated(s.mutating(s.managementHandler(PermissionWebhookSettingsWrite, true))))
 	s.mux.Handle("GET /admin/v1/assets", s.authenticated(http.HandlerFunc(s.assets)))
+	s.mux.Handle("GET /admin/v1/financial-settings", s.authenticated(http.HandlerFunc(s.financialSettings)))
 	s.mux.Handle("GET /admin/v1/reconciliation", s.authenticated(http.HandlerFunc(s.reconciliation)))
 	s.mux.Handle("GET /admin/v1/audit", s.authenticated(http.HandlerFunc(s.audit)))
 	s.mux.Handle("GET /admin/v1/api-clients", s.authenticated(s.managementHandler(PermissionAPIClientsRead, false)))
@@ -700,6 +701,15 @@ func (s *Server) assets(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	value, err := s.repository.ListAssets(request.Context(), auth.Principal, scope, cursor, limit)
+	respond(w, value, err)
+}
+
+func (s *Server) financialSettings(w http.ResponseWriter, request *http.Request) {
+	auth, scope, ok := s.authorize(w, request, PermissionInfrastructureRead)
+	if !ok {
+		return
+	}
+	value, err := s.repository.FinancialSettings(request.Context(), auth.Principal, scope)
 	respond(w, value, err)
 }
 

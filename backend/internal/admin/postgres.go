@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -39,7 +40,9 @@ func (r *PostgresRepository) Ping(ctx context.Context) error {
   to_regprocedure('public.ensure_admin_invitation_identity(uuid,uuid,uuid,text,text,text,text,uuid,timestamp with time zone)') IS NOT NULL AND
   has_function_privilege(current_user,to_regprocedure('public.ensure_admin_invitation_identity(uuid,uuid,uuid,text,text,text,text,uuid,timestamp with time zone)'),'EXECUTE') AND
   to_regprocedure('public.list_current_admin_financial_permissions(uuid)') IS NOT NULL AND
-  has_function_privilege(current_user,to_regprocedure('public.list_current_admin_financial_permissions(uuid)'),'EXECUTE')`).Scan(&ready)
+  has_function_privilege(current_user,to_regprocedure('public.list_current_admin_financial_permissions(uuid)'),'EXECUTE') AND
+  to_regprocedure('public.admin_financial_settings_inventory(uuid,uuid)') IS NOT NULL AND
+  has_function_privilege(current_user,to_regprocedure('public.admin_financial_settings_inventory(uuid,uuid)'),'EXECUTE')`).Scan(&ready)
 	if err != nil || !ready {
 		return errors.New("required admin migrations or runtime grants are unavailable")
 	}
@@ -783,6 +786,43 @@ func (r *PostgresRepository) ListAssets(ctx context.Context, p Principal, s Scop
 	return page, classifyAdminDB(err)
 }
 
+func (r *PostgresRepository) FinancialSettings(ctx context.Context, p Principal, s Scope) (result FinancialSettingsInventory, err error) {
+	if !ids.Valid(s.TenantID) || !ids.Valid(s.MerchantID) {
+		return result, ErrForbidden
+	}
+	err = r.withinScope(ctx, p, s, pgx.ReadOnly, func(tx pgx.Tx) error {
+		rows, queryErr := tx.Query(ctx, `SELECT merchant_currency,route_currency,chain_id,asset_id,asset_symbol,asset_status,chain_status,route_status,wallet_count,active_wallet_count,address_count,available_address_count,assigned_address_count,quarantined_address_count FROM admin_financial_settings_inventory($1,$2)`, s.TenantID, s.MerchantID)
+		if queryErr != nil {
+			return queryErr
+		}
+		defer rows.Close()
+		currencies := map[string]struct{}{}
+		for rows.Next() {
+			var route FinancialSettingsRoute
+			if scanErr := rows.Scan(&result.SettlementCurrency, &route.Currency, &route.ChainID, &route.AssetID, &route.AssetSymbol, &route.AssetStatus, &route.ChainStatus, &route.RouteStatus, &route.WalletCount, &route.ActiveWalletCount, &route.AddressCount, &route.AvailableAddressCount, &route.AssignedAddressCount, &route.QuarantinedAddressCount); scanErr != nil {
+				return scanErr
+			}
+			currencies[route.Currency] = struct{}{}
+			result.Routes = append(result.Routes, route)
+		}
+		if rowsErr := rows.Err(); rowsErr != nil {
+			return rowsErr
+		}
+		for currency := range currencies {
+			result.AcceptedCurrencies = append(result.AcceptedCurrencies, currency)
+		}
+		slices.Sort(result.AcceptedCurrencies)
+		if result.Routes == nil {
+			result.Routes = []FinancialSettingsRoute{}
+		}
+		if result.AcceptedCurrencies == nil {
+			result.AcceptedCurrencies = []string{}
+		}
+		return nil
+	})
+	return result, classifyAdminDB(err)
+}
+
 func (r *PostgresRepository) ListReconciliation(ctx context.Context, p Principal, s Scope, cursor string, limit int) (page Page[ReconciliationRow], err error) {
 	if s.MerchantID != "" {
 		return page, nil
@@ -813,17 +853,11 @@ func (r *PostgresRepository) ListReconciliation(ctx context.Context, p Principal
 
 func (r *PostgresRepository) ListAudit(ctx context.Context, p Principal, s Scope, cursor string, limit int) (page Page[AuditRow], err error) {
 	err = r.withinScope(ctx, p, s, pgx.ReadOnly, func(tx pgx.Tx) error {
-		clause, args, e := cursorClause(cursor, "event_id", 1)
+		query, args, e := auditPageQuery(s, cursor, limit)
 		if e != nil {
 			return e
 		}
-		args = append(args, limit+1)
-		merchant := ""
-		if s.MerchantID != "" {
-			merchant = fmt.Sprintf(" AND merchant_id=$%d", len(args)+1)
-			args = append(args, s.MerchantID)
-		}
-		rows, e := tx.Query(ctx, `SELECT event_id::text,coalesce(actor_user_id::text,''),action,resource_type,resource_id,reason,details,occurred_at,encode(entry_hash,'hex') FROM admin_audit_log WHERE true`+clause+merchant+fmt.Sprintf(" ORDER BY event_id DESC LIMIT $%d", len(args)), args...)
+		rows, e := tx.Query(ctx, query, args...)
 		if e != nil {
 			return e
 		}
@@ -839,6 +873,21 @@ func (r *PostgresRepository) ListAudit(ctx context.Context, p Principal, s Scope
 		return rows.Err()
 	})
 	return page, classifyAdminDB(err)
+}
+
+func auditPageQuery(scope Scope, cursor string, limit int) (string, []any, error) {
+	clause, args, err := cursorClause(cursor, "event_id", 1)
+	if err != nil {
+		return "", nil, err
+	}
+	merchant := ""
+	if scope.MerchantID != "" {
+		merchant = fmt.Sprintf(" AND merchant_id=$%d", len(args)+1)
+		args = append(args, scope.MerchantID)
+	}
+	args = append(args, limit+1)
+	query := `SELECT event_id::text,coalesce(actor_user_id::text,''),action,resource_type,resource_id,reason,details,occurred_at,encode(entry_hash,'hex') FROM admin_audit_log WHERE true` + clause + merchant + fmt.Sprintf(" ORDER BY event_id DESC LIMIT $%d", len(args))
+	return query, args, nil
 }
 
 func trimPage[T any](items *[]T, next *string, limit int, id func(T) string) {

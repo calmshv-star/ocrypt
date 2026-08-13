@@ -32,12 +32,14 @@ func main() {
 		certificate, certErr := tls.LoadX509KeyPair(os.Getenv("FINANCIAL_MONITOR_CLIENT_CERT_FILE"), os.Getenv("FINANCIAL_MONITOR_CLIENT_KEY_FILE"))
 		roots := x509.NewCertPool()
 		serverName := os.Getenv("FINANCIAL_MONITOR_SERVER_NAME")
-		if caErr != nil || certErr != nil || !roots.AppendCertsFromPEM(caPEM) || serverName == "" || port == "" { os.Exit(2) }
+		if caErr != nil || certErr != nil || !roots.AppendCertsFromPEM(caPEM) || serverName == "" || port == "" {
+			os.Exit(2)
+		}
 		transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS13, MaxVersion: tls.VersionTLS13, RootCAs: roots, ServerName: serverName, Certificates: []tls.Certificate{certificate}}
 		target = "https://127.0.0.1:" + port
 	}
 	client := &http.Client{
-		Timeout: 2 * time.Second,
+		Timeout:   2 * time.Second,
 		Transport: transport,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse

@@ -653,6 +653,9 @@ export const fr = {
   "management.validUntilOptional": "Valide jusqu’au (facultatif)",
   "management.scopesComma": "Portées séparées par des virgules",
   "management.keyVersions": "Versions de clé",
+  "management.directMerchantAPI": "Connexion directe à Merchant API",
+  "management.directMerchantAPIReadOnly": "Intégration existante. Cet identifiant est en lecture seule car il a été configuré hors de cette console.",
+  "management.noWebhooksPollingNote": "Aucun webhook n’est configuré. L’intégration peut fonctionner en interrogeant l’état des paiements via Merchant API.",
   "management.rotateSecret": "Faire tourner le secret",
   "management.approvalBridgePending": "Cette action destructive reste bloquée jusqu’à ce que le serveur lui associe une approbation indépendante.",
   "management.revokeRequiresApproval": "Révoquer · approbation requise",
@@ -1142,4 +1145,27 @@ export const fr = {
   "migrationControl.runs": "Exécutions de migration",
   "migrationControl.noPendingAction": "Aucune action d’actionneur en attente",
   "migrationControl.empty": "Aucune migration pour ce tenant."
+  ,"financialSettings.title": "Paramètres financiers"
+  ,"financialSettings.description": "Devises fiat, routes crypto et capacité de réception effectives du marchand."
+  ,"financialSettings.active": "Actif"
+  ,"financialSettings.disabled": "Désactivé"
+  ,"financialSettings.merchantScope": "Sélectionnez un espace marchand."
+  ,"financialSettings.fiat": "Devises fiat"
+  ,"financialSettings.settlement": "Devise de règlement : {currency}"
+  ,"financialSettings.routes": "Routes de paiement"
+  ,"financialSettings.effectiveOnly": "Uniquement les routes actuellement admises"
+  ,"financialSettings.walletPools": "Réseaux de réception"
+  ,"financialSettings.addressesHidden": "Les adresses et données de signature sont masquées"
+  ,"financialSettings.routesTitle": "Routes crypto et capacité de réception"
+  ,"financialSettings.routesBody": "État de production en lecture seule utilisé pour les paiements."
+  ,"financialSettings.asset": "Actif"
+  ,"financialSettings.network": "Réseau"
+  ,"financialSettings.wallets": "Portefeuilles actifs"
+  ,"financialSettings.addressCapacity": "Capacité d’adresses"
+  ,"financialSettings.addressCapacityValue": "{available} disponibles sur {total}"
+  ,"financialSettings.empty": "Aucune route de paiement active."
+  ,"financialSettings.safetyTitle": "Les clés privées ne sont jamais acceptées ici"
+  ,"financialSettings.safetyBody": "Cette page n’affiche et n’accepte ni phrase de récupération, ni clé privée, ni référence de signature, ni adresse complète."
+  ,"financialSettings.changesTitle": "Les modifications restent volontairement en lecture seule"
+  ,"financialSettings.changesBody": "Les contrôles resteront indisponibles sans validation, approbation séparée, activation protégée et retour arrière."
 } satisfies Messages;

@@ -103,6 +103,9 @@ func (r *repositoryStub) ListWebhooks(context.Context, Principal, Scope, string,
 func (r *repositoryStub) ListAssets(context.Context, Principal, Scope, string, int) (Page[AssetRow], error) {
 	return Page[AssetRow]{}, nil
 }
+func (r *repositoryStub) FinancialSettings(context.Context, Principal, Scope) (FinancialSettingsInventory, error) {
+	return FinancialSettingsInventory{}, nil
+}
 func (r *repositoryStub) ListReconciliation(context.Context, Principal, Scope, string, int) (Page[ReconciliationRow], error) {
 	return Page[ReconciliationRow]{}, nil
 }

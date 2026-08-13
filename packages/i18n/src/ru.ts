@@ -653,6 +653,9 @@ export const ru = {
   "management.validUntilOptional": "Действует до (необязательно)",
   "management.scopesComma": "Права через запятую",
   "management.keyVersions": "Версии ключа",
+  "management.directMerchantAPI": "Прямое подключение Merchant API",
+  "management.directMerchantAPIReadOnly": "Действующая интеграция. Ключ показан только для просмотра, потому что был подключён вне этой панели.",
+  "management.noWebhooksPollingNote": "Вебхуки не настроены. Интеграция всё равно может работать, самостоятельно проверяя статус платежей через Merchant API.",
   "management.rotateSecret": "Сменить секрет",
   "management.approvalBridgePending": "Сервер блокирует это разрушительное действие, пока к нему не прикреплено независимое одобрение.",
   "management.revokeRequiresApproval": "Отозвать · нужно одобрение",
@@ -1142,4 +1145,27 @@ export const ru = {
   "migrationControl.runs": "Запуски миграции",
   "migrationControl.noPendingAction": "Нет ожидающего действия актуатора",
   "migrationControl.empty": "Для этого тенанта миграций нет."
+  ,"financialSettings.title": "Финансовые настройки"
+  ,"financialSettings.description": "Фиатные валюты, криптомаршруты и ёмкость приёма платежей для этого проекта."
+  ,"financialSettings.active": "Включено"
+  ,"financialSettings.disabled": "Отключено"
+  ,"financialSettings.merchantScope": "Выберите проект, чтобы увидеть его финансовую конфигурацию."
+  ,"financialSettings.fiat": "Фиатные валюты"
+  ,"financialSettings.settlement": "Валюта расчётов: {currency}"
+  ,"financialSettings.routes": "Платёжные маршруты"
+  ,"financialSettings.effectiveOnly": "Только реально допущенные к оплате маршруты"
+  ,"financialSettings.walletPools": "Сети приёма"
+  ,"financialSettings.addressesHidden": "Адреса и данные подписания скрыты"
+  ,"financialSettings.routesTitle": "Криптовалюты, сети и ёмкость приёма"
+  ,"financialSettings.routesBody": "Состояние продакшена, которое фактически используется при создании заказов."
+  ,"financialSettings.asset": "Криптовалюта"
+  ,"financialSettings.network": "Сеть"
+  ,"financialSettings.wallets": "Активные кошельки"
+  ,"financialSettings.addressCapacity": "Ёмкость адресов"
+  ,"financialSettings.addressCapacityValue": "{available} свободно из {total}"
+  ,"financialSettings.empty": "Для этого проекта нет активных платёжных маршрутов."
+  ,"financialSettings.safetyTitle": "Приватные ключи сюда никогда не вводятся"
+  ,"financialSettings.safetyBody": "Страница не показывает и не принимает seed-фразы, приватные ключи, ссылки на ключи подписи и полные адреса приёма."
+  ,"financialSettings.changesTitle": "Изменения пока намеренно недоступны"
+  ,"financialSettings.changesBody": "В backend пока нет безопасного merchant-контракта для добавления кошельков и переключения фиатных или криптовалютных маршрутов. Управление появится только вместе с валидацией, отдельным одобрением, защищённой активацией и откатом."
 } satisfies Messages;

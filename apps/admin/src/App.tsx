@@ -8,7 +8,7 @@ import { AdminProvider, useAdmin } from "./AdminProvider";
 import type { AdminClient } from "./api/client";
 import type { Permission } from "./api/types";
 
-const SETTINGS_PATHS = new Set(["/settings", "/webhooks", "/reconciliation", "/audit", "/management-audit", "/management-actions", "/matching-policies", "/api-clients", "/team", "/assets", "/platform"]);
+const SETTINGS_PATHS = new Set(["/settings", "/financial-settings", "/webhooks", "/audit", "/matching-policies", "/api-clients", "/team"]);
 const SETTINGS_PERMISSIONS: Permission[] = [
   "settings:read", "webhook_settings:read", "reconciliation:read", "audit:read", "management_audit:read",
   "matching_policy:read", "api_clients:read", "team:read", "infrastructure:read", "platform_config:read",
@@ -32,7 +32,6 @@ const UnavailablePage = lazy(() => import("./LiveAdminPages").then((module) => (
 const PaymentLinksManagementPage = lazy(() => import("./ManagementPages").then((module) => ({ default: module.PaymentLinksManagementPage })));
 const APIClientsManagementPage = lazy(() => import("./ManagementPages").then((module) => ({ default: module.APIClientsManagementPage })));
 const WebhookManagementPage = lazy(() => import("./ManagementPages").then((module) => ({ default: module.WebhookManagementPage })));
-const ManagementAuditPage = lazy(() => import("./ManagementPages").then((module) => ({ default: module.ManagementAuditPage })));
 const ManagementActionsPage = lazy(() => import("./ManagementPages").then((module) => ({ default: module.ManagementActionsPage })));
 const PlatformControlPage = lazy(() => import("./PlatformControlPage").then((module) => ({ default: module.PlatformControlPage })));
 const MatchingPolicyPage = lazy(() => import("./MatchingPolicyPage").then((module) => ({ default: module.MatchingPolicyPage })));
@@ -42,6 +41,7 @@ const InvitationAcceptPage = lazy(() => import("./MerchantSettingsPages").then((
 const FinancialSweepsPage = lazy(() => import("./FinancialPages").then((module) => ({ default: module.FinancialSweepsPage })));
 const FinancialRefundsPage = lazy(() => import("./FinancialPages").then((module) => ({ default: module.FinancialRefundsPage })));
 const FinancialReconciliationPage = lazy(() => import("./FinancialPages").then((module) => ({ default: module.FinancialReconciliationPage })));
+const FinancialSettingsPage = lazy(() => import("./FinancialSettingsPage").then((module) => ({ default: module.FinancialSettingsPage })));
 const ProviderOperationsPage = lazy(() => import("./ProviderOperationsPage").then((module) => ({ default: module.ProviderOperationsPage })));
 const ProviderConfigurationPage = lazy(() => import("./ProviderConfigurationPage").then((module) => ({ default: module.ProviderConfigurationPage })));
 const RetentionControlPage = lazy(() => import("./RetentionControlPage").then((module) => ({ default: module.RetentionControlPage })));
@@ -75,6 +75,7 @@ function PreviewRoutes() {
     <Route element={<PaymentLinksPage />} path="/payment-links" />
     <Route element={<TeamPage />} path="/team" />
     <Route element={<MerchantProjectSettingsPage />} path="/settings" />
+    <Route element={<FinancialSettingsPage />} path="/financial-settings" />
     <Route element={<UnavailablePage description={"management.auditBody"} title={"management.auditTitle"} />} path="/management-audit" />
     <Route element={<UnavailablePage description={"platform.body"} title={"platform.title"} />} path="/platform" />
     <Route element={<UnavailablePage description={"management.actionsBody"} title={"management.actionsTitle"} />} path="/management-actions" />
@@ -103,12 +104,13 @@ function ProductionRoutes() {
     <Route element={<LiveResourcePage resource="audit" />} path="/audit" />
     <Route element={<APIClientsManagementPage />} path="/api-clients" />
     <Route element={<PaymentLinksManagementPage />} path="/payment-links" />
-    <Route element={<ManagementAuditPage />} path="/management-audit" />
+    <Route element={<Navigate replace to="/audit" />} path="/management-audit" />
     <Route element={<PlatformControlPage />} path="/platform" />
     <Route element={<ManagementActionsPage />} path="/management-actions" />
     <Route element={<MatchingPolicyPage />} path="/matching-policies" />
     <Route element={<MerchantTeamPage />} path="/team" />
     <Route element={<MerchantProjectSettingsPage />} path="/settings" />
+    <Route element={<FinancialSettingsPage />} path="/financial-settings" />
     <Route element={<InvitationAcceptPage />} path="/invite" />
     <Route element={<FinancialSweepsPage />} path="/financial/sweeps" />
     <Route element={<FinancialRefundsPage />} path="/financial/refunds" />

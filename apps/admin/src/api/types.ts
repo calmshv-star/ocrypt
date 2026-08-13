@@ -50,6 +50,8 @@ export type CandidateRow = { id:string;route_id:string;rank:number;score:number;
 export type UnmatchedRow = { id:string;event_id:string;classification:string;status:string;severity:string;assigned_operator_id?:string;version:number;created_at:string;candidates:CandidateRow[] };
 export type WebhookRow = { id:string;merchant_id:string;url:string;status:string;failure_count:number;last_success_at?:string };
 export type AssetRow = { asset_id:string;chain_id:string;symbol:string;status:string;required_confirmations:number;open_gaps:number };
+export type FinancialSettingsRoute = { currency:string;chain_id:string;asset_id:string;asset_symbol:string;asset_status:string;chain_status:string;route_status:string;wallet_count:number;active_wallet_count:number;address_count:number;available_address_count:number;assigned_address_count:number;quarantined_address_count:number };
+export type FinancialSettingsInventory = { settlement_currency:string;accepted_currencies:string[];routes:FinancialSettingsRoute[] };
 export type ReconciliationRow = { id:string;run_type:string;status:string;started_at:string;ended_at?:string };
 export type AuditRow = { event_id:string;actor_user_id:string;action:string;resource_type:string;resource_id:string;reason:string;details:unknown;occurred_at:string;entry_hash:string };
 export type ActionRequest = { id:string;tenant_id:string;merchant_id?:string;kind:"manual_resolution";resource_type:string;resource_id:string;object_version:number;requested_by:string;approved_by?:string;rejected_by?:string;reason:string;payload:unknown;status:string;requires_step_up:boolean;created_at:string;expires_at:string };
@@ -75,7 +77,7 @@ export type ManagementPage<T> = { data:T[];next_cursor?:string };
 
 export type APIKeyVersion = { id:string;key_id:string;number:number;status:"current"|"overlap"|"revoked";valid_from:string;valid_until?:string;revoked_at?:string };
 export type APIClientInput = { name:string;scopes:string[];valid_until?:string };
-export type APIClientRecord = { id:string;name:string;status:"active"|"revoked";scopes:string[];versions:APIKeyVersion[];created_at:string;updated_at:string;version:number };
+export type APIClientRecord = { id:string;name:string;managed:boolean;status:"active"|"revoked";scopes:string[];versions:APIKeyVersion[];created_at:string;updated_at:string;version:number };
 export type APIClientSecret = { client:APIClientRecord;key_id:string;secret:string };
 
 export type WebhookEndpointInput = { url:string;event_types:string[];timeout_ms:number;max_concurrency:number };

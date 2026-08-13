@@ -97,6 +97,28 @@ func TestOverviewWebhookHealthIsMerchantScopedAndReadable(t *testing.T) {
 	}
 }
 
+func TestFinancialSettingsInventoryIsReadOnlyAndSecretFree(t *testing.T) {
+	raw, err := os.ReadFile("../../migrations/000040_admin_financial_settings_read.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"SECURITY DEFINER", "SET search_path=pg_catalog,public SET row_security=off",
+		"REVOKE ALL ON FUNCTION admin_financial_settings_inventory(uuid,uuid) FROM PUBLIC",
+		"legacy_compat_configs", "wallet_count", "available_address_count", "quarantined_address_count",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Errorf("financial inventory missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"canonical_address", "display_address", "signer_key_reference", "encrypted_secret", "private_key", "mnemonic", "seed"} {
+		if strings.Contains(strings.ToLower(sql), forbidden) {
+			t.Errorf("financial inventory exposes forbidden field %q", forbidden)
+		}
+	}
+}
+
 func TestTransferRowsExposeHumanAmountMetadata(t *testing.T) {
 	repository, err := os.ReadFile("postgres.go")
 	if err != nil {
