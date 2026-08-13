@@ -6,6 +6,14 @@ import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AdminProvider, useAdmin } from "./AdminProvider";
 import type { AdminClient } from "./api/client";
+import type { Permission } from "./api/types";
+
+const SETTINGS_PATHS = new Set(["/settings", "/webhooks", "/reconciliation", "/audit", "/management-audit", "/management-actions", "/matching-policies", "/api-clients", "/team", "/assets", "/platform"]);
+const SETTINGS_PERMISSIONS: Permission[] = [
+  "settings:read", "webhook_settings:read", "reconciliation:read", "audit:read", "management_audit:read",
+  "matching_policy:read", "api_clients:read", "team:read", "infrastructure:read", "platform_config:read",
+  "webhook_settings:disable", "api_clients:revoke"
+];
 
 const AssetsPage = lazy(() => import("./pages/AssetsPage").then((module) => ({ default: module.AssetsPage })));
 const ApiClientsPage = lazy(() => import("./pages/ApiClientsPage").then((module) => ({ default: module.ApiClientsPage })));
@@ -133,14 +141,9 @@ function AdminApplication() {
       admin.can("unmatched:read") && { label: t("nav.unmatched"), href: "#/unmatched", icon: Fingerprint, active: active("/unmatched"), keywords: ["review"] },
       admin.can("payment_links:read") && { label: t("nav.paymentLinks"), href: "#/payment-links", icon: Link2, active: active("/payment-links") }
   ].filter(Boolean) as ShellNavGroup["items"];
-  const settingsPaths = new Set(["/settings", "/webhooks", "/reconciliation", "/audit", "/management-audit", "/management-actions", "/matching-policies", "/api-clients", "/team", "/assets", "/platform"]);
-  const canOpenSettings = Boolean(admin.scope?.merchantId) && [
-    "settings:read", "webhook_settings:read", "reconciliation:read", "audit:read", "management_audit:read",
-    "matching_policy:read", "api_clients:read", "team:read", "infrastructure:read", "platform_config:read",
-    "webhook_settings:disable", "api_clients:revoke"
-  ].some((permission) => admin.can(permission));
+  const canOpenSettings = Boolean(admin.scope?.merchantId) && SETTINGS_PERMISSIONS.some((permission) => admin.can(permission));
   const settings = [
-    canOpenSettings && { label: t("nav.settings"), href: "#/settings", icon: Settings2, active: settingsPaths.has(location.pathname), keywords: ["integration", "security", "access", "configuration"] }
+    canOpenSettings && { label: t("nav.settings"), href: "#/settings", icon: Settings2, active: SETTINGS_PATHS.has(location.pathname), keywords: ["integration", "security", "access", "configuration"] }
   ].filter(Boolean) as ShellNavGroup["items"];
   const infrastructure = [
       admin.can("infrastructure:read") && { label: t("nav.assets"), href: "#/assets", icon: RadioTower, active: active("/assets") },
