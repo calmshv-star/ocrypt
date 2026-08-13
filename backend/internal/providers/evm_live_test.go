@@ -39,8 +39,8 @@ func TestEVMPublicRPCQuorum(t *testing.T) {
 	for _, item := range cases {
 		item := item
 		t.Run(item.Name, func(t *testing.T) {
-			if len(item.Endpoints) != 2 {
-				t.Fatal("live quorum requires exactly two independent endpoints")
+			if len(item.Endpoints) < 2 {
+				t.Fatal("live quorum requires at least two independent endpoints")
 			}
 			sources := make([]scanner.Source, 0, len(item.Endpoints))
 			for index, endpoint := range item.Endpoints {
@@ -58,22 +58,31 @@ func TestEVMPublicRPCQuorum(t *testing.T) {
 					t.Fatal(err)
 				}
 				heads, err := source.Heads(t.Context())
-				if err != nil || len(heads) != 1 || heads[0].GenesisHash != item.GenesisHash {
-					t.Fatalf("endpoint %d identity mismatch: heads=%+v err=%v", index, heads, err)
+				if err != nil {
+					t.Logf("endpoint %d is temporarily unavailable: %v", index, err)
+					continue
+				}
+				if len(heads) != 1 || heads[0].GenesisHash != item.GenesisHash {
+					t.Fatalf("endpoint %d identity mismatch: heads=%+v", index, heads)
 				}
 				sources = append(sources, source)
+			}
+			if len(sources) < 2 {
+				t.Fatal("fewer than two correctly identified endpoints are available")
 			}
 			quorum, err := NewQuorumSource(sources, 2)
 			if err != nil {
 				t.Fatal(err)
 			}
 			heads, err := quorum.Heads(t.Context())
-			if err != nil || len(heads) != 2 {
+			if err != nil || len(heads) < 2 {
 				t.Fatalf("head quorum failed: heads=%+v err=%v", heads, err)
 			}
 			height := heads[0].SafeHeight
-			if heads[1].SafeHeight < height {
-				height = heads[1].SafeHeight
+			for _, head := range heads[1:] {
+				if head.SafeHeight < height {
+					height = head.SafeHeight
+				}
 			}
 			batch, err := quorum.ScanRange(t.Context(), height, height)
 			if err != nil || len(batch.Blocks) != 1 || batch.Blocks[0].Height != height {

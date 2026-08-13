@@ -15,7 +15,7 @@
     "chain_id": "eip155:8453",
     "genesis_hash": "0xf712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd",
     "native_asset_id": "eth-base",
-    "endpoints": ["https://mainnet.base.org", "https://base.drpc.org"],
+    "endpoints": ["https://mainnet.base.org", "https://base.drpc.org", "https://1rpc.io/base"],
     "tokens": {
       "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913": {"asset_id": "usdc-base", "decimals": 6}
     }
@@ -25,7 +25,7 @@
     "chain_id": "eip155:42161",
     "genesis_hash": "0x7ee576b35482195fc49205cec9af72ce14f003b9ae69f6ba0faef4514be8b442",
     "native_asset_id": "eth-arbitrum",
-    "endpoints": ["https://arbitrum.gateway.tenderly.co", "https://arbitrum.drpc.org"],
+    "endpoints": ["https://arbitrum.gateway.tenderly.co", "https://arbitrum.drpc.org", "https://arb1.arbitrum.io/rpc"],
     "tokens": {
       "0xaf88d065e77c8cC2239327C5EDb3A432268e5831": {"asset_id": "usdc-arbitrum", "decimals": 6}
     }

@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from collections import Counter
 
 
 HASH = re.compile(r"^0x[0-9a-f]{64}$")
@@ -60,25 +61,41 @@ def finalized_anchor(item):
     expected_chain = int(chain_id.split(":", 1)[1])
     expected_genesis = item["genesis_hash"].lower()
     endpoints = item["endpoints"]
-    if not CHAIN.fullmatch(chain_id) or not HASH.fullmatch(expected_genesis) or len(endpoints) != 2:
+    if not CHAIN.fullmatch(chain_id) or not HASH.fullmatch(expected_genesis) or len(set(endpoints)) != len(endpoints) or len(endpoints) < 2:
         raise RuntimeError(f"invalid catalog identity for {item.get('name', chain_id)}")
 
-    finalized_heights = []
+    verified = []
     for endpoint in endpoints:
-        reported_chain = int(rpc(endpoint, "eth_chainId", []), 16)
-        genesis = rpc(endpoint, "eth_getBlockByNumber", ["0x0", False])
-        finalized = rpc(endpoint, "eth_getBlockByNumber", ["finalized", False])
+        try:
+            reported_chain = int(rpc(endpoint, "eth_chainId", []), 16)
+            genesis = rpc(endpoint, "eth_getBlockByNumber", ["0x0", False])
+            finalized = rpc(endpoint, "eth_getBlockByNumber", ["finalized", False])
+        except Exception as error:
+            print(f"{chain_id}: provider unavailable: {endpoint}: {error}", file=sys.stderr)
+            continue
         if reported_chain != expected_chain or genesis["hash"].lower() != expected_genesis:
             raise RuntimeError(f"provider identity mismatch for {chain_id}")
-        finalized_heights.append(int(finalized["number"], 16))
+        verified.append((endpoint, int(finalized["number"], 16)))
 
-    height = min(finalized_heights)
+    if len(verified) < 2:
+        raise RuntimeError(f"fewer than two verified providers are available for {chain_id}")
+
+    height = min(value for _, value in verified)
     tag = hex(height)
-    anchors = [rpc(endpoint, "eth_getBlockByNumber", [tag, False]) for endpoint in endpoints]
-    hashes = {anchor["hash"].lower() for anchor in anchors}
-    if len(hashes) != 1 or any(int(anchor["number"], 16) != height for anchor in anchors):
+    anchors = []
+    for endpoint, _ in verified:
+        try:
+            anchor = rpc(endpoint, "eth_getBlockByNumber", [tag, False])
+        except Exception as error:
+            print(f"{chain_id}: anchor unavailable: {endpoint}: {error}", file=sys.stderr)
+            continue
+        if int(anchor["number"], 16) != height:
+            raise RuntimeError(f"provider returned wrong anchor height for {chain_id}")
+        anchors.append(anchor["hash"].lower())
+    counts = Counter(anchors)
+    block_hash, agreements = counts.most_common(1)[0] if counts else ("", 0)
+    if agreements < 2:
         raise RuntimeError(f"providers disagree on finalized anchor for {chain_id}")
-    block_hash = hashes.pop()
     if not HASH.fullmatch(block_hash):
         raise RuntimeError(f"invalid finalized hash for {chain_id}")
     return height, block_hash

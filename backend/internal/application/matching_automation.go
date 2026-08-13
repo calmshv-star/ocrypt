@@ -114,6 +114,23 @@ func EvaluateAutomatedMatch(route domain.PaymentRoute, events []domain.TransferE
 		}
 		return sorted[i].OnChainTime.Before(sorted[j].OnChainTime)
 	})
+	canonical := make([]domain.TransferEvent, 0, len(sorted))
+	identities := make(map[string]domain.TransferEvent, len(sorted))
+	for _, event := range sorted {
+		key, err := event.Identity.Key()
+		if err != nil {
+			return AutomatedMatchDecision{}, fmt.Errorf("%w: invalid transfer identity", domain.ErrValidation)
+		}
+		if existing, ok := identities[key]; ok {
+			if !sameCanonicalTransfer(existing, event) {
+				return AutomatedMatchDecision{}, fmt.Errorf("%w: duplicate transfer identity has conflicting facts", domain.ErrInvariantViolation)
+			}
+			continue
+		}
+		identities[key] = event
+		canonical = append(canonical, event)
+	}
+	sorted = canonical
 	byTx := map[string][]domain.TransferEvent{}
 	for _, event := range sorted {
 		byTx[event.Identity.TransactionID] = append(byTx[event.Identity.TransactionID], event)
@@ -142,8 +159,16 @@ func EvaluateAutomatedMatch(route domain.PaymentRoute, events []domain.TransferE
 		}
 		anyLate = anyLate || event.OnChainTime.After(route.ExpiresAt)
 		allocation := MatchAllocation{EventID: event.ID, Role: "payment", MatchKind: "partial", Received: event.Amount, Effective: event.Amount, Credited: event.Amount, TransactionID: event.Identity.TransactionID, EventIndex: event.Identity.EventIndex, Sender: event.FromAddress, OnChainTime: event.OnChainTime, BlockHeight: event.BlockHeight, BlockHash: event.BlockHash, ParserVersion: event.ParserVersion, EvidenceHash: event.EvidenceHash}
-		decision.Received, _ = decision.Received.Add(event.Amount)
-		decision.TreasuryReceived, _ = decision.TreasuryReceived.Add(event.Amount)
+		received, err := decision.Received.Add(event.Amount)
+		if err != nil {
+			return AutomatedMatchDecision{}, fmt.Errorf("%w: payment aggregate overflow", domain.ErrInvariantViolation)
+		}
+		treasuryReceived, err := decision.TreasuryReceived.Add(event.Amount)
+		if err != nil {
+			return AutomatedMatchDecision{}, fmt.Errorf("%w: treasury aggregate overflow", domain.ErrInvariantViolation)
+		}
+		decision.Received = received
+		decision.TreasuryReceived = treasuryReceived
 		if event.Kind == "gasfree_permit_transfer" {
 			fee, ok := correlateGasFreeFee(event, byTx[event.Identity.TransactionID], route, collectors, policy)
 			if !ok {
@@ -152,7 +177,11 @@ func EvaluateAutomatedMatch(route domain.PaymentRoute, events []domain.TransferE
 			}
 			used[fee.ID] = true
 			allocation.MatchKind = "gasfree_policy"
-			decision.GasFreeFees, _ = decision.GasFreeFees.Add(fee.Amount)
+			gasFreeFees, err := decision.GasFreeFees.Add(fee.Amount)
+			if err != nil {
+				return AutomatedMatchDecision{}, fmt.Errorf("%w: gas-free fee aggregate overflow", domain.ErrInvariantViolation)
+			}
+			decision.GasFreeFees = gasFreeFees
 			// The sibling fee proves the mechanism but is not money received by
 			// the merchant. It therefore contributes neither invoice value nor
 			// a merchant ledger leg.
@@ -214,6 +243,20 @@ func EvaluateAutomatedMatch(route domain.PaymentRoute, events []domain.TransferE
 		decision.ReasonCodes = append(decision.ReasonCodes, "late_within_versioned_grace_policy")
 	}
 	return sealAutomatedDecision(decision), nil
+}
+
+func sameCanonicalTransfer(left, right domain.TransferEvent) bool {
+	return left.Kind == right.Kind &&
+		left.FromAddress == right.FromAddress &&
+		left.Amount.Cmp(right.Amount) == 0 &&
+		left.AssetDecimals == right.AssetDecimals &&
+		left.BlockHeight == right.BlockHeight &&
+		left.BlockHash == right.BlockHash &&
+		left.OnChainTime.Equal(right.OnChainTime) &&
+		left.Confirmations == right.Confirmations &&
+		left.Status == right.Status &&
+		left.ParserVersion == right.ParserVersion &&
+		left.EvidenceHash == right.EvidenceHash
 }
 
 func correlateGasFreeFee(payment domain.TransferEvent, siblings []domain.TransferEvent, route domain.PaymentRoute, collectors map[string]bool, policy AutomatedMatchingPolicy) (domain.TransferEvent, bool) {

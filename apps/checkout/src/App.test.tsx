@@ -29,7 +29,7 @@ function session(status: "pending" | "detected" | "partially_paid" | "confirming
     selected_route_id: selectedRouteId,
     routes: [
       { id: routeOne, provider: "on_chain", network: "tron:mainnet", asset: "usdt-tron", amount: "1280.00", address: "TWb4A6kVtQJ4z9Yp2mR7sX8cN1hL5uD3eF", transaction_hash: "70e31d825cf84e0114c93c5f29dbbe2408eeab421e8a14d49f97d6fba2483f0d" },
-      { id: routeTwo, provider: "on_chain", network: "ethereum:mainnet", asset: "usdc-ethereum", amount: "1280.00", address: "0x8077444bed90f3ca9157ab8bf8d2c51103b2ce89" }
+      { id: routeTwo, provider: "on_chain", network: "eip155:1", asset: "usdc-ethereum", amount: "1280.00", address: "0x8077444bed90f3ca9157ab8bf8d2c51103b2ce89", transaction_hash: "0xe6843b6fa52ca5c2de30c9220e8768a0d05a9cecd6272430c193ec3f04bac022" }
     ]
   };
 }
@@ -112,6 +112,15 @@ describe("hosted checkout", () => {
     expect(document.querySelector('a[href*="evil.example"]')).toBeNull();
     expect(screen.getByRole("link", { name: "Open transaction explorer" })).toHaveAttribute("href", "https://tronscan.org/#/transaction/70e31d825cf84e0114c93c5f29dbbe2408eeab421e8a14d49f97d6fba2483f0d");
     expect(fetch).toHaveBeenCalledWith(`https://merchant-api.example/v1/checkout-sessions/${csToken}`, expect.objectContaining({ credentials: "omit", redirect: "error" }));
+  });
+
+  it("uses canonical EVM chain identifiers for the transaction explorer", async () => {
+    vi.stubEnv("VITE_CHECKOUT_FIXTURE_MODE", "false");
+    vi.stubEnv("VITE_CHECKOUT_API_URL", "https://merchant-api.example");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(session("pending", routeTwo))));
+    window.history.replaceState({}, "", `/checkout?token=${csToken}`);
+    renderCheckout();
+    expect(await screen.findByRole("link", { name: "Open transaction explorer" })).toHaveAttribute("href", "https://etherscan.io/tx/0xe6843b6fa52ca5c2de30c9220e8768a0d05a9cecd6272430c193ec3f04bac022");
   });
 
   it("shows the durable received total and copies only the exact remaining top-up", async () => {

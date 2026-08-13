@@ -397,7 +397,7 @@ GRANT INSERT ON callback_deliveries,outbox_events TO merchant_scanner_worker;
 -- deterministic settlement transaction, including exception job enqueueing.
 GRANT SELECT,UPDATE ON scanner_transfer_queue,payment_intents,payment_routes TO merchant_settlement_worker;
 GRANT DELETE ON scanner_transfer_queue TO merchant_settlement_worker;
-GRANT SELECT ON merchants TO merchant_settlement_worker;
+GRANT SELECT ON merchants,assets TO merchant_settlement_worker;
 GRANT INSERT ON payment_intent_versions TO merchant_settlement_worker;
 GRANT SELECT,INSERT,UPDATE ON transfer_events,unmatched_payments,automated_matching_jobs TO merchant_settlement_worker;
 GRANT SELECT,INSERT ON payment_matches,ledger_accounts,ledger_entries,callback_events TO merchant_settlement_worker;

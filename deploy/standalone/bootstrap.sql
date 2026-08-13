@@ -38,6 +38,12 @@ VALUES
 ('usdt-tron','tron:mainnet','USDT','Tether USD','fungible_token','TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',6,'active',clock_timestamp(),clock_timestamp())
 ON CONFLICT(id) DO NOTHING;
 
+-- Native TON transfers at or below 0.001 TON are fee rebates/economic dust
+-- unless they exactly match a live payment route. Settlement keeps the chain
+-- event for audit while excluding unmatched dust from operator queues.
+UPDATE assets SET dust_threshold=1000000,updated_at=clock_timestamp(),version=version+1
+WHERE id='ton-ton' AND chain_id='ton:mainnet' AND dust_threshold=0;
+
 INSERT INTO wallets(id,tenant_id,merchant_id,chain_id,custody_mode,status,created_at,updated_at)
 VALUES
 ('0198a100-0000-7000-8000-000000000010','0198a100-0000-7000-8000-000000000001','0198a100-0000-7000-8000-000000000002','eip155:1','watch_only','active',clock_timestamp(),clock_timestamp()),
@@ -123,9 +129,9 @@ INSERT INTO automated_matching_policy_changes(
   accept_late_within_grace,require_same_sender,gasfree_enabled,status,created_by,requested_by,approved_by,activated_by,
   request_reason,approval_reason,activation_reason,approved_at,activated_at,effective_at,created_at,updated_at)
 VALUES('0198a100-0000-7000-8000-000000000040','0198a100-0000-7000-8000-000000000001','0198a100-0000-7000-8000-000000000002',1,
-  true,0,'manual_review',false,false,false,'activated','0198a100-0000-7000-8000-000000000003','0198a100-0000-7000-8000-000000000003',
+  true,500,'credit_expected_hold_excess',false,false,false,'activated','0198a100-0000-7000-8000-000000000003','0198a100-0000-7000-8000-000000000003',
   '0198a100-0000-7000-8000-000000000004','0198a100-0000-7000-8000-000000000004','Initial partial-payment policy','Independent bootstrap approval',
-  'Activate exact partial aggregation',clock_timestamp(),clock_timestamp(),clock_timestamp()-interval '1 second',clock_timestamp(),clock_timestamp())
+  'Activate partial aggregation, five-percent shortfall tolerance, and deterministic overpayment settlement',clock_timestamp(),clock_timestamp(),clock_timestamp()-interval '1 second',clock_timestamp(),clock_timestamp())
 ON CONFLICT(id) DO NOTHING;
 
 INSERT INTO automated_matching_policies(
@@ -133,9 +139,9 @@ INSERT INTO automated_matching_policies(
   accept_late_within_grace,require_same_sender,gasfree_enabled,effective_at,change_request_id,
   requested_by,approved_by,activated_by,approval_reference,config_hash,created_at)
 VALUES('0198a100-0000-7000-8000-000000000041','0198a100-0000-7000-8000-000000000001','0198a100-0000-7000-8000-000000000002',1,
-  true,0,'manual_review',false,false,false,clock_timestamp()-interval '1 second','0198a100-0000-7000-8000-000000000040',
+  true,500,'credit_expected_hold_excess',false,false,false,clock_timestamp()-interval '1 second','0198a100-0000-7000-8000-000000000040',
   '0198a100-0000-7000-8000-000000000003','0198a100-0000-7000-8000-000000000004','0198a100-0000-7000-8000-000000000004',
-  'Initial partial-payment policy',digest('{"accumulate_partials":true,"underpayment_tolerance_bps":0,"overpayment_mode":"manual_review","accept_late_within_grace":false,"require_same_sender":false}'::text,'sha256'),clock_timestamp())
+  'Initial partial-payment policy',digest('{"accumulate_partials":true,"underpayment_tolerance_bps":500,"overpayment_mode":"credit_expected_hold_excess","accept_late_within_grace":false,"require_same_sender":false}'::text,'sha256'),clock_timestamp())
 ON CONFLICT(id) DO NOTHING;
 
 COMMIT;
