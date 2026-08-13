@@ -349,6 +349,17 @@
 .admin-management-form textarea:focus, .admin-live-label textarea:focus { border-color: var(--mp-primary); outline: 3px solid color-mix(in srgb, var(--mp-primary) 16%, transparent); }
 .admin-management-form small { color: var(--mp-muted); font-size: 10px; line-height: 1.45; }
 .admin-management-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.settings-hub { display: grid; gap: 24px; }
+.settings-hub__group { display: grid; gap: 10px; }
+.settings-hub__group h2 { margin: 0; color: var(--mp-text-strong); font-size: 13px; letter-spacing: -.01em; }
+.settings-hub__links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.settings-hub__link { display: grid; min-height: 88px; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 12px; border: 1px solid var(--mp-border); border-radius: 13px; background: var(--mp-surface); padding: 14px; color: var(--mp-text); box-shadow: var(--mp-shadow-xs); }
+.settings-hub__link:hover { border-color: var(--mp-border-strong); background: var(--mp-surface-soft); }
+.settings-hub__icon { display: flex; width: 38px; height: 38px; align-items: center; justify-content: center; border-radius: 11px; background: var(--mp-primary-soft); color: var(--mp-primary); }
+.settings-hub__link > span:nth-child(2) { min-width: 0; display: grid; gap: 4px; }
+.settings-hub__link strong { color: var(--mp-text-strong); font-size: 12px; }
+.settings-hub__link small { color: var(--mp-muted); font-size: 10.5px; line-height: 1.5; }
+.settings-hub__link > svg { color: var(--mp-subtle); }
 .admin-management-card { display: grid; align-content: start; gap: 14px; min-width: 0; border: 1px solid var(--mp-border); border-radius: 15px; background: var(--mp-surface); padding: 16px; box-shadow: var(--mp-shadow-xs); }
 .admin-management-card.is-selected { border-color: var(--mp-primary); box-shadow: 0 0 0 3px var(--mp-primary-soft); }
 .admin-management-card > header, .admin-management-card__select { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -455,7 +466,7 @@
   .unmatched-review__facts > div:nth-child(2) { border-right: 0; }
   .unmatched-review__facts > div:nth-child(-n + 2) { border-bottom: 1px solid var(--mp-border); }
   .domain-detail-grid { grid-template-columns: 1fr; }
-  .admin-management-grid, .admin-platform-columns { grid-template-columns: 1fr; }
+  .admin-management-grid, .admin-platform-columns, .settings-hub__links { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 680px) {

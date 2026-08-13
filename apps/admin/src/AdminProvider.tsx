@@ -40,7 +40,7 @@ const previewPrincipal: AdminPrincipal = {
     "matching_policy:activate", "platform_config:read", "platform_config:write", "platform_config:request", "platform_config:approve",
     "platform_config:schedule", "platform_config:activate", "platform_config:rollback", "platform_config:emergency", "financial:read",
   ],
-  scopes: [{ tenant_id: "10000000-0000-4000-8000-000000000003" }],
+  scopes: [{ tenant_id: "10000000-0000-4000-8000-000000000003", merchant_id: "10000000-0000-4000-8000-000000000004" }],
   amr: ["preview"]
 };
 

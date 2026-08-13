@@ -1,7 +1,7 @@
 import { I18nProvider } from "@merchant/i18n";
 import { ThemeProvider } from "@merchant/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -123,6 +123,26 @@ describe("admin application", () => {
     expect(screen.queryByText("Atlas Commerce")).not.toBeInTheDocument();
     expect(liveClient.me).toHaveBeenCalledWith(expect.any(AbortSignal));
     expect(liveClient.overview).toHaveBeenCalledWith({ tenantId, merchantId });
+  });
+
+  it("keeps the primary navigation focused and moves low-frequency controls into settings", async () => {
+    renderApp("/overview", { client: client(), preview: false });
+    await screen.findByText("ORDER-1042");
+    const navigation = screen.getByRole("navigation", { name: "Primary navigation" });
+    expect(within(navigation).getByRole("link", { name: "Settings" })).toBeInTheDocument();
+    expect(within(navigation).queryByRole("link", { name: "Audit log" })).not.toBeInTheDocument();
+    expect(within(navigation).queryByRole("link", { name: "Reconciliation" })).not.toBeInTheDocument();
+  });
+
+  it("groups authorized integration, payment, security and platform controls on the settings hub", async () => {
+    const settingsPrincipal = { ...principal, permissions: [...principal.permissions, "webhook_settings:read", "api_clients:read", "matching_policy:read", "management_audit:read", "infrastructure:read", "platform_config:read"] as AdminPrincipal["permissions"] };
+    renderApp("/settings", { client: client({ me: vi.fn().mockResolvedValue(settingsPrincipal) }), preview: false });
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    const settingsPage = screen.getByTestId("merchant-settings-page");
+    for (const name of ["Webhooks", "API clients", "Matching policies", "Audit log", "Management audit", "Assets & RPC", "Platform configuration"]) {
+      expect(within(settingsPage).getByRole("link", { name: new RegExp(name) })).toBeInTheDocument();
+    }
+    expect(screen.queryByText("No records")).not.toBeInTheDocument();
   });
 
   it("keeps the transfers route visible when an older API returns null for an empty page", async () => {

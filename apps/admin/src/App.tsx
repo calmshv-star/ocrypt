@@ -1,11 +1,19 @@
 import { useI18n } from "@merchant/i18n";
 import { AppShell, Badge, Button, PRODUCT_NAME, Select, ThemeToggle, WorkspaceSwitcher, type ShellNavGroup } from "@merchant/ui";
 import { useQueryClient } from "@tanstack/react-query";
-import { Activity, Archive, Blocks, CircleDollarSign, FileClock, Fingerprint, GitCompareArrows, KeyRound, Landmark, LayoutDashboard, Link2, RadioTower, ReceiptText, RefreshCw, Scale, Settings2, ShieldCheck, UsersRound, Webhook } from "lucide-react";
+import { Activity, Archive, Blocks, CircleDollarSign, Fingerprint, GitCompareArrows, KeyRound, Landmark, LayoutDashboard, Link2, RadioTower, ReceiptText, RefreshCw, Settings2, ShieldCheck } from "lucide-react";
 import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AdminProvider, useAdmin } from "./AdminProvider";
 import type { AdminClient } from "./api/client";
+import type { Permission } from "./api/types";
+
+const SETTINGS_PATHS = new Set(["/settings", "/webhooks", "/reconciliation", "/audit", "/management-audit", "/management-actions", "/matching-policies", "/api-clients", "/team", "/assets", "/platform"]);
+const SETTINGS_PERMISSIONS: Permission[] = [
+  "settings:read", "webhook_settings:read", "reconciliation:read", "audit:read", "management_audit:read",
+  "matching_policy:read", "api_clients:read", "team:read", "infrastructure:read", "platform_config:read",
+  "webhook_settings:disable", "api_clients:revoke"
+];
 
 const AssetsPage = lazy(() => import("./pages/AssetsPage").then((module) => ({ default: module.AssetsPage })));
 const ApiClientsPage = lazy(() => import("./pages/ApiClientsPage").then((module) => ({ default: module.ApiClientsPage })));
@@ -13,7 +21,6 @@ const AuditPage = lazy(() => import("./pages/AuditPage").then((module) => ({ def
 const IntentsPage = lazy(() => import("./pages/IntentsPage").then((module) => ({ default: module.IntentsPage })));
 const ReconciliationPage = lazy(() => import("./pages/ReconciliationPage").then((module) => ({ default: module.ReconciliationPage })));
 const PaymentLinksPage = lazy(() => import("./pages/PaymentLinksPage").then((module) => ({ default: module.PaymentLinksPage })));
-const SettingsPage = lazy(() => import("./pages/SettingsPage").then((module) => ({ default: module.SettingsPage })));
 const TeamPage = lazy(() => import("./pages/TeamPage").then((module) => ({ default: module.TeamPage })));
 const TransfersPage = lazy(() => import("./pages/TransfersPage").then((module) => ({ default: module.TransfersPage })));
 const UnmatchedPage = lazy(() => import("./pages/UnmatchedPage").then((module) => ({ default: module.UnmatchedPage })));
@@ -67,7 +74,7 @@ function PreviewRoutes() {
     <Route element={<ApiClientsPage />} path="/api-clients" />
     <Route element={<PaymentLinksPage />} path="/payment-links" />
     <Route element={<TeamPage />} path="/team" />
-    <Route element={<SettingsPage />} path="/settings" />
+    <Route element={<MerchantProjectSettingsPage />} path="/settings" />
     <Route element={<UnavailablePage description={"management.auditBody"} title={"management.auditTitle"} />} path="/management-audit" />
     <Route element={<UnavailablePage description={"platform.body"} title={"platform.title"} />} path="/platform" />
     <Route element={<UnavailablePage description={"management.actionsBody"} title={"management.actionsTitle"} />} path="/management-actions" />
@@ -131,19 +138,12 @@ function AdminApplication() {
       admin.can("dashboard:read") && { label: t("nav.overview"), href: "#/overview", icon: LayoutDashboard, active: active("/overview"), keywords: ["dashboard"] },
       admin.can("payments:read") && { label: t("nav.intents"), href: "#/intents", icon: CircleDollarSign, active: active("/intents"), keywords: ["orders"] },
       admin.can("payments:read") && { label: t("nav.transfers"), href: "#/transfers", icon: Blocks, active: active("/transfers"), keywords: ["transactions"] },
-      admin.can("unmatched:read") && { label: t("nav.unmatched"), href: "#/unmatched", icon: Fingerprint, active: active("/unmatched"), keywords: ["review"] }
+      admin.can("unmatched:read") && { label: t("nav.unmatched"), href: "#/unmatched", icon: Fingerprint, active: active("/unmatched"), keywords: ["review"] },
+      admin.can("payment_links:read") && { label: t("nav.paymentLinks"), href: "#/payment-links", icon: Link2, active: active("/payment-links") }
   ].filter(Boolean) as ShellNavGroup["items"];
-  const integration = [
-      admin.can("webhook_settings:read") && { label: t("nav.webhooks"), href: "#/webhooks", icon: Webhook, active: active("/webhooks") },
-      admin.can("reconciliation:read") && { label: t("nav.reconciliation"), href: "#/reconciliation", icon: Scale, active: active("/reconciliation") },
-      admin.can("audit:read") && { label: t("nav.audit"), href: "#/audit", icon: FileClock, active: active("/audit") },
-      admin.can("management_audit:read") && { label: t("nav.managementAudit"), href: "#/management-audit", icon: FileClock, active: active("/management-audit") },
-      (admin.can("webhook_settings:disable") || admin.can("api_clients:revoke")) && { label: t("nav.managementActions"), href: "#/management-actions", icon: ShieldCheck, active: active("/management-actions") },
-      admin.can("matching_policy:read") && { label: t("nav.matchingPolicies"), href: "#/matching-policies", icon: GitCompareArrows, active: active("/matching-policies") },
-      admin.can("api_clients:read") && { label: t("nav.apiKeys"), href: "#/api-clients", icon: KeyRound, active: active("/api-clients") },
-      admin.can("payment_links:read") && { label: t("nav.paymentLinks"), href: "#/payment-links", icon: Link2, active: active("/payment-links") },
-      admin.can("team:read") && Boolean(admin.scope?.merchantId) && { label: t("nav.team"), href: "#/team", icon: UsersRound, active: active("/team") },
-      admin.can("settings:read") && Boolean(admin.scope?.merchantId) && { label: t("nav.settings"), href: "#/settings", icon: Settings2, active: active("/settings") }
+  const canOpenSettings = Boolean(admin.scope?.merchantId) && SETTINGS_PERMISSIONS.some((permission) => admin.can(permission));
+  const settings = [
+    canOpenSettings && { label: t("nav.settings"), href: "#/settings", icon: Settings2, active: SETTINGS_PATHS.has(location.pathname), keywords: ["integration", "security", "access", "configuration"] }
   ].filter(Boolean) as ShellNavGroup["items"];
   const infrastructure = [
       admin.can("infrastructure:read") && { label: t("nav.assets"), href: "#/assets", icon: RadioTower, active: active("/assets") },
@@ -158,7 +158,7 @@ function AdminApplication() {
       admin.can("financial:read") && !admin.scope?.merchantId && { label: t("financial.refunds"), href: "#/financial/refunds", icon: ReceiptText, active: active("/financial/refunds") },
       admin.can("financial:read") && !admin.scope?.merchantId && { label: t("financial.reconciliation"), href: "#/financial/reconciliation-runs", icon: RefreshCw, active: active("/financial/reconciliation-runs") }
   ].filter(Boolean) as ShellNavGroup["items"];
-  const navGroups = [operations.length && { label: t("nav.operations"), items: operations }, financial.length && { label: t("financial.cabinet"), items: financial }, integration.length && { label: t("nav.integration"), items: integration }, infrastructure.length && { label: t("common.platform"), items: infrastructure, collapsible: true }].filter(Boolean) as ShellNavGroup[];
+  const navGroups = [operations.length && { label: t("nav.operations"), items: operations }, financial.length && { label: t("financial.cabinet"), items: financial }, settings.length && { label: t("nav.settings"), items: settings }, infrastructure.length && !admin.scope?.merchantId && { label: t("common.platform"), items: infrastructure, collapsible: true }].filter(Boolean) as ShellNavGroup[];
 
   if (!admin.preview && location.pathname === "/invite") return <Suspense fallback={<div aria-busy="true" className="admin-route-loading"><span /><span /><span /></div>}><InvitationAcceptPage /></Suspense>;
   if (admin.sessionState === "loading") return <AccessScreen state="loading" />;
