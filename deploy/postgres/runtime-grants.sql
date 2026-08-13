@@ -415,7 +415,10 @@ GRANT SELECT,INSERT ON ledger_accounts,ledger_entries,callback_events TO merchan
 -- ON CONFLICT and forced-RLS updates read the target row even when the worker
 -- only appends a decision or consumes a reservation.
 GRANT SELECT,INSERT ON automated_matching_decisions TO merchant_matching_worker;
-GRANT INSERT ON ledger_transactions,callback_deliveries,outbox_events TO merchant_matching_worker;
+-- The idempotent ledger transaction insert uses ON CONFLICT and therefore
+-- needs SELECT on the conflict arbiter columns in addition to INSERT.
+GRANT SELECT,INSERT ON ledger_transactions TO merchant_matching_worker;
+GRANT INSERT ON callback_deliveries,outbox_events TO merchant_matching_worker;
 GRANT SELECT,UPDATE ON amount_reservations TO merchant_matching_worker;
 GRANT SELECT ON payment_route_policy_bindings,automated_matching_policies TO merchant_matching_worker;
 GRANT SELECT,UPDATE ON webhook_endpoints TO merchant_matching_worker;
