@@ -24,6 +24,30 @@ func TestUnmanagedAPIClientInventoryIsReadOnlyAndSecretFree(t *testing.T) {
 	}
 }
 
+func TestAPIClientInventoryKeepsUUIDTypeUntilCursorComparison(t *testing.T) {
+	raw, err := os.ReadFile("postgres_clients_audit.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	start := strings.Index(source, "SELECT id::text,managed FROM (")
+	end := strings.Index(source[start:], "LIMIT $4`")
+	if start < 0 || end < 0 {
+		t.Fatal("API client inventory query was not found")
+	}
+	query := source[start : start+end]
+	for _, forbidden := range []string{"SELECT c.id::text", "SELECT a.id::text"} {
+		if strings.Contains(query, forbidden) {
+			t.Fatalf("inventory cursor compares text to uuid through %q", forbidden)
+		}
+	}
+	for _, required := range []string{"SELECT c.id AS id", "SELECT a.id AS id", "id<NULLIF($3,'')::uuid"} {
+		if !strings.Contains(query, required) {
+			t.Fatalf("inventory UUID cursor contract lost %q", required)
+		}
+	}
+}
+
 func TestUnmanagedAPIClientStatusUsesCredentialValidity(t *testing.T) {
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	for _, item := range []struct {
