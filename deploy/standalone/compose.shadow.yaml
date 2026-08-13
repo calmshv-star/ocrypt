@@ -64,7 +64,9 @@ services:
       - /opt/ocrypt/secrets/management-assertion-key:/run/secrets/assertion-key:ro
       - /opt/ocrypt/secrets/polza-api-key:/run/secrets/receipt-ai-api-key:ro
     ports: ["127.0.0.1:8445:8445"]
-    networks: [data]
+    networks:
+      data:
+        aliases: [management-api.ocrypt.internal]
 
   legacy-gateway:
     <<: *runtime
