@@ -262,6 +262,38 @@ func (s *QuorumHTTPSource) VerifyTransfer(ctx context.Context, identity domain.E
 	return domain.TransferEvent{}, errors.New("normalized RPC transfer verification quorum unavailable")
 }
 
+// VerifyExpectedTransfer uses the same byte-identical provider quorum as a
+// scanner range read, then selects the exact immutable event from its block.
+// This is the independent manual-resolution path for normalized gateways that
+// intentionally do not implement /v1/transfer or /v1/transaction.
+func (s *QuorumHTTPSource) VerifyExpectedTransfer(ctx context.Context, expected domain.TransferEvent) (domain.TransferEvent, error) {
+	if err := expected.Identity.Validate(); err != nil || expected.Identity.ChainID != s.chainID || expected.BlockHeight == 0 {
+		return domain.TransferEvent{}, errors.New("expected transfer does not belong to this source")
+	}
+	batch, err := s.ScanRange(ctx, expected.BlockHeight, expected.BlockHeight)
+	if err != nil {
+		return domain.TransferEvent{}, err
+	}
+	wanted, _ := expected.Identity.Key()
+	var found *domain.TransferEvent
+	for index := range batch.Events {
+		candidate := &batch.Events[index]
+		key, keyErr := candidate.Identity.Key()
+		if keyErr != nil || key != wanted {
+			continue
+		}
+		if found != nil {
+			return domain.TransferEvent{}, errors.New("normalized RPC range returned duplicate transfer identity")
+		}
+		copy := *candidate
+		found = &copy
+	}
+	if found == nil {
+		return domain.TransferEvent{}, errors.New("normalized RPC range did not contain expected transfer")
+	}
+	return *found, nil
+}
+
 func (s *QuorumHTTPSource) getJSON(ctx context.Context, endpoint *url.URL, query map[string]string, target any) error {
 	values := endpoint.Query()
 	for key, value := range query {

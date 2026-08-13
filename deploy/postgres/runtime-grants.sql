@@ -421,7 +421,9 @@ GRANT SELECT,UPDATE ON outbox_events TO merchant_outbox_worker;
 GRANT INSERT ON event_history TO merchant_outbox_worker;
 GRANT SELECT,UPDATE ON manual_resolutions,transfer_events,payment_intents,payment_routes TO merchant_resolution_worker;
 GRANT INSERT ON payment_intent_versions TO merchant_resolution_worker;
-GRANT UPDATE ON unmatched_payments,amount_reservations TO merchant_resolution_worker;
+-- UPDATE under forced RLS also evaluates the row policy and therefore needs
+-- SELECT on the fenced case/reservation rows.
+GRANT SELECT,UPDATE ON unmatched_payments,amount_reservations TO merchant_resolution_worker;
 GRANT SELECT,INSERT ON payment_matches,ledger_accounts,ledger_entries,callback_events TO merchant_resolution_worker;
 GRANT INSERT ON ledger_transactions,callback_deliveries,outbox_events TO merchant_resolution_worker;
 GRANT SELECT ON match_candidates TO merchant_resolution_worker;

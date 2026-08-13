@@ -75,6 +75,25 @@ func TestNormalizedHTTPSourceRequiresRangeAgreement(t *testing.T) {
 	}
 }
 
+func TestNormalizedHTTPSourceVerifiesExpectedTransferThroughRangeQuorum(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	event := domain.TransferEvent{ID: "018f22b0-4db4-7c58-8f18-4d2f9d7b6a11", Identity: domain.EventIdentity{ChainID: "chain", TransactionID: "tx", EventIndex: "native:0", AssetID: "asset", ToAddress: "recipient"}, Kind: "native_transfer", FromAddress: "sender", Amount: money.MustParse("326335"), BlockHeight: 42, BlockHash: "block-42", OnChainTime: now, Confirmations: 10, Status: domain.TransferFinalized, ParserVersion: "v1", EvidenceHash: strings.Repeat("a", 64)}
+	client := &http.Client{Transport: rpcTransport(func(request *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(request.URL.Path, "/range") || request.URL.Query().Get("from") != "42" || request.URL.Query().Get("to") != "42" {
+			return &http.Response{StatusCode: http.StatusNotFound, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("not found"))}, nil
+		}
+		return jsonResponse(scanner.RangeBatch{From: 42, To: 42, Blocks: []scanner.Block{{Height: 42, Hash: "block-42", ParentHash: "block-41", Time: now}}, Events: []domain.TransferEvent{event}}), nil
+	})}
+	source, err := scanner.NewQuorumHTTPSource("chain", []string{"https://one.example", "https://two.example"}, 2, "", client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified, err := source.VerifyExpectedTransfer(t.Context(), event)
+	if err != nil || verified.ID != event.ID || verified.Amount.Cmp(event.Amount) != 0 {
+		t.Fatalf("verified=%+v err=%v", verified, err)
+	}
+}
+
 func TestNormalizedHTTPSourceDoesNotRedirectBearerSecret(t *testing.T) {
 	targetCalls := 0
 	client := &http.Client{Transport: rpcTransport(func(request *http.Request) (*http.Response, error) {
