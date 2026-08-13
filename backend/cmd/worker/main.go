@@ -117,9 +117,9 @@ func main() {
 
 	var callbackWorker *webhook.Worker
 	if roles["callbacks"] {
-		key, err := decodeKey(os.Getenv("WEBHOOK_ENVELOPE_KEY"))
+		key, err := webhookEnvelopeKey()
 		if err != nil {
-			slog.Error("invalid WEBHOOK_ENVELOPE_KEY", "error", err)
+			slog.Error("invalid webhook envelope key configuration", "error", err)
 			os.Exit(1)
 		}
 		decryptor, err := webhook.NewWebhookSecretDecryptor(key)
@@ -399,6 +399,25 @@ func decodeKey(raw string) ([]byte, error) {
 		return key, nil
 	}
 	return base64.StdEncoding.DecodeString(raw)
+}
+
+func webhookEnvelopeKey() ([]byte, error) {
+	raw := strings.TrimSpace(os.Getenv("WEBHOOK_ENVELOPE_KEY"))
+	path := strings.TrimSpace(os.Getenv("WEBHOOK_ENVELOPE_KEY_FILE"))
+	if raw != "" && path != "" {
+		return nil, errors.New("WEBHOOK_ENVELOPE_KEY and WEBHOOK_ENVELOPE_KEY_FILE are mutually exclusive")
+	}
+	if path != "" {
+		encoded, err := os.ReadFile(path)
+		if err != nil {
+			return nil, errors.New("WEBHOOK_ENVELOPE_KEY_FILE cannot be read")
+		}
+		raw = strings.TrimSpace(string(encoded))
+		if strings.ContainsAny(raw, "\r\n") {
+			return nil, errors.New("WEBHOOK_ENVELOPE_KEY_FILE must contain one key")
+		}
+	}
+	return decodeKey(raw)
 }
 
 func env(key, fallback string) string {
