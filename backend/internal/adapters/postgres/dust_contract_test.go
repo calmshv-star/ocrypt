@@ -49,6 +49,7 @@ func TestTONDustMigrationIsAssetScopedAndPreservesExactMatches(t *testing.T) {
 		"chain_id='ton:mainnet'",
 		"dust_threshold=1000000",
 		"e.amount_atomic<=a.dust_threshold",
+		"version=u.version+1",
 		"NOT EXISTS (",
 		"payment_matches pm",
 		"pm.state<>'reversed'",

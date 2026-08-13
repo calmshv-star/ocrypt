@@ -3,7 +3,7 @@ BEGIN;
 UPDATE assets
 SET dust_threshold=1000000,
     updated_at=clock_timestamp(),
-    version=u.version+1
+    version=version+1
 WHERE id='ton-ton'
   AND chain_id='ton:mainnet'
   AND dust_threshold=0;
@@ -14,7 +14,7 @@ SET classification='dust_below_asset_threshold',
     severity='low',
     assigned_operator_id=NULL,
     updated_at=clock_timestamp(),
-    version=version+1
+    version=u.version+1
 FROM transfer_events e
 JOIN assets a ON a.id=e.asset_id AND a.chain_id=e.chain_id
 WHERE u.event_id=e.id
