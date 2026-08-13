@@ -47,6 +47,7 @@ type ReadRepository interface {
 	ListUnmatched(context.Context, Principal, Scope, string, int) (Page[UnmatchedRow], error)
 	ListWebhooks(context.Context, Principal, Scope, string, int) (Page[WebhookRow], error)
 	ListAssets(context.Context, Principal, Scope, string, int) (Page[AssetRow], error)
+	FinancialSettings(context.Context, Principal, Scope) (FinancialSettingsInventory, error)
 	ListReconciliation(context.Context, Principal, Scope, string, int) (Page[ReconciliationRow], error)
 	ListAudit(context.Context, Principal, Scope, string, int) (Page[AuditRow], error)
 }

@@ -1,7 +1,7 @@
 import { useI18n } from "@merchant/i18n";
 import { Badge, Button, Input, PageHeader, SectionCard, Select, StatusBadge, ThemeToggle } from "@merchant/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, FileClock, GitCompareArrows, KeyRound, RadioTower, Save, Scale, Settings2, ShieldCheck, UserPlus, UsersRound, Webhook } from "lucide-react";
+import { ArrowRight, CircleDollarSign, FileClock, GitCompareArrows, KeyRound, Save, Settings2, ShieldCheck, UserPlus, UsersRound, Webhook } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { isStepUpError, useAdmin } from "./AdminProvider";
@@ -35,7 +35,7 @@ function Reason({value,onChange}:{value:string;onChange:(value:string)=>void}){c
 function roleLabel(key:MerchantRoleKey,t:ReturnType<typeof useI18n>["t"]){return t(roleKeys[key])}
 
 export function MerchantTeamPage(){
-  const{locale,t}=useI18n();const admin=useAdmin();const cache=useQueryClient();const scope=admin.scope;const enabled=!admin.preview&&Boolean(scope?.merchantId);
+  const{locale,t}=useI18n();const admin=useAdmin();const cache=useQueryClient();const scope=admin.scope;const canRead=admin.can("team:read");const enabled=!admin.preview&&Boolean(scope?.merchantId)&&canRead;
   const roles=useQuery({queryKey:["merchant-team","roles",scope?.tenantId,scope?.merchantId],enabled,queryFn:({signal})=>admin.clientFor(signal).teamRoles(scope!,signal)});
   const members=useQuery({queryKey:["merchant-team","members",scope?.tenantId,scope?.merchantId],enabled,queryFn:({signal})=>admin.clientFor(signal).teamMembers(scope!,"",100,signal)});
   const invites=useQuery({queryKey:["merchant-team","invites",scope?.tenantId,scope?.merchantId],enabled,queryFn:({signal})=>admin.clientFor(signal).teamInvitations(scope!,"",100,signal)});
@@ -63,6 +63,7 @@ export function MerchantTeamPage(){
   const mutateMember=(action:"disable"|"remove")=>{if(!scope||!selected||reason.trim().length<8)return;const highRisk=selected.role_keys.some((role)=>highRiskRoles.has(role));if(highRisk&&!can("team:security_request")){setNotice("failure");return}void mutate(()=>highRisk?admin.client!.requestTeamSecurityAction(scope,{operation:`member.${action}`,target_member_id:selected.id,target_version:selected.version,desired_role_keys:[],reason:reason.trim()},idem()):admin.client!.mutateMember(scope,selected.id,action,selected.version,reason.trim(),idem()))};
   const invite=(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();if(!scope)return;const data=new FormData(event.currentTarget);const role=data.get("role") as OrdinaryMerchantRoleKey;const delivery=data.get("delivery") as "copy_once"|"email";const input={email:String(data.get("email")??"").trim(),role_keys:[role],delivery_mode:delivery,ttl_seconds:Number(data.get("ttl")),reason:String(data.get("reason")??"").trim()};if(input.reason.length<8)return;setBusy(true);setNotice(null);void admin.client!.createTeamInvitation(scope,input,idem()).then(async(value)=>{setCreatedInvite(value);setNotice("success");await refresh()}).catch((error)=>setNotice(isStepUpError(error)?"stepup":"failure")).finally(()=>setBusy(false))};
   const decide=(action:MerchantSecurityAction,decision:"approve"|"reject")=>{if(!scope||reason.trim().length<8)return;void mutate(()=>admin.client!.decideTeamSecurityAction(scope,action.id,decision,action.version,reason.trim(),idem()))};
+  if(!canRead)return <div className="admin-page"><PageHeader description={t("page.team.description")} title={t("page.team.title")}/><div className="admin-live-state" role="status"><strong>{t("admin.permissionTitle")}</strong><p>{t("admin.permissionBody")}</p></div></div>;
   const loading=roles.isLoading||members.isLoading;const error=roles.error??members.error;
   return <div className="admin-page" data-testid="merchant-team-page"><PageHeader description={t("page.team.description")} title={t("page.team.title")}/><NoticeBox notice={notice}/><State empty={!loading&&!error&&(members.data?.data.length??0)===0} error={error} loading={loading}/>
     {(members.data?.data.length??0)>0&&<div className="admin-management-grid">{members.data!.data.map(member=><article className={`admin-management-card${selected?.id===member.id?" is-selected":""}`} key={member.id}><button aria-pressed={selected?.id===member.id} className="admin-management-card__select" onClick={()=>selectMember(member)} type="button"><span><strong>{member.display_name}</strong><small>{member.email}</small></span><StatusBadge status={member.status}>{t(memberStatusKeys[member.status])}</StatusBadge></button><div className="merchant-role-list">{member.role_keys.map(role=><Badge key={role} tone={highRiskRoles.has(role)?"warning":"neutral"}>{roleLabel(role,t)}</Badge>)}</div><small>{t("merchant.version",{version:member.version})} · {date(member.updated_at,locale)}</small></article>)}</div>}
@@ -77,23 +78,17 @@ export function MerchantTeamPage(){
 function SettingsHub(){
   const{t}=useI18n();const admin=useAdmin();
   const groups=[
+    {title:t("financialSettings.title"),items:[
+      admin.can("infrastructure:read")&&{href:"#/financial-settings",title:t("financialSettings.title"),body:t("financialSettings.description"),icon:CircleDollarSign},
+      admin.can("matching_policy:read")&&{href:"#/matching-policies",title:t("nav.matchingPolicies"),body:t("matching.body"),icon:GitCompareArrows}
+    ].filter(Boolean)},
     {title:t("nav.integration"),items:[
       admin.can("webhook_settings:read")&&{href:"#/webhooks",title:t("nav.webhooks"),body:t("management.webhooksBody"),icon:Webhook},
       admin.can("api_clients:read")&&{href:"#/api-clients",title:t("nav.apiKeys"),body:t("management.apiClientsBody"),icon:KeyRound}
     ].filter(Boolean)},
-    {title:t("nav.operations"),items:[
-      admin.can("matching_policy:read")&&{href:"#/matching-policies",title:t("nav.matchingPolicies"),body:t("matching.body"),icon:GitCompareArrows},
-      admin.can("reconciliation:read")&&{href:"#/reconciliation",title:t("nav.reconciliation"),body:t("page.reconciliation.description"),icon:Scale}
-    ].filter(Boolean)},
     {title:t("page.team.title"),items:[
       admin.can("team:read")&&{href:"#/team",title:t("nav.team"),body:t("page.team.description"),icon:UsersRound},
-      admin.can("audit:read")&&{href:"#/audit",title:t("nav.audit"),body:t("page.audit.description"),icon:FileClock},
-      admin.can("management_audit:read")&&{href:"#/management-audit",title:t("nav.managementAudit"),body:t("management.auditBody"),icon:ShieldCheck},
-      (admin.can("webhook_settings:disable")||admin.can("api_clients:revoke"))&&{href:"#/management-actions",title:t("nav.managementActions"),body:t("management.actionsBody"),icon:ShieldCheck}
-    ].filter(Boolean)},
-    {title:t("common.platform"),items:[
-      admin.can("infrastructure:read")&&{href:"#/assets",title:t("nav.assets"),body:t("page.assets.description"),icon:RadioTower},
-      admin.can("platform_config:read")&&{href:"#/platform",title:t("nav.platformConfiguration"),body:t("platform.body"),icon:Settings2}
+      admin.can("audit:read")&&{href:"#/audit",title:t("nav.audit"),body:t("page.audit.description"),icon:FileClock}
     ].filter(Boolean)}
   ].filter(group=>group.items.length>0);
   return <div className="settings-hub">{groups.map(group=><section className="settings-hub__group" key={group.title}><h2>{group.title}</h2><div className="settings-hub__links">{group.items.map((item)=>{if(!item)return null;const Icon=item.icon;return <a className="settings-hub__link" href={item.href} key={item.href}><span className="settings-hub__icon"><Icon aria-hidden="true" size={18}/></span><span><strong>{item.title}</strong><small>{item.body}</small></span><ArrowRight aria-hidden="true" size={17}/></a>})}</div></section>)}</div>

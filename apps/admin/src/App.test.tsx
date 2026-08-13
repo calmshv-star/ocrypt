@@ -134,13 +134,16 @@ describe("admin application", () => {
     expect(within(navigation).queryByRole("link", { name: "Reconciliation" })).not.toBeInTheDocument();
   });
 
-  it("groups authorized integration, payment, security and platform controls on the settings hub", async () => {
+  it("keeps only merchant-relevant financial, integration, matching and audit controls on the settings hub", async () => {
     const settingsPrincipal = { ...principal, permissions: [...principal.permissions, "webhook_settings:read", "api_clients:read", "matching_policy:read", "management_audit:read", "infrastructure:read", "platform_config:read"] as AdminPrincipal["permissions"] };
     renderApp("/settings", { client: client({ me: vi.fn().mockResolvedValue(settingsPrincipal) }), preview: false });
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
     const settingsPage = screen.getByTestId("merchant-settings-page");
-    for (const name of ["Webhooks", "API clients", "Matching policies", "Audit log", "Management audit", "Assets & RPC", "Platform configuration"]) {
+    for (const name of ["Financial settings", "Webhooks", "API clients", "Matching policies", "Audit log"]) {
       expect(within(settingsPage).getByRole("link", { name: new RegExp(name) })).toBeInTheDocument();
+    }
+    for (const name of ["Management audit", "Assets & RPC", "Platform configuration", "Reconciliation"]) {
+      expect(within(settingsPage).queryByRole("link", { name: new RegExp(name) })).not.toBeInTheDocument();
     }
     expect(screen.queryByText("No records")).not.toBeInTheDocument();
   });
@@ -178,7 +181,20 @@ describe("admin application", () => {
     const liveClient=client({me:vi.fn().mockResolvedValue(webhookPrincipal),webhookEndpoints:vi.fn().mockResolvedValue({data:null})});
     renderApp("/webhooks",{client:liveClient,preview:false});
     expect(await screen.findByRole("heading",{name:"Webhook delivery"})).toBeInTheDocument();
-    expect(await screen.findByText("No records")).toBeInTheDocument();
+    expect(await screen.findByText("No webhook endpoints are configured. Integrations can still work by polling payment status through the merchant API.")).toBeInTheDocument();
+  });
+
+  it("shows directly provisioned merchant credentials without offering unsafe mutations", async () => {
+    const apiPrincipal={...principal,permissions:[...principal.permissions,"api_clients:read","api_clients:rotate","api_clients:revoke"] as AdminPrincipal["permissions"]};
+    const liveClient=client({me:vi.fn().mockResolvedValue(apiPrincipal),apiClients:vi.fn().mockResolvedValue({data:[{
+      id:"20000000-0000-4000-8000-000000000030",name:"mk_live_existing",managed:false,status:"active",scopes:["payments:read","payments:write"],versions:[{id:"20000000-0000-4000-8000-000000000030",key_id:"mk_live_existing",number:1,status:"current",valid_from:"2026-08-11T00:00:00Z"}],created_at:"2026-08-11T00:00:00Z",updated_at:"2026-08-11T00:00:00Z",version:1
+    }]})});
+    renderApp("/api-clients",{client:liveClient,preview:false});
+    expect(await screen.findByText("Direct merchant API")).toBeInTheDocument();
+    expect(screen.getByText("mk_live_existing")).toBeInTheDocument();
+    expect(screen.getByText(/shown read-only/)).toBeInTheDocument();
+    expect(screen.queryByRole("button",{name:"Rotate secret"})).not.toBeInTheDocument();
+    expect(screen.queryByRole("button",{name:"Request revocation"})).not.toBeInTheDocument();
   });
 
   it("fails closed to a sign-in action for an unauthenticated session", async () => {

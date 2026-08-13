@@ -653,6 +653,9 @@ export const es = {
   "management.validUntilOptional": "Válido hasta (opcional)",
   "management.scopesComma": "Permisos separados por comas",
   "management.keyVersions": "Versiones de clave",
+  "management.directMerchantAPI": "Conexión directa a Merchant API",
+  "management.directMerchantAPIReadOnly": "Integración existente. Esta credencial es de solo lectura porque se configuró fuera de esta consola.",
+  "management.noWebhooksPollingNote": "No hay webhooks configurados. La integración puede funcionar consultando el estado de los pagos mediante Merchant API.",
   "management.rotateSecret": "Rotar secreto",
   "management.approvalBridgePending": "Esta acción destructiva sigue bloqueada hasta que el servidor adjunte una aprobación independiente.",
   "management.revokeRequiresApproval": "Revocar · requiere aprobación",
@@ -1142,4 +1145,27 @@ export const es = {
   "migrationControl.runs": "Ejecuciones de migración",
   "migrationControl.noPendingAction": "Sin acción pendiente del actuador",
   "migrationControl.empty": "No hay migraciones para este tenant."
+  ,"financialSettings.title": "Configuración financiera"
+  ,"financialSettings.description": "Monedas fiat, rutas cripto y capacidad de recepción efectivas del comercio."
+  ,"financialSettings.active": "Activo"
+  ,"financialSettings.disabled": "Desactivado"
+  ,"financialSettings.merchantScope": "Selecciona un espacio de comercio."
+  ,"financialSettings.fiat": "Monedas fiat"
+  ,"financialSettings.settlement": "Moneda de liquidación: {currency}"
+  ,"financialSettings.routes": "Rutas de pago"
+  ,"financialSettings.effectiveOnly": "Solo rutas admitidas actualmente"
+  ,"financialSettings.walletPools": "Redes receptoras"
+  ,"financialSettings.addressesHidden": "Las direcciones y datos de firma están ocultos"
+  ,"financialSettings.routesTitle": "Rutas cripto y capacidad receptora"
+  ,"financialSettings.routesBody": "Estado de producción de solo lectura usado al crear pagos."
+  ,"financialSettings.asset": "Activo"
+  ,"financialSettings.network": "Red"
+  ,"financialSettings.wallets": "Carteras activas"
+  ,"financialSettings.addressCapacity": "Capacidad de direcciones"
+  ,"financialSettings.addressCapacityValue": "{available} disponibles de {total}"
+  ,"financialSettings.empty": "No hay rutas de pago activas."
+  ,"financialSettings.safetyTitle": "Aquí nunca se aceptan claves privadas"
+  ,"financialSettings.safetyBody": "Esta página no muestra ni acepta semillas, claves privadas, referencias de firma ni direcciones receptoras completas."
+  ,"financialSettings.changesTitle": "Los cambios son deliberadamente de solo lectura"
+  ,"financialSettings.changesBody": "Los controles seguirán deshabilitados hasta contar con validación, aprobación separada, activación protegida y reversión."
 } satisfies Messages;
