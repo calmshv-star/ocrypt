@@ -15,7 +15,11 @@ import (
 	"github.com/calmshv-star/ocrypt/backend/internal/scanner"
 )
 
-type capabilitySource struct{ rangeError error }
+type capabilitySource struct {
+	rangeError error
+	from       uint64
+	to         uint64
+}
 
 type providerProbeTransport func(*http.Request) (*http.Response, error)
 
@@ -24,16 +28,22 @@ func (transport providerProbeTransport) RoundTrip(request *http.Request) (*http.
 }
 
 func (capabilitySource) Heads(context.Context) ([]scanner.ProviderHead, error) { return nil, nil }
-func (source capabilitySource) ScanRange(context.Context, uint64, uint64) (scanner.RangeBatch, error) {
+func (source *capabilitySource) ScanRange(_ context.Context, from, to uint64) (scanner.RangeBatch, error) {
+	source.from = from
+	source.to = to
 	return scanner.RangeBatch{}, source.rangeError
 }
 
 func TestRangeProbeCannotCloseFromHeadsAlone(t *testing.T) {
-	err := probeReadOnlyCapability(context.Background(), capabilitySource{rangeError: errors.New("range unavailable")}, providerops.OperationRange, scanner.ProviderHead{SafeHeight: 10, ObservedAt: time.Now()})
+	source := &capabilitySource{rangeError: errors.New("range unavailable")}
+	err := probeReadOnlyCapability(context.Background(), source, providerops.OperationRange, scanner.ProviderHead{SafeHeight: 10, ObservedAt: time.Now()})
 	if err == nil {
 		t.Fatal("range circuit was certified without a successful range operation")
 	}
-	if err = probeReadOnlyCapability(context.Background(), capabilitySource{rangeError: errors.New("range unavailable")}, providerops.OperationHead, scanner.ProviderHead{}); err != nil {
+	if source.from != 2 || source.to != 2 {
+		t.Fatalf("range probe did not keep a stable finalized margin: %d..%d", source.from, source.to)
+	}
+	if err = probeReadOnlyCapability(context.Background(), source, providerops.OperationHead, scanner.ProviderHead{}); err != nil {
 		t.Fatalf("head probe unexpectedly exercised range: %v", err)
 	}
 }

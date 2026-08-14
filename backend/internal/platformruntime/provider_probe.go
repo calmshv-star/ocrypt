@@ -111,6 +111,14 @@ var evmHealthProbeContracts = map[string]string{
 	"eip155:9745":  "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb",
 }
 
+// Public EVM RPC endpoints are commonly backed by several nodes. Two
+// consecutive reads of the finalized tag can therefore move backwards by a
+// small number of blocks while the load balancer switches nodes. Probe an
+// already-finalized block so that this harmless head skew cannot open the
+// provider circuit. Production scanners still derive their own safe head and
+// confirmation depth; this margin applies only to the read-only health probe.
+const providerHealthProbeFinalizedMargin uint64 = 8
+
 func providerHealthSourceConfig(rpc rpcPayload, chain chainPayload, headers http.Header, timeout time.Duration) (providers.Config, error) {
 	config := providers.Config{
 		Kind:            providers.Kind(rpc.ProviderKind),
@@ -186,7 +194,11 @@ func probeReadOnlyCapability(ctx context.Context, source scanner.Source, operati
 	case providerops.OperationHealth, providerops.OperationHead:
 		return nil
 	case providerops.OperationRange, providerops.OperationTransactionLookup, providerops.OperationTransferVerify:
-		_, err := source.ScanRange(ctx, head.SafeHeight, head.SafeHeight)
+		height := head.SafeHeight
+		if height > providerHealthProbeFinalizedMargin {
+			height -= providerHealthProbeFinalizedMargin
+		}
+		_, err := source.ScanRange(ctx, height, height)
 		return err
 	default:
 		return errors.New("unsupported provider health capability")
