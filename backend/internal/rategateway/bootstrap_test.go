@@ -203,7 +203,7 @@ func TestGMPayCatalogIsExactAndAdmittedWithoutManualRPCPromotion(t *testing.T) {
 		t.Fatal("Nodit credential was exposed or a rejected Aptos indexer was promoted")
 	}
 	for _, required := range []string{
-		`BEGIN;`, `COMMIT;`, `Aptos chain must remain disabled`,
+		`BEGIN;`, `\if :{?dry_run}`, `ROLLBACK;`, `COMMIT;`, `Aptos chain must remain disabled`,
 		`Aptos assets must remain deposit_disabled`, `Aptos wallet pool must remain disabled`,
 		`'rpc_provider','rpc/aptos-nodit'`, `'indexer_endpoint_ref','aptos/nodit-indexer'`,
 		`provider_id='aptos-labs' AND status='active'`,
