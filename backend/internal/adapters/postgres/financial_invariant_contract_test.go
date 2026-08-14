@@ -72,9 +72,11 @@ func TestFinancialInvariantMutationContractsRemainFenced(t *testing.T) {
 	)
 	requireInvariantClauses(t, "outbox_store.go", outbox,
 		"WHERE id=$1 AND published_at IS NULL AND lease_token=$2 AND locked_until>clock_timestamp()",
-		"ON CONFLICT (event_id) DO NOTHING",
 		"outbox lease lost or history already advanced",
 	)
+	if strings.Contains(outbox, "ON CONFLICT (event_id)") {
+		t.Error("outbox history insert must not require SELECT privileges through ON CONFLICT")
+	}
 	requireInvariantClauses(t, "callback_store.go", callback,
 		"WHERE id=$1 AND status='leased' AND lease_token=$2 RETURNING attempt_count",
 		"INSERT INTO callback_attempts",
