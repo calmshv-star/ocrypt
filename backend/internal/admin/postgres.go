@@ -900,6 +900,51 @@ func (r *PostgresRepository) ReplaceWatchWalletAddress(ctx context.Context, p Pr
 	return value, classifyAdminDB(err)
 }
 
+func (r *PostgresRepository) ImportWatchWallets(ctx context.Context, p Principal, s Scope, input WatchWalletImport) (result WatchWalletImportResult, err error) {
+	if !ids.Valid(s.TenantID) || !ids.Valid(s.MerchantID) || !ids.Valid(input.Challenge.Nonce) || input.IdempotencyKey != input.Challenge.Nonce || len(input.Challenge.Wallets) == 0 || len(input.Challenge.Wallets) > 16 {
+		return result, ErrInvalid
+	}
+	hash := requestDigest(map[string]any{
+		"kind": input.Challenge.Kind, "address": input.Challenge.Address, "wallets": input.Challenge.Wallets,
+		"nonce": input.Challenge.Nonce, "issued_at": input.Challenge.IssuedAt, "expires_at": input.Challenge.ExpiresAt, "reason": input.Reason,
+	})
+	err = r.withinScopeWrite(ctx, p, s, func(tx pgx.Tx) error {
+		_, found, e := readAdminIdempotency(ctx, tx, s.TenantID, p.UserID, "financial.wallet.import", input.IdempotencyKey, hash, &result)
+		if e != nil || found {
+			return e
+		}
+		result.Wallets = make([]FinancialSettingsWallet, 0, len(input.Challenge.Wallets))
+		for _, item := range input.Challenge.Wallets {
+			if !ids.Valid(item.WalletID) || !ids.Valid(item.AddressID) || item.ExpectedVersion < 1 {
+				return ErrInvalid
+			}
+			var beforeAddress string
+			var beforeVersion int64
+			if e = tx.QueryRow(ctx, `SELECT address,version FROM admin_watch_wallet_inventory($1,$2) WHERE wallet_id=$3`, s.TenantID, s.MerchantID, item.WalletID).Scan(&beforeAddress, &beforeVersion); e != nil {
+				return e
+			}
+			var value FinancialSettingsWallet
+			row := tx.QueryRow(ctx, `SELECT wallet_id::text,chain_id,chain_name,address,status,version FROM admin_replace_watch_wallet_address($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, s.TenantID, s.MerchantID, p.UserID, item.WalletID, item.AddressID, item.ChainID, item.CanonicalAddress, item.DisplayAddress, item.ExpectedVersion, input.Reason)
+			if e = scanFinancialSettingsWallet(row, &value); e != nil {
+				return e
+			}
+			result.Wallets = append(result.Wallets, value)
+			if e = r.appendAuditTx(ctx, tx, AuditEntry{
+				TenantID: s.TenantID, MerchantID: s.MerchantID, ActorUserID: p.UserID, SessionID: p.SessionID,
+				Action: "financial.wallet.imported", ResourceType: "watch_wallet", ResourceID: item.WalletID,
+				RequestID: input.IdempotencyKey, Reason: input.Reason,
+				BeforeDigest: requestDigest(map[string]any{"wallet_id": item.WalletID, "chain_id": value.ChainID, "address": beforeAddress, "version": beforeVersion}),
+				AfterDigest:  requestDigest(map[string]any{"wallet_id": item.WalletID, "chain_id": value.ChainID, "canonical_address": item.CanonicalAddress, "version": value.Version}),
+				Details:      json.RawMessage(`{"source":"trust_wallet","ownership_proof":true,"private_keys_stored":false,"historic_routes_retained":true}`), OccurredAt: time.Now().UTC(),
+			}); e != nil {
+				return e
+			}
+		}
+		return writeAdminIdempotency(ctx, tx, s.TenantID, p.UserID, "financial.wallet.import", input.IdempotencyKey, hash, result)
+	})
+	return result, classifyAdminDB(err)
+}
+
 func (r *PostgresRepository) ListReconciliation(ctx context.Context, p Principal, s Scope, cursor string, limit int) (page Page[ReconciliationRow], err error) {
 	if s.MerchantID != "" {
 		return page, nil

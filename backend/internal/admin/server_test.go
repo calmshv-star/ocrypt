@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -401,6 +402,62 @@ func TestWatchWalletReplacementRequiresValidatedChainAndRecentStepUp(t *testing.
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "step_up_required") {
 		t.Fatalf("expired step-up expected 403, got %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestTrustWalletImportRequiresSignedShortLivedChallenge(t *testing.T) {
+	handler, repo, raw, csrf, tenant := serverFixture(t, false)
+	merchant := "018f22b0-4db4-7c58-8f18-4d2f9d7b6a44"
+	walletID := "018f22b0-4db4-7c58-8f18-4d2f9d7b6a55"
+	address := "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+	repo.identity.Bindings[0].MerchantID = merchant
+	repo.identity.Bindings[0].Permissions[PermissionInfrastructureEdit] = true
+	challengeRequest := mutationRequest(http.MethodPost, "/admin/v1/financial-settings/wallet-import-challenges", `{"kind":"evm_personal_sign","address":"`+address+`","wallets":[{"wallet_id":"`+walletID+`","chain_id":"eip155:1","address":"`+address+`","version":1}]}`, raw, csrf)
+	challengeRequest.Header.Set("X-Admin-Tenant-ID", tenant)
+	challengeRequest.Header.Set("X-Admin-Merchant-ID", merchant)
+	challengeResponse := httptest.NewRecorder()
+	handler.ServeHTTP(challengeResponse, challengeRequest)
+	if challengeResponse.Code != http.StatusOK {
+		t.Fatalf("wallet challenge expected 200, got %d %s", challengeResponse.Code, challengeResponse.Body.String())
+	}
+	var challenge WatchWalletImportChallenge
+	if err := json.NewDecoder(challengeResponse.Body).Decode(&challenge); err != nil {
+		t.Fatal(err)
+	}
+	if challenge.Message == "" || challenge.Token == "" || challenge.ExpiresAt.Sub(challenge.IssuedAt) != walletProofTTL {
+		t.Fatalf("invalid short-lived challenge: %#v", challenge)
+	}
+	tampered := challenge
+	tampered.Wallets = append([]WatchWalletImportItem(nil), challenge.Wallets...)
+	tampered.Wallets[0].ExpectedVersion++
+	tamperedBody, err := json.Marshal(watchWalletImportRequest{Challenge: tampered, Signature: testEVMSignature(t, challenge.Message), Reason: "import receiving address from Trust Wallet"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tamperedRequest := mutationRequest(http.MethodPost, "/admin/v1/financial-settings/wallet-imports", string(tamperedBody), raw, csrf)
+	tamperedRequest.Header.Set("X-Admin-Tenant-ID", tenant)
+	tamperedRequest.Header.Set("X-Admin-Merchant-ID", merchant)
+	tamperedRequest.Header.Set("Idempotency-Key", challenge.Nonce)
+	tamperedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(tamperedResponse, tamperedRequest)
+	if tamperedResponse.Code != http.StatusBadRequest {
+		t.Fatalf("tampered sealed challenge expected 400, got %d %s", tamperedResponse.Code, tamperedResponse.Body.String())
+	}
+	requestBody, err := json.Marshal(watchWalletImportRequest{Challenge: challenge, Signature: testEVMSignature(t, challenge.Message), Reason: "import receiving address from Trust Wallet"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := mutationRequest(http.MethodPost, "/admin/v1/financial-settings/wallet-imports", string(requestBody), raw, csrf)
+	request.Header.Set("X-Admin-Tenant-ID", tenant)
+	request.Header.Set("X-Admin-Merchant-ID", merchant)
+	request.Header.Set("Idempotency-Key", challenge.Nonce)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("signed wallet import expected 200, got %d %s", response.Code, response.Body.String())
+	}
+	if repo.walletImport.Challenge.Address != address || len(repo.walletImport.Challenge.Wallets) != 1 || repo.walletImport.Challenge.Wallets[0].AddressID == "" {
+		t.Fatalf("verified import did not reach the atomic repository: %#v", repo.walletImport)
 	}
 }
 

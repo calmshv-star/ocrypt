@@ -9,15 +9,16 @@ import (
 )
 
 type repositoryStub struct {
-	identity    Identity
-	session     Session
-	invitation  InvitationLogin
-	attempt     LoginAttempt
-	action      ActionRequest
-	rotated     Session
-	revoked     bool
-	claimErr    error
-	walletInput WatchWalletReplacement
+	identity     Identity
+	session      Session
+	invitation   InvitationLogin
+	attempt      LoginAttempt
+	action       ActionRequest
+	rotated      Session
+	revoked      bool
+	claimErr     error
+	walletInput  WatchWalletReplacement
+	walletImport WatchWalletImport
 }
 
 func (r *repositoryStub) LookupInvitation(context.Context, [32]byte) (InvitationLogin, error) {
@@ -155,6 +156,14 @@ func (r *repositoryStub) ReplaceWatchWalletAddress(_ context.Context, _ Principa
 	r.walletInput = input
 	return FinancialSettingsWallet{ID: walletID, ChainID: input.ChainID, ChainName: "Ethereum", Address: input.DisplayAddress, Status: "active", Version: input.ExpectedVersion + 1}, nil
 }
+func (r *repositoryStub) ImportWatchWallets(_ context.Context, _ Principal, _ Scope, input WatchWalletImport) (WatchWalletImportResult, error) {
+	r.walletImport = input
+	result := WatchWalletImportResult{Wallets: make([]FinancialSettingsWallet, 0, len(input.Challenge.Wallets))}
+	for _, item := range input.Challenge.Wallets {
+		result.Wallets = append(result.Wallets, FinancialSettingsWallet{ID: item.WalletID, ChainID: item.ChainID, ChainName: item.ChainID, Address: item.DisplayAddress, Status: "active", Version: item.ExpectedVersion + 1})
+	}
+	return result, nil
+}
 func (r *repositoryStub) AppendAudit(context.Context, AuditEntry) error { return nil }
 func (r *repositoryStub) Ping(context.Context) error                    { return nil }
 
@@ -167,7 +176,11 @@ func testIdentityAndSession(now time.Time, token, csrf string) (Identity, Sessio
 }
 
 func testService(repo Repository, now time.Time) *Service {
-	return &Service{repository: repo, config: ServiceConfig{IdleTTL: 15 * time.Minute, AbsoluteTTL: 8 * time.Hour, RotationInterval: 5 * time.Minute, StepUpTTL: 10 * time.Minute, RequiredACR: "urn:mfa", AcceptedAMR: map[string]bool{"otp": true}}, now: func() time.Time { return now }}
+	box, err := NewAESGCMSecretBox(make([]byte, 32))
+	if err != nil {
+		panic(err)
+	}
+	return &Service{repository: repo, stateBox: box, config: ServiceConfig{IdleTTL: 15 * time.Minute, AbsoluteTTL: 8 * time.Hour, RotationInterval: 5 * time.Minute, StepUpTTL: 10 * time.Minute, RequiredACR: "urn:mfa", AcceptedAMR: map[string]bool{"otp": true}}, now: func() time.Time { return now }}
 }
 
 func TestRBACScopeAndStepUpAreServerAuthoritative(t *testing.T) {

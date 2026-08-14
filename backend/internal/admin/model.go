@@ -349,6 +349,37 @@ type WatchWalletReplacement struct {
 	IdempotencyKey   string
 }
 
+type WatchWalletImportItem struct {
+	WalletID         string `json:"wallet_id"`
+	AddressID        string `json:"-"`
+	ChainID          string `json:"chain_id"`
+	CanonicalAddress string `json:"-"`
+	DisplayAddress   string `json:"address"`
+	ExpectedVersion  int64  `json:"version"`
+}
+
+type WatchWalletImportChallenge struct {
+	Kind      string                  `json:"kind"`
+	Address   string                  `json:"address"`
+	Wallets   []WatchWalletImportItem `json:"wallets"`
+	Nonce     string                  `json:"nonce"`
+	IssuedAt  time.Time               `json:"issued_at"`
+	ExpiresAt time.Time               `json:"expires_at"`
+	Message   string                  `json:"message,omitempty"`
+	Token     string                  `json:"token"`
+}
+
+type WatchWalletImport struct {
+	Challenge      WatchWalletImportChallenge
+	Signature      string
+	Reason         string
+	IdempotencyKey string
+}
+
+type WatchWalletImportResult struct {
+	Wallets []FinancialSettingsWallet `json:"wallets"`
+}
+
 type ReconciliationRow struct {
 	ID        string     `json:"id"`
 	RunType   string     `json:"run_type"`

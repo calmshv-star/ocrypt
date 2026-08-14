@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useAdmin } from "./AdminProvider";
 import { AdminAPIError } from "./api/client";
 import type { FinancialSettingsRoute, FinancialSettingsWallet } from "./api/types";
+import { TrustWalletImport } from "./TrustWalletImport";
 
 function Status({ value }: { value: string }) {
   const { t } = useI18n();
@@ -75,6 +76,7 @@ export function FinancialSettingsPage() {
       {stepUpRequired&&admin.client&&<a className="mp-button mp-button--secondary mp-button--sm" href={admin.client.stepUpURL("/admin/#/financial-settings")}>{t("financialSettings.confirmLogin")}</a>}
     </div>}
     <SectionCard description={t("financialSettings.networksBody")} title={t("financialSettings.networksTitle")}>
+      <TrustWalletImport canEdit={canEdit} client={admin.client} onImported={async()=>{setSaved(true);await queryClient.invalidateQueries({queryKey:["financial-settings",scope?.tenantId,scope?.merchantId]});}} scope={scope} wallets={inventory?.wallets??[]}/>
       <div className="financial-network-list">{networks.map(network => {
         const enabledRoutes = network.routes.filter(route=>route.route_status==="enabled"&&route.asset_status==="active"&&route.chain_status==="active");
         const currencies = [...new Set(enabledRoutes.map(route=>route.currency))];
