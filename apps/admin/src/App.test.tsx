@@ -279,7 +279,10 @@ describe("admin application", () => {
     });
     renderApp("/unmatched", { client:liveClient, preview:false });
     expect((await screen.findAllByText("< 0.01 RUB")).length).toBeGreaterThan(0);
-    fireEvent.click(await screen.findByRole("button", { name:"Hide from list" }));
+    const hide = await screen.findByRole("button", { name:"Hide from list" });
+    expect(hide).toHaveAttribute("title", "Hide from list");
+    fireEvent.click(hide);
+    expect(screen.queryByText("< 0.01 RUB")).not.toBeInTheDocument();
     await waitFor(() => expect(hideUnmatched).toHaveBeenCalledWith({tenantId,merchantId},caseId,expect.objectContaining({version:4,reason:"Hidden by operator without order attribution",idempotency_key:expect.stringMatching(/.{8,}/)})));
   });
 
