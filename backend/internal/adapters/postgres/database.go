@@ -99,7 +99,6 @@ SELECT key_id, nonce FROM auth_nonces
 WHERE expires_at < clock_timestamp()
 ORDER BY expires_at
 LIMIT $1
-FOR UPDATE SKIP LOCKED
 )
 DELETE FROM auth_nonces current
 USING expired
