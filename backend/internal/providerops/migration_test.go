@@ -121,3 +121,30 @@ func TestProviderHealthConfiguredEvidenceJoinMigrationIsExactAndReversible(t *te
 		}
 	}
 }
+
+func TestProviderHealthFairGroupRotationMigrationIsExactAndReversible(t *testing.T) {
+	up, err := os.ReadFile("../../migrations/000048_provider_health_fair_group_rotation.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	down, err := os.ReadFile("../../migrations/000048_provider_health_fair_group_rotation.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, sql := range map[string]string{"up": string(up), "down": string(down)} {
+		for _, required := range []string{
+			"claim_provider_health_probes(text,integer,timestamptz)",
+			"SELECT configured.*",
+			"SELECT configured.*,c.updated_at AS last_scheduled_at",
+			"ORDER BY min(e.binding_id::text) LIMIT 1",
+			"ORDER BY min(e.last_scheduled_at),min(e.binding_id::text) LIMIT 1",
+			"chain_snapshot.payload->>''status''=''active''",
+			"pg_get_functiondef",
+			"EXECUTE patched",
+		} {
+			if !strings.Contains(sql, required) {
+				t.Fatalf("%s migration lacks %q", name, required)
+			}
+		}
+	}
+}
