@@ -90,4 +90,8 @@ BEGIN
   END IF;
 END $$;
 
+\if :{?dry_run}
+ROLLBACK;
+\else
 COMMIT;
+\endif
