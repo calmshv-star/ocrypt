@@ -238,7 +238,7 @@ WITH rpc(logical_key,chain_id,endpoint,indexer_endpoint,indexer_endpoint_ref,hea
     ('rpc/plasma-public','eip155:9745','https://rpc.plasma.to',NULL,NULL,'finalized','evm-jsonrpc','plasma-public',10,'plasma-public'),
     ('rpc/plasma-thirdweb','eip155:9745','https://9745.rpc.thirdweb.com',NULL,NULL,'finalized','evm-jsonrpc','plasma-thirdweb',20,'plasma-thirdweb'),
     ('rpc/aptos-publicnode','aptos:1','https://aptos-rest.publicnode.com','https://api.mainnet.aptoslabs.com/v1/graphql',NULL,NULL,'aptos-fullnode','aptos-publicnode',10,'aptos-publicnode'),
-    ('rpc/aptos-labs','aptos:1','https://fullnode.mainnet.aptoslabs.com',NULL,'aptos/secondary-indexer',NULL,'aptos-fullnode','aptos-labs',20,'aptos-labs')
+    ('rpc/aptos-nodit','aptos:1','https://fullnode.mainnet.aptoslabs.com',NULL,'aptos/nodit-indexer',NULL,'aptos-fullnode','aptos-nodit',20,'nodit')
 ), payloads AS (
   SELECT logical_key,jsonb_strip_nulls(jsonb_build_object(
     'chain_ref',chain_id,'endpoint',endpoint,
@@ -272,6 +272,12 @@ FROM payloads p;
 UPDATE provider_operation_bindings
 SET status='paused',version=version+1,updated_at=clock_timestamp()
 WHERE provider_kind='on_chain' AND provider_id='bsc-1rpc' AND status='active';
+
+-- Retain the earlier generic secondary-indexer snapshot for audit, but do not
+-- let it participate after the independent Nodit identity is installed.
+UPDATE provider_operation_bindings
+SET status='paused',version=version+1,updated_at=clock_timestamp()
+WHERE provider_kind='on_chain' AND provider_id='aptos-labs' AND status='active';
 
 SELECT pg_temp.reconcile_platform_snapshot(
   '0198a100-0000-7000-8000-000000000001','wallet_pool',wallet_id::text,
