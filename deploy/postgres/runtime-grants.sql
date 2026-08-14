@@ -198,6 +198,9 @@ GRANT EXECUTE ON FUNCTION append_admin_audit(uuid,uuid,uuid,uuid,uuid,text,text,
 TO merchant_admin_runtime;
 GRANT EXECUTE ON FUNCTION admin_financial_settings_inventory(uuid,uuid)
 TO merchant_admin_runtime;
+GRANT EXECUTE ON FUNCTION admin_watch_wallet_inventory(uuid,uuid),
+  admin_replace_watch_wallet_address(uuid,uuid,uuid,uuid,uuid,text,text,text,bigint,text)
+TO merchant_admin_runtime;
 -- Converge the BFF's merchant-settings authority even if a pre-existing role
 -- had accumulated grants. Authorization is read-only; all mutation remains in
 -- the private settings API and its request-bound assertion contract.

@@ -46,6 +46,21 @@ func TestIdempotencySerializesFirstUseAndRetriesSerialization(t *testing.T) {
 	}
 }
 
+func TestAdminIdempotencyLockUsesOneTypedParameter(t *testing.T) {
+	raw, err := os.ReadFile("postgres.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	if !strings.Contains(source, `strings.Join([]string{tenant, user, operation, key}, "\x1f")`) ||
+		!strings.Contains(source, `hashtextextended($1,0)`) {
+		t.Fatal("admin idempotency lock must pass one unambiguous text key to PostgreSQL")
+	}
+	if strings.Contains(source, `concat_ws(chr(31),$1,$2,$3,$4)`) {
+		t.Fatal("untyped variadic concat_ws parameters make every admin mutation fail at runtime")
+	}
+}
+
 func TestAuditChainReadsGlobalPredecessorAndRestoresRLSContext(t *testing.T) {
 	raw, err := os.ReadFile("../../migrations/000002_admin_control.up.sql")
 	if err != nil {

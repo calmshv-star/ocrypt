@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/ids"
+	"github.com/calmshv-star/ocrypt/backend/internal/providers"
 )
 
 const (
@@ -150,6 +151,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /admin/v1/webhook-deliveries/{id}/retry", s.authenticated(s.mutating(s.managementHandler(PermissionWebhookSettingsWrite, true))))
 	s.mux.Handle("GET /admin/v1/assets", s.authenticated(http.HandlerFunc(s.assets)))
 	s.mux.Handle("GET /admin/v1/financial-settings", s.authenticated(http.HandlerFunc(s.financialSettings)))
+	s.mux.Handle("PUT /admin/v1/financial-settings/wallets/{id}", s.authenticated(s.mutating(http.HandlerFunc(s.replaceWatchWalletAddress))))
 	s.mux.Handle("GET /admin/v1/reconciliation", s.authenticated(http.HandlerFunc(s.reconciliation)))
 	s.mux.Handle("GET /admin/v1/audit", s.authenticated(http.HandlerFunc(s.audit)))
 	s.mux.Handle("GET /admin/v1/api-clients", s.authenticated(s.managementHandler(PermissionAPIClientsRead, false)))
@@ -734,6 +736,42 @@ func (s *Server) financialSettings(w http.ResponseWriter, request *http.Request)
 		return
 	}
 	value, err := s.repository.FinancialSettings(request.Context(), auth.Principal, scope)
+	respond(w, value, err)
+}
+
+type replaceWatchWalletRequest struct {
+	ChainID string `json:"chain_id"`
+	Address string `json:"address"`
+	Version int64  `json:"version"`
+	Reason  string `json:"reason"`
+}
+
+func (s *Server) replaceWatchWalletAddress(w http.ResponseWriter, request *http.Request) {
+	auth, scope, ok := s.authorize(w, request, PermissionInfrastructureEdit)
+	if !ok {
+		return
+	}
+	var input replaceWatchWalletRequest
+	if !s.decode(w, request, &input) {
+		return
+	}
+	key := strings.TrimSpace(request.Header.Get("Idempotency-Key"))
+	chainID := strings.TrimSpace(input.ChainID)
+	display := strings.TrimSpace(input.Address)
+	canonical, err := providers.CanonicalWatchAddress(chainID, display)
+	if err != nil || input.Version < 1 || len(key) < 8 || len(key) > 255 || len(strings.TrimSpace(input.Reason)) < 3 || len(input.Reason) > 1000 {
+		respond[any](w, nil, ErrInvalid)
+		return
+	}
+	addressID, err := ids.New()
+	if err != nil {
+		respond[any](w, nil, err)
+		return
+	}
+	value, err := s.service.ReplaceWatchWalletAddress(request.Context(), auth.Principal, scope, request.PathValue("id"), WatchWalletReplacement{
+		AddressID: addressID, ChainID: chainID, CanonicalAddress: canonical, DisplayAddress: display,
+		ExpectedVersion: input.Version, Reason: strings.TrimSpace(input.Reason), IdempotencyKey: key,
+	})
 	respond(w, value, err)
 }
 

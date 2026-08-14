@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # Build exactly one Go command per image. BINARY is intentionally a command
 # directory name, not an arbitrary package path.
-ARG GO_IMAGE=golang:1.26.5-bookworm
+ARG GO_IMAGE=golang:1.26.6-bookworm
 ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
 
 FROM ${GO_IMAGE} AS build

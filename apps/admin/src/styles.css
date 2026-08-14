@@ -410,7 +410,20 @@
 .financial-settings-routes dl div { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--mp-border); padding-top: 8px; }
 .financial-settings-routes dt { color: var(--mp-muted); font-size: 10px; }
 .financial-settings-routes dd { margin: 0; color: var(--mp-text); font-size: 10px; }
+.financial-settings-feedback { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid color-mix(in srgb, var(--mp-positive) 35%, var(--mp-border)); border-radius: 14px; background: var(--mp-positive-soft); color: var(--mp-text-strong); padding: 12px 14px; }
+.financial-settings-feedback--error { border-color: color-mix(in srgb, var(--mp-negative) 35%, var(--mp-border)); background: var(--mp-negative-soft); }
+.financial-wallet-list { display: grid; gap: 10px; }
+.financial-wallet-row { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 12px; border: 1px solid var(--mp-border); border-radius: 14px; background: var(--mp-surface); padding: 14px; }
+.financial-wallet-main { min-width: 0; }
+.financial-wallet-main strong,.financial-wallet-main span { display: block; }
+.financial-wallet-main strong { color: var(--mp-text-strong); font-size: 13px; }
+.financial-wallet-main span { margin-top: 5px; color: var(--mp-muted); font-size: 11px; overflow-wrap: anywhere; }
+.financial-wallet-form { grid-column: 1/-1; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 10px; border-top: 1px solid var(--mp-border); padding-top: 12px; }
+.financial-wallet-form label,.financial-wallet-form label span { display: block; }
+.financial-wallet-form label span { margin-bottom: 6px; color: var(--mp-text); font-size: 11px; font-weight: 700; }
+.financial-wallet-form>div { display: flex; gap: 8px; }
 @media (max-width: 800px) { .financial-settings-summary,.financial-settings-routes { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .financial-wallet-row,.financial-wallet-form { grid-template-columns: 1fr; } .financial-wallet-row>.mp-button { width: 100%; } }
 .admin-management-card { display: grid; align-content: start; gap: 14px; min-width: 0; border: 1px solid var(--mp-border); border-radius: 15px; background: var(--mp-surface); padding: 16px; box-shadow: var(--mp-shadow-xs); }
 .admin-management-card.is-selected { border-color: var(--mp-primary); box-shadow: 0 0 0 3px var(--mp-primary-soft); }
 .admin-management-card > header, .admin-management-card__select { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 12px; }

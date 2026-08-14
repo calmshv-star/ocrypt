@@ -9,14 +9,15 @@ import (
 )
 
 type repositoryStub struct {
-	identity   Identity
-	session    Session
-	invitation InvitationLogin
-	attempt    LoginAttempt
-	action     ActionRequest
-	rotated    Session
-	revoked    bool
-	claimErr   error
+	identity    Identity
+	session     Session
+	invitation  InvitationLogin
+	attempt     LoginAttempt
+	action      ActionRequest
+	rotated     Session
+	revoked     bool
+	claimErr    error
+	walletInput WatchWalletReplacement
 }
 
 func (r *repositoryStub) LookupInvitation(context.Context, [32]byte) (InvitationLogin, error) {
@@ -149,6 +150,10 @@ func (r *repositoryStub) DecideActionRequest(_ context.Context, p Principal, _ S
 }
 func (r *repositoryStub) ReplayDelivery(context.Context, Principal, Scope, string, string, string) error {
 	return nil
+}
+func (r *repositoryStub) ReplaceWatchWalletAddress(_ context.Context, _ Principal, _ Scope, walletID string, input WatchWalletReplacement) (FinancialSettingsWallet, error) {
+	r.walletInput = input
+	return FinancialSettingsWallet{ID: walletID, ChainID: input.ChainID, ChainName: "Ethereum", Address: input.DisplayAddress, Status: "active", Version: input.ExpectedVersion + 1}, nil
 }
 func (r *repositoryStub) AppendAudit(context.Context, AuditEntry) error { return nil }
 func (r *repositoryStub) Ping(context.Context) error                    { return nil }

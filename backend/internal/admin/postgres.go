@@ -42,7 +42,11 @@ func (r *PostgresRepository) Ping(ctx context.Context) error {
   to_regprocedure('public.list_current_admin_financial_permissions(uuid)') IS NOT NULL AND
   has_function_privilege(current_user,to_regprocedure('public.list_current_admin_financial_permissions(uuid)'),'EXECUTE') AND
   to_regprocedure('public.admin_financial_settings_inventory(uuid,uuid)') IS NOT NULL AND
-  has_function_privilege(current_user,to_regprocedure('public.admin_financial_settings_inventory(uuid,uuid)'),'EXECUTE')`).Scan(&ready)
+  has_function_privilege(current_user,to_regprocedure('public.admin_financial_settings_inventory(uuid,uuid)'),'EXECUTE') AND
+  to_regprocedure('public.admin_watch_wallet_inventory(uuid,uuid)') IS NOT NULL AND
+  has_function_privilege(current_user,to_regprocedure('public.admin_watch_wallet_inventory(uuid,uuid)'),'EXECUTE') AND
+  to_regprocedure('public.admin_replace_watch_wallet_address(uuid,uuid,uuid,uuid,uuid,text,text,text,bigint,text)') IS NOT NULL AND
+  has_function_privilege(current_user,to_regprocedure('public.admin_replace_watch_wallet_address(uuid,uuid,uuid,uuid,uuid,text,text,text,bigint,text)'),'EXECUTE')`).Scan(&ready)
 	if err != nil || !ready {
 		return errors.New("required admin migrations or runtime grants are unavailable")
 	}
@@ -835,9 +839,65 @@ func (r *PostgresRepository) FinancialSettings(ctx context.Context, p Principal,
 		if result.AcceptedCurrencies == nil {
 			result.AcceptedCurrencies = []string{}
 		}
+		walletRows, walletErr := tx.Query(ctx, `SELECT wallet_id::text,chain_id,chain_name,address,status,version FROM admin_watch_wallet_inventory($1,$2)`, s.TenantID, s.MerchantID)
+		if walletErr != nil {
+			return walletErr
+		}
+		defer walletRows.Close()
+		for walletRows.Next() {
+			var wallet FinancialSettingsWallet
+			if scanErr := walletRows.Scan(&wallet.ID, &wallet.ChainID, &wallet.ChainName, &wallet.Address, &wallet.Status, &wallet.Version); scanErr != nil {
+				return scanErr
+			}
+			result.Wallets = append(result.Wallets, wallet)
+		}
+		if walletErr = walletRows.Err(); walletErr != nil {
+			return walletErr
+		}
+		if result.Wallets == nil {
+			result.Wallets = []FinancialSettingsWallet{}
+		}
 		return nil
 	})
 	return result, classifyAdminDB(err)
+}
+
+func scanFinancialSettingsWallet(row pgx.Row, value *FinancialSettingsWallet) error {
+	return row.Scan(&value.ID, &value.ChainID, &value.ChainName, &value.Address, &value.Status, &value.Version)
+}
+
+func (r *PostgresRepository) ReplaceWatchWalletAddress(ctx context.Context, p Principal, s Scope, walletID string, input WatchWalletReplacement) (value FinancialSettingsWallet, err error) {
+	if !ids.Valid(s.TenantID) || !ids.Valid(s.MerchantID) || !ids.Valid(walletID) || !ids.Valid(input.AddressID) || input.ChainID == "" || input.ExpectedVersion < 1 || len(input.IdempotencyKey) < 8 || len(input.IdempotencyKey) > 255 {
+		return value, ErrInvalid
+	}
+	hash := requestDigest(map[string]any{"wallet_id": walletID, "chain_id": input.ChainID, "address": input.CanonicalAddress, "version": input.ExpectedVersion, "reason": input.Reason})
+	err = r.withinScopeWrite(ctx, p, s, func(tx pgx.Tx) error {
+		_, found, e := readAdminIdempotency(ctx, tx, s.TenantID, p.UserID, "financial.wallet.replace", input.IdempotencyKey, hash, &value)
+		if e != nil || found {
+			return e
+		}
+		var beforeAddress string
+		var beforeVersion int64
+		if e = tx.QueryRow(ctx, `SELECT address,version FROM admin_watch_wallet_inventory($1,$2) WHERE wallet_id=$3`, s.TenantID, s.MerchantID, walletID).Scan(&beforeAddress, &beforeVersion); e != nil {
+			return e
+		}
+		row := tx.QueryRow(ctx, `SELECT wallet_id::text,chain_id,chain_name,address,status,version FROM admin_replace_watch_wallet_address($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, s.TenantID, s.MerchantID, p.UserID, walletID, input.AddressID, input.ChainID, input.CanonicalAddress, input.DisplayAddress, input.ExpectedVersion, input.Reason)
+		if e = scanFinancialSettingsWallet(row, &value); e != nil {
+			return e
+		}
+		if e = writeAdminIdempotency(ctx, tx, s.TenantID, p.UserID, "financial.wallet.replace", input.IdempotencyKey, hash, value); e != nil {
+			return e
+		}
+		return r.appendAuditTx(ctx, tx, AuditEntry{
+			TenantID: s.TenantID, MerchantID: s.MerchantID, ActorUserID: p.UserID, SessionID: p.SessionID,
+			Action: "financial.wallet.replaced", ResourceType: "watch_wallet", ResourceID: walletID,
+			RequestID: input.IdempotencyKey, Reason: input.Reason,
+			BeforeDigest: requestDigest(map[string]any{"wallet_id": walletID, "chain_id": value.ChainID, "address": beforeAddress, "version": beforeVersion}),
+			AfterDigest:  requestDigest(map[string]any{"wallet_id": walletID, "chain_id": value.ChainID, "canonical_address": input.CanonicalAddress, "version": value.Version}),
+			Details:      json.RawMessage(`{"private_keys_stored":false,"historic_routes_retained":true}`), OccurredAt: time.Now().UTC(),
+		})
+	})
+	return value, classifyAdminDB(err)
 }
 
 func (r *PostgresRepository) ListReconciliation(ctx context.Context, p Principal, s Scope, cursor string, limit int) (page Page[ReconciliationRow], err error) {
@@ -1214,7 +1274,8 @@ func (r *PostgresRepository) appendAuditTx(ctx context.Context, q rowQuerier, va
 }
 
 func readAdminIdempotency(ctx context.Context, tx pgx.Tx, tenant, user, operation, key string, hash []byte, target any) (bool, bool, error) {
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(concat_ws(chr(31),$1,$2,$3,$4),0))`, tenant, user, operation, key); err != nil {
+	lockKey := strings.Join([]string{tenant, user, operation, key}, "\x1f")
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, lockKey); err != nil {
 		return false, false, err
 	}
 	var storedHash, body []byte
@@ -1255,7 +1316,7 @@ func classifyAdminDB(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
-		case "23505", "40001", "40P01":
+		case "23505", "40001", "40P01", "55000":
 			return ErrConflict
 		case "23503", "23514", "22P02":
 			return ErrInvalid
