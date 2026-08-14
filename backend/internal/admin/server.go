@@ -133,6 +133,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /admin/v1/auth/callback", s.callback)
 	s.mux.Handle("GET /admin/v1/auth/step-up", s.authenticated(http.HandlerFunc(s.stepUp)))
 	s.mux.Handle("GET /admin/v1/session/me", s.authenticated(http.HandlerFunc(s.me)))
+	s.mux.Handle("POST /admin/v1/session/csrf", s.authenticated(s.sameOrigin(http.HandlerFunc(s.refreshCSRF))))
 	s.mux.Handle("POST /admin/v1/session/logout", s.authenticated(s.mutating(http.HandlerFunc(s.logout))))
 	s.mux.Handle("GET /admin/v1/overview", s.authenticated(http.HandlerFunc(s.overview)))
 	s.mux.Handle("GET /admin/v1/intents", s.authenticated(http.HandlerFunc(s.intents)))
@@ -436,6 +437,17 @@ func (s *Server) mutating(next http.Handler) http.Handler {
 	})
 }
 
+func (s *Server) sameOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		origins := request.Header.Values("Origin")
+		if len(origins) != 1 || origins[0] != s.origin.String() || request.Header.Get("Sec-Fetch-Site") == "cross-site" {
+			writeProblem(w, http.StatusForbidden, "origin_rejected", "Request origin was rejected.")
+			return
+		}
+		next.ServeHTTP(w, request)
+	})
+}
+
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		header := w.Header()
@@ -620,6 +632,17 @@ func (s *Server) clearOIDCCookie(w http.ResponseWriter) {
 
 func (s *Server) me(w http.ResponseWriter, request *http.Request) {
 	writeJSON(w, http.StatusOK, authenticatedFrom(request.Context()).Principal)
+}
+
+func (s *Server) refreshCSRF(w http.ResponseWriter, request *http.Request) {
+	authenticated := authenticatedFrom(request.Context())
+	csrfToken, err := s.service.RefreshCSRF(request.Context(), authenticated)
+	if err != nil {
+		writeProblem(w, statusFor(err), "csrf_refresh_failed", "The action token could not be refreshed.")
+		return
+	}
+	s.setCSRFCookie(w, csrfToken, authenticated.Session.AbsoluteExpiresAt)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) logout(w http.ResponseWriter, request *http.Request) {
@@ -984,8 +1007,16 @@ func (s *Server) setCookies(w http.ResponseWriter, tokens SessionTokens, expires
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Value: tokens.Session, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, Expires: expires, MaxAge: maxAge})
 	if tokens.CSRF != "" {
-		http.SetCookie(w, &http.Cookie{Name: csrfCookieName, Value: tokens.CSRF, Path: "/", Secure: true, HttpOnly: false, SameSite: http.SameSiteStrictMode, Expires: expires, MaxAge: maxAge})
+		s.setCSRFCookie(w, tokens.CSRF, expires)
 	}
+}
+
+func (s *Server) setCSRFCookie(w http.ResponseWriter, csrfToken string, expires time.Time) {
+	maxAge := int(time.Until(expires).Seconds())
+	if maxAge < 1 {
+		maxAge = 1
+	}
+	http.SetCookie(w, &http.Cookie{Name: csrfCookieName, Value: csrfToken, Path: "/", Secure: true, HttpOnly: false, SameSite: http.SameSiteStrictMode, Expires: expires, MaxAge: maxAge})
 }
 
 func (s *Server) clearCookies(w http.ResponseWriter) {

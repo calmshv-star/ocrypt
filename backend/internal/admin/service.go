@@ -314,6 +314,17 @@ func (s *Service) VerifyCSRF(authenticated AuthResult, rawCSRF string) error {
 	return nil
 }
 
+func (s *Service) RefreshCSRF(ctx context.Context, authenticated AuthResult) (string, error) {
+	csrfToken, err := randomToken(32)
+	if err != nil {
+		return "", err
+	}
+	if err = s.repository.ReplaceSessionCSRF(ctx, authenticated.Session.SessionHash, tokenHash(csrfToken), s.now()); err != nil {
+		return "", err
+	}
+	return csrfToken, nil
+}
+
 func (s *Service) Logout(ctx context.Context, authenticated AuthResult) error {
 	now := s.now()
 	if err := s.repository.RevokeSession(ctx, authenticated.Session.SessionHash, "user_logout", now); err != nil {

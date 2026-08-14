@@ -27,6 +27,7 @@ type AuthRepository interface {
 	FindSession(context.Context, [32]byte, time.Time) (Session, Identity, error)
 	FindInvitationSession(context.Context, [32]byte, time.Time) (Session, Identity, error)
 	TouchSession(context.Context, [32]byte, time.Time, time.Time) error
+	ReplaceSessionCSRF(context.Context, [32]byte, [32]byte, time.Time) error
 	RotateSession(context.Context, [32]byte, Session) error
 	RevokeSession(context.Context, [32]byte, string, time.Time) error
 	RevokeAllUserSessions(context.Context, string, string, time.Time) error

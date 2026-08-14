@@ -361,6 +361,14 @@ func (r *PostgresRepository) TouchSession(ctx context.Context, hash [32]byte, se
 	return classifyAdminDB(err)
 }
 
+func (r *PostgresRepository) ReplaceSessionCSRF(ctx context.Context, sessionHash, csrfHash [32]byte, now time.Time) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE admin_sessions SET csrf_hash=$2,last_seen_at=$3 WHERE session_hash=$1 AND revoked_at IS NULL AND idle_expires_at>$3 AND absolute_expires_at>$3`, sessionHash[:], csrfHash[:], now)
+	if err == nil && tag.RowsAffected() != 1 {
+		return ErrUnauthenticated
+	}
+	return classifyAdminDB(err)
+}
+
 func (r *PostgresRepository) RotateSession(ctx context.Context, old [32]byte, session Session) error {
 	return classifyAdminDB(pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{IsoLevel: pgx.Serializable}, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `UPDATE admin_sessions SET revoked_at=$2,revocation_reason='rotated',replaced_by_hash=$3 WHERE session_hash=$1 AND revoked_at IS NULL AND idle_expires_at>$2 AND absolute_expires_at>$2`, old[:], session.RotatedAt, session.SessionHash[:])

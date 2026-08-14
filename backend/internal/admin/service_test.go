@@ -69,6 +69,13 @@ func (r *repositoryStub) TouchSession(_ context.Context, _ [32]byte, seen, idle 
 	r.session.IdleExpiresAt = idle
 	return nil
 }
+func (r *repositoryStub) ReplaceSessionCSRF(_ context.Context, sessionHash, csrfHash [32]byte, _ time.Time) error {
+	if r.revoked || r.session.SessionHash != sessionHash {
+		return ErrUnauthenticated
+	}
+	r.session.CSRFHash = csrfHash
+	return nil
+}
 func (r *repositoryStub) RotateSession(_ context.Context, old [32]byte, s Session) error {
 	if r.session.SessionHash != old {
 		return ErrUnauthenticated
