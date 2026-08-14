@@ -49,9 +49,9 @@ func TestConfigurationValidationRejectsSecretsMoneyAndInvalidPolicies(t *testing
 	}
 }
 
-func TestRPCValidationPinsSafeHeadsAndAptosIndexer(t *testing.T) {
+func TestRPCValidationPinsHeadsAndAptosIndexer(t *testing.T) {
 	valid := []string{
-		`{"chain_ref":"eip155:56","endpoint":"https://1rpc.io/bnb","head_tag":"safe","capabilities":["blocks","transactions"],"provider_kind":"evm-jsonrpc","provider_id":"bsc-1rpc"}`,
+		`{"chain_ref":"eip155:56","endpoint":"https://bsc.rpc.blxrbdn.com","head_tag":"finalized","capabilities":["blocks","transactions","logs"],"provider_kind":"evm-jsonrpc","provider_id":"bsc-blxr"}`,
 		`{"chain_ref":"aptos:1","endpoint":"https://fullnode.mainnet.aptoslabs.com","indexer_endpoint":"https://api.mainnet.aptoslabs.com/v1/graphql","capabilities":["blocks","transactions"],"provider_kind":"aptos-fullnode","provider_id":"aptos-labs"}`,
 		`{"chain_ref":"aptos:1","endpoint":"https://aptos-rest.publicnode.com","indexer_endpoint_ref":"aptos/nodit-mainnet","capabilities":["blocks","transactions"],"provider_kind":"aptos-fullnode","provider_id":"aptos-nodit"}`,
 	}
