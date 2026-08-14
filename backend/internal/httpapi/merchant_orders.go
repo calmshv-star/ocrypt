@@ -176,7 +176,7 @@ func (s *Server) getMerchantOrder(w http.ResponseWriter, r *http.Request) {
 func (s *Server) resolveMerchantAsset(ctx context.Context, principal application.Principal, network, symbol string) (domain.Asset, error) {
 	network = strings.ToLower(strings.TrimSpace(network))
 	symbol = strings.ToUpper(strings.TrimSpace(symbol))
-	aliases := map[string]string{"ethereum": "eip155:1", "eth": "eip155:1", "tron": "tron:mainnet", "trx": "tron:mainnet", "solana": "solana:mainnet", "sol": "solana:mainnet", "ton": "ton:mainnet"}
+	aliases := map[string]string{"ethereum": "eip155:1", "eth": "eip155:1", "tron": "tron:mainnet", "trx": "tron:mainnet", "solana": "solana:mainnet", "sol": "solana:mainnet", "ton": "ton:mainnet", "bsc": "eip155:56", "binance": "eip155:56", "polygon": "eip155:137", "plasma": "eip155:9745", "aptos": "aptos:1"}
 	if canonical := aliases[network]; canonical != "" {
 		network = canonical
 	}

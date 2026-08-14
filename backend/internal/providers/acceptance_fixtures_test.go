@@ -210,22 +210,26 @@ func TestRetainedProviderAcceptanceFixtures(t *testing.T) {
 		readAcceptanceFixture(t, "aptos_coin_fungible_asset.json", &fixture)
 		var expected []string
 		_ = json.Unmarshal(fixture["expected_kinds"], &expected)
+		var block struct {
+			Transactions []json.RawMessage `json:"transactions"`
+		}
+		if err := json.Unmarshal(fixture["block"], &block); err != nil {
+			t.Fatal(err)
+		}
 		client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
 			switch request.URL.Path {
 			case "/v1":
 				return http.StatusOK, fixture["ledger"]
-			case "/v1/transactions/by_version/0":
-				return http.StatusOK, fixture["genesis"]
-			case "/v1/blocks/by_height/0":
-				return http.StatusOK, fixture["parent"]
-			case "/v1/blocks/by_height/1":
-				return http.StatusOK, fixture["block"]
+			case "/v1/transactions/by_version/1":
+				return http.StatusOK, block.Transactions[0]
+			case "/v1/graphql":
+				return http.StatusOK, json.RawMessage(`{"data":{"fungible_asset_activities":[{"amount":"20","asset_type":"0x44","event_index":"1","is_transaction_success":true,"owner_address":"0x2","transaction_version":"1","type":"Deposit"}],"processor_status":[{"last_success_version":"1","processor":"fungible_asset_processor"}]}}`)
 			default:
 				t.Fatalf("unexpected Aptos path %s", request.URL.Path)
 				return http.StatusInternalServerError, nil
 			}
 		})
-		source, err := NewAptosSource(AptosConfig{HTTP: HTTPConfig{Endpoint: "https://aptos.acceptance.invalid", Client: client}, ProviderID: "aptos-retained", ChainID: "aptos:1", Assets: map[string]AptosAsset{"0x44": {AssetID: "usdc-aptos", Decimals: 6, FungibleAsset: true}, "0x1::aptos_coin::AptosCoin": {AssetID: "apt", Decimals: 8}}})
+		source, err := NewAptosSource(AptosConfig{HTTP: HTTPConfig{Endpoint: "https://aptos.acceptance.invalid", Client: client}, IndexerHTTP: HTTPConfig{Endpoint: "https://aptos.acceptance.invalid/v1/graphql", Client: client}, ProviderID: "aptos-retained", ChainID: "aptos:1", WatchedAddresses: []string{"0x2"}, Assets: map[string]AptosAsset{"0x44": {AssetID: "usdc-aptos", Decimals: 6, FungibleAsset: true}}})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -42,6 +42,7 @@ type TONSource struct {
 	nativeDecimals uint8
 	jettons        map[string]TONAsset
 	watched        []string
+	watchedSet     map[string]struct{}
 	pageSize       uint32
 }
 
@@ -81,7 +82,7 @@ func NewTONSource(config TONConfig) (*TONSource, error) {
 	if pageSize > 1000 {
 		return nil, errors.New("TON page size exceeds provider safety limit")
 	}
-	return &TONSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, jettons: jettons, watched: watched, pageSize: pageSize}, nil
+	return &TONSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, jettons: jettons, watched: watched, watchedSet: watchedSet, pageSize: pageSize}, nil
 }
 
 type tonMasterchainInfo struct {
@@ -139,9 +140,12 @@ type tonAction struct {
 	Details struct {
 		Source       string `json:"source"`
 		Destination  string `json:"destination"`
+		Sender       string `json:"sender"`
+		Receiver     string `json:"receiver"`
 		Value        string `json:"value"`
 		Amount       string `json:"amount"`
 		JettonMaster string `json:"jetton_master"`
+		Asset        string `json:"asset"`
 		QueryID      string `json:"query_id"`
 	} `json:"details"`
 }
@@ -461,20 +465,24 @@ func (s *TONSource) normalizeTONActions(all []tonAction, blocks map[uint64]tonBl
 			return nil, malformed("ton block actions", errors.New("duplicate transaction action index"))
 		}
 		seenIndices[indexKey] = true
-		fromRaw, toRaw := action.Data.Sender, action.Data.Recipient
-		amountRaw, jettonMaster, queryID := action.Data.Amount, action.Data.JettonMaster, action.Data.QueryID
-		if fromRaw == "" {
-			fromRaw, toRaw = action.Details.Source, action.Details.Destination
-			amountRaw, jettonMaster, queryID = action.Details.Value, action.Details.JettonMaster, action.Details.QueryID
-			if amountRaw == "" {
-				amountRaw = action.Details.Amount
-			}
-		}
-		from, err := canonicalTONAddress(fromRaw)
+		fromRaw := firstTONValue(action.Data.Sender, action.Details.Source, action.Details.Sender)
+		toRaw := firstTONValue(action.Data.Recipient, action.Details.Destination, action.Details.Receiver)
+		amountRaw := firstTONValue(action.Data.Amount, action.Details.Value, action.Details.Amount)
+		jettonMaster := firstTONValue(action.Data.JettonMaster, action.Details.JettonMaster, action.Details.Asset)
+		queryID := firstTONValue(action.Data.QueryID, action.Details.QueryID)
+		to, err := canonicalTONAddress(toRaw)
 		if err != nil {
 			return nil, malformed("ton transfer action", err)
 		}
-		to, err := canonicalTONAddress(toRaw)
+		if len(s.watchedSet) > 0 {
+			if _, inbound := s.watchedSet[to]; !inbound {
+				// The account-filtered TON API also returns outgoing transfers.
+				// A valid recipient outside the complete watched set proves this
+				// action cannot fund any active route, so it is safe to ignore.
+				continue
+			}
+		}
+		from, err := canonicalTONAddress(fromRaw)
 		if err != nil {
 			return nil, malformed("ton transfer action", err)
 		}
@@ -504,6 +512,15 @@ func (s *TONSource) normalizeTONActions(all []tonAction, blocks map[uint64]tonBl
 		events = append(events, normalized...)
 	}
 	return events, nil
+}
+
+func firstTONValue(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func tonActionTransactionHash(action tonAction) string {

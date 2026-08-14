@@ -209,6 +209,40 @@ func TestEVMEmptyWatchSetUsesHeaderOnly(t *testing.T) {
 	}
 }
 
+func TestEVMProviderUsesItsAdmittedSafeHeadTag(t *testing.T) {
+	var fixture struct {
+		Block json.RawMessage `json:"block"`
+	}
+	readFixture(t, "evm.json", &fixture)
+	tags := make([]string, 0, 1)
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		return 200, rpcResult(t, request, func(method string, params []json.RawMessage) json.RawMessage {
+			if method != "eth_getBlockByNumber" {
+				t.Fatalf("unexpected method %s", method)
+			}
+			var tag string
+			if err := json.Unmarshal(params[0], &tag); err != nil {
+				t.Fatal(err)
+			}
+			tags = append(tags, tag)
+			return fixture.Block
+		})
+	})
+	source, err := NewEVMSource(EVMConfig{HTTP: HTTPConfig{Endpoint: "https://evm.example", Client: client}, ProviderID: "evm-safe", ChainID: "eip155:56", HeadTag: "safe", Tokens: map[string]EVMToken{"0x4444444444444444444444444444444444444444": {AssetID: "usdt-bsc", Decimals: 18}}, AddressFiltered: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = source.ScanRange(context.Background(), 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(tags) == 0 || tags[0] != "safe" {
+		t.Fatalf("provider head policy was ignored: %v", tags)
+	}
+	if _, err = NewEVMSource(EVMConfig{HTTP: HTTPConfig{Endpoint: "https://evm.example", Client: client}, ProviderID: "evm-unsafe", ChainID: "eip155:56", HeadTag: "latest", Tokens: map[string]EVMToken{"0x4444444444444444444444444444444444444444": {AssetID: "usdt-bsc", Decimals: 18}}}); err == nil {
+		t.Fatal("unfinalized latest head tag was accepted")
+	}
+}
+
 func TestEVMEmptyRouteWatchFastForwardsWithSparseCursorEvidence(t *testing.T) {
 	requested := make([]uint64, 0, 2)
 	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
@@ -459,6 +493,57 @@ func TestTONDirectSourceParsesNativeAndJettonActionsWithPaginationContract(t *te
 	}
 }
 
+func TestTONActionSchemaDriftSkipsProvenOutboundAndKeepsInbound(t *testing.T) {
+	const watched = "0:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const other = "0:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	const master = "0:4444444444444444444444444444444444444444444444444444444444444444"
+	source, err := NewTONSource(TONConfig{
+		HTTP:             HTTPConfig{Endpoint: "https://ton.example"},
+		ProviderID:       "ton-a",
+		ChainID:          "ton:mainnet",
+		NativeAssetID:    "ton-ton",
+		NativeDecimals:   9,
+		WatchedAddresses: []string{watched},
+		Jettons:          map[string]TONAsset{master: {AssetID: "usdt-ton", Decimals: 6}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := tonAction{ActionID: strings.Repeat("1", 64), Type: "jetton_transfer", Success: true, Utime: 100, TraceMCSeqnoEnd: 1}
+	action.Details.Sender = watched
+	action.Details.Receiver = other
+	action.Details.Asset = master
+	action.Details.Amount = "1000000"
+	blocks := map[uint64]tonBlockEvidence{1: {Hash: strings.Repeat("2", 64), Time: time.Unix(100, 0).UTC()}}
+	events, err := source.normalizeTONActions([]tonAction{action}, blocks, 0, 1)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("proven outbound action must be ignored: events=%+v err=%v", events, err)
+	}
+
+	action.ActionID = strings.Repeat("3", 64)
+	action.Details.Sender, action.Details.Receiver = other, watched
+	events, err = source.normalizeTONActions([]tonAction{action}, blocks, 0, 1)
+	if err != nil || len(events) != 1 || events[0].Identity.ToAddress != watched || events[0].Identity.AssetID != "usdt-ton" {
+		t.Fatalf("inbound drifted action must be normalized: events=%+v err=%v", events, err)
+	}
+}
+
+func TestTONActionSchemaDriftFailsClosedWithoutValidRecipient(t *testing.T) {
+	const watched = "0:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	source, err := NewTONSource(TONConfig{HTTP: HTTPConfig{Endpoint: "https://ton.example"}, ProviderID: "ton-a", ChainID: "ton:mainnet", NativeAssetID: "ton-ton", NativeDecimals: 9, WatchedAddresses: []string{watched}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := tonAction{ActionID: strings.Repeat("1", 64), Type: "ton_transfer", Success: true, Utime: 100, TraceMCSeqnoEnd: 1}
+	action.Details.Sender = watched
+	action.Details.Receiver = "not-an-address"
+	action.Details.Amount = "1"
+	_, err = source.normalizeTONActions([]tonAction{action}, map[uint64]tonBlockEvidence{1: {Hash: strings.Repeat("2", 64), Time: time.Unix(100, 0).UTC()}}, 0, 1)
+	if err == nil {
+		t.Fatal("an unprovable recipient must stop the scanner")
+	}
+}
+
 func TestTONDirectSourceRejectsAmbiguousGenesisFields(t *testing.T) {
 	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
 		if request.URL.Path != "/api/v3/masterchainInfo" {
@@ -478,22 +563,26 @@ func TestTONDirectSourceRejectsAmbiguousGenesisFields(t *testing.T) {
 func TestAptosDirectSourceParsesPrimaryFungibleAssetTransfer(t *testing.T) {
 	var fixture map[string]json.RawMessage
 	readFixture(t, "aptos.json", &fixture)
+	var block struct {
+		Transactions []json.RawMessage `json:"transactions"`
+	}
+	if err := json.Unmarshal(fixture["block"], &block); err != nil {
+		t.Fatal(err)
+	}
 	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
 		switch request.URL.Path {
 		case "/v1":
 			return 200, fixture["ledger"]
-		case "/v1/transactions/by_version/0":
-			return 200, fixture["genesis"]
-		case "/v1/blocks/by_height/0":
-			return 200, fixture["parent"]
-		case "/v1/blocks/by_height/1":
-			return 200, fixture["block"]
+		case "/v1/transactions/by_version/1":
+			return 200, block.Transactions[0]
+		case "/v1/graphql":
+			return 200, json.RawMessage(`{"data":{"fungible_asset_activities":[{"amount":"20","asset_type":"0x44","event_index":"1","is_transaction_success":true,"owner_address":"0x2","transaction_version":"1","type":"Deposit"}],"processor_status":[{"last_success_version":"1","processor":"fungible_asset_processor"}]}}`)
 		default:
 			t.Fatalf("unexpected Aptos path %s", request.URL.Path)
 			return 500, nil
 		}
 	})
-	source, err := NewAptosSource(AptosConfig{HTTP: HTTPConfig{Endpoint: "https://aptos.example", Client: client}, ProviderID: "aptos-a", ChainID: "aptos:1", Assets: map[string]AptosAsset{"0x44": {AssetID: "usdc-aptos", Decimals: 6, FungibleAsset: true}, "0x1::aptos_coin::AptosCoin": {AssetID: "apt", Decimals: 8}}})
+	source, err := NewAptosSource(AptosConfig{HTTP: HTTPConfig{Endpoint: "https://aptos.example", Client: client}, IndexerHTTP: HTTPConfig{Endpoint: "https://aptos.example/v1/graphql", Client: client}, ProviderID: "aptos-a", ChainID: "aptos:1", WatchedAddresses: []string{"0x2"}, Assets: map[string]AptosAsset{"0x44": {AssetID: "usdc-aptos", Decimals: 6, FungibleAsset: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -501,8 +590,123 @@ func TestAptosDirectSourceParsesPrimaryFungibleAssetTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(batch.Events) != 2 || batch.Events[0].Kind != "aptos_fungible_asset_transfer" || batch.Events[0].Identity.EventIndex != "event:0" || batch.Events[1].Kind != "aptos_native_transfer" {
+	if len(batch.Events) != 1 || batch.Events[0].Kind != "aptos_fungible_asset_transfer" || batch.Events[0].Identity.EventIndex != "event:1" {
 		t.Fatalf("unexpected Aptos events: %+v", batch.Events)
+	}
+}
+
+func TestAptosEventParserAcceptsSwapAndRejectsSpoofedPayload(t *testing.T) {
+	source, err := NewAptosSource(AptosConfig{HTTP: HTTPConfig{Endpoint: "https://aptos.example"}, ProviderID: "aptos-a", ChainID: "aptos:1", Assets: map[string]AptosAsset{"0x44": {AssetID: "usdc-aptos", Decimals: 6, FungibleAsset: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transaction := aptosTransaction{Type: "user_transaction", Hash: "0x" + strings.Repeat("c", 64), Version: "7", Success: true, Timestamp: "100000000", Sender: "0x1"}
+	transaction.Payload.Function = "0xfeed::router_v3::exact_input_swap_entry"
+	transaction.Events = make([]aptosEvent, 2)
+	transaction.Events[0].Type = "0x1::fungible_asset::Withdraw"
+	transaction.Events[0].Data.Amount, transaction.Events[0].Data.Store = "20", "0x11"
+	transaction.Events[1].Type = "0x1::fungible_asset::Deposit"
+	transaction.Events[1].Data.Amount, transaction.Events[1].Data.Store = "20", "0x22"
+	transaction.Changes = aptosTestStoreChanges(t, "0x11", "0x1", "0x22", "0x2", "0x44")
+	events, err := source.normalizeAptosTransaction(transaction, 1, "0x"+strings.Repeat("b", 64), time.Unix(100, 0).UTC(), 1)
+	if err != nil || len(events) != 1 || events[0].Identity.ToAddress != "0x"+strings.Repeat("0", 63)+"2" {
+		t.Fatalf("swap deposit was not detected: events=%+v err=%v", events, err)
+	}
+
+	transaction.Events, transaction.Changes = nil, nil
+	transaction.Payload.Function = "0xfeed::primary_fungible_store::transfer"
+	transaction.Payload.Arguments = []json.RawMessage{json.RawMessage(`"0x44"`), json.RawMessage(`"0x2"`), json.RawMessage(`"20"`)}
+	events, err = source.normalizeAptosTransaction(transaction, 1, "0x"+strings.Repeat("b", 64), time.Unix(100, 0).UTC(), 1)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("spoofed payload must not create a transfer: events=%+v err=%v", events, err)
+	}
+}
+
+func TestAptosEventParserHandlesSplitDepositAndFailsClosedOnMissingContext(t *testing.T) {
+	source, err := NewAptosSource(AptosConfig{HTTP: HTTPConfig{Endpoint: "https://aptos.example"}, ProviderID: "aptos-a", ChainID: "aptos:1", Assets: map[string]AptosAsset{"0x44": {AssetID: "usdc-aptos", Decimals: 6, FungibleAsset: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transaction := aptosTransaction{Type: "user_transaction", Hash: "0x" + strings.Repeat("c", 64), Version: "7", Success: true, Timestamp: "100000000", Sender: "0x1"}
+	transaction.Events = make([]aptosEvent, 3)
+	transaction.Events[0].Type, transaction.Events[0].Data.Amount, transaction.Events[0].Data.Store = "0x1::fungible_asset::Withdraw", "20", "0x11"
+	transaction.Events[1].Type, transaction.Events[1].Data.Amount, transaction.Events[1].Data.Store = "0x1::fungible_asset::Deposit", "12", "0x22"
+	transaction.Events[2].Type, transaction.Events[2].Data.Amount, transaction.Events[2].Data.Store = "0x1::fungible_asset::Deposit", "8", "0x33"
+	transaction.Changes = aptosTestStoreChanges(t, "0x11", "0x1", "0x22", "0x2", "0x44")
+	transaction.Changes = append(transaction.Changes, aptosTestStoreChanges(t, "0x33", "0x3", "", "", "0x44")[:2]...)
+	events, err := source.normalizeAptosTransaction(transaction, 1, "0x"+strings.Repeat("b", 64), time.Unix(100, 0).UTC(), 1)
+	if err != nil || len(events) != 2 || events[0].Identity.EventIndex != "event:1" || events[1].Identity.EventIndex != "event:2" {
+		t.Fatalf("split deposit was not detected: events=%+v err=%v", events, err)
+	}
+
+	transaction.Changes = transaction.Changes[:2]
+	_, err = source.normalizeAptosTransaction(transaction, 1, "0x"+strings.Repeat("b", 64), time.Unix(100, 0).UTC(), 1)
+	if err == nil {
+		t.Fatal("missing deposit ownership evidence must fail closed")
+	}
+}
+
+func aptosTestStoreChanges(t *testing.T, firstStore, firstOwner, secondStore, secondOwner, metadata string) []aptosChange {
+	t.Helper()
+	changes := make([]aptosChange, 0, 4)
+	for _, pair := range [][2]string{{firstStore, firstOwner}, {secondStore, secondOwner}} {
+		if pair[0] == "" {
+			continue
+		}
+		owner := aptosChange{Type: "write_resource", Address: pair[0]}
+		owner.Data.Type, owner.Data.Data = "0x1::object::ObjectCore", json.RawMessage(`{"owner":"`+pair[1]+`"}`)
+		store := aptosChange{Type: "write_resource", Address: pair[0]}
+		store.Data.Type, store.Data.Data = "0x1::fungible_asset::FungibleStore", json.RawMessage(`{"metadata":{"inner":"`+metadata+`"}}`)
+		changes = append(changes, owner, store)
+	}
+	return changes
+}
+
+func TestAptosHeadsDerivesNetworkIdentityFromObservedChainID(t *testing.T) {
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		if request.URL.Path != "/v1" {
+			t.Fatalf("unexpected Aptos path %s", request.URL.Path)
+		}
+		return http.StatusOK, json.RawMessage(`{"chain_id":1,"ledger_version":"7"}`)
+	})
+	source, err := NewAptosSource(AptosConfig{HTTP: HTTPConfig{Endpoint: "https://aptos.example", Client: client}, ProviderID: "aptos-a", ChainID: "aptos:1", Assets: map[string]AptosAsset{"0x44": {AssetID: "usdc-aptos", Decimals: 6, FungibleAsset: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	heads, err := source.Heads(context.Background())
+	if err != nil || len(heads) != 1 || heads[0].GenesisHash != aptosNetworkFingerprint(1) || heads[0].SafeHeight != 7 {
+		t.Fatalf("unexpected Aptos network identity: heads=%+v err=%v", heads, err)
+	}
+}
+
+func TestAptosEmptyWatchSetUsesSparseLedgerCheckpoint(t *testing.T) {
+	pageCalls := 0
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		switch {
+		case request.URL.Path == "/v1":
+			return http.StatusOK, json.RawMessage(`{"chain_id":1,"ledger_version":"20"}`)
+		case request.URL.Path == "/v1/transactions":
+			pageCalls++
+			return http.StatusOK, json.RawMessage(`[]`)
+		case strings.HasPrefix(request.URL.Path, "/v1/transactions/by_version/"):
+			version := request.URL.Path[strings.LastIndex(request.URL.Path, "/")+1:]
+			number := "1"
+			if version == "20" {
+				number = "2"
+			}
+			return http.StatusOK, json.RawMessage(`{"type":"state_checkpoint_transaction","hash":"0x` + strings.Repeat(number, 64) + `","version":"` + version + `","timestamp":"1000000","success":true}`)
+		default:
+			t.Fatalf("unexpected Aptos path %s", request.URL.Path)
+			return http.StatusInternalServerError, nil
+		}
+	})
+	source, err := NewAptosSource(AptosConfig{HTTP: HTTPConfig{Endpoint: "https://aptos.example", Client: client}, ProviderID: "aptos-a", ChainID: "aptos:1", Overlap: 4, Assets: map[string]AptosAsset{"0x44": {AssetID: "usdc-aptos", Decimals: 6, FungibleAsset: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := source.ScanRange(context.Background(), 10, 20)
+	if err != nil || !batch.SparseBlocks || !batch.IdleCheckpoint || len(batch.Blocks) != 3 || pageCalls != 0 {
+		t.Fatalf("empty Aptos watch set downloaded transaction pages: batch=%+v page_calls=%d err=%v", batch, pageCalls, err)
 	}
 }
 
@@ -606,6 +810,18 @@ func TestDestinationFilterPreservesBlocksAndKeepsOnlyWatchedTransfers(t *testing
 	filtered, err := source.ScanRange(context.Background(), 1, 1)
 	if err != nil || len(filtered.Blocks) != 1 || len(filtered.Events) != 1 || filtered.Events[0].Identity.ToAddress != "merchant" {
 		t.Fatalf("unexpected filtered range: batch=%+v err=%v", filtered, err)
+	}
+}
+
+func TestDestinationFilterWithNoWalletDropsEveryTransfer(t *testing.T) {
+	batch := scanner.RangeBatch{From: 1, To: 1, Blocks: []scanner.Block{{Height: 1, Hash: "block"}}, Events: []domain.TransferEvent{{Identity: domain.EventIdentity{ToAddress: "merchant"}}}}
+	source, err := NewDestinationFilterSource(staticSource{batch: batch}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered, err := source.ScanRange(context.Background(), 1, 1)
+	if err != nil || len(filtered.Blocks) != 1 || len(filtered.Events) != 0 {
+		t.Fatalf("empty destination inventory must preserve blocks and drop transfers: batch=%+v err=%v", filtered, err)
 	}
 }
 

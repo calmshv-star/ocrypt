@@ -193,6 +193,12 @@ func validateKind(kind Kind, o map[string]any) error {
 		if !safeHTTPS(o["endpoint"]) {
 			return ErrInvalid
 		}
+		if indexer, exists := o["indexer_endpoint"]; exists && !safeHTTPS(indexer) {
+			return ErrInvalid
+		}
+		if headTag, exists := o["head_tag"]; exists && !oneOf(headTag, "finalized", "safe") {
+			return ErrInvalid
+		}
 		capabilities, ok := o["capabilities"].([]any)
 		if !ok || len(capabilities) == 0 || len(capabilities) > 32 {
 			return ErrInvalid
@@ -209,11 +215,36 @@ func validateKind(kind Kind, o map[string]any) error {
 			if !oneOf(o["provider_kind"], "evm-jsonrpc", "tron-fullnode", "solana-jsonrpc", "toncenter-v3", "aptos-fullnode") {
 				return ErrInvalid
 			}
+			providerKind, _ := o["provider_kind"].(string)
+			if _, exists := o["head_tag"]; exists && providerKind != "evm-jsonrpc" {
+				return ErrInvalid
+			}
+			_, directIndexer := o["indexer_endpoint"]
+			_, referencedIndexer := o["indexer_endpoint_ref"]
+			if providerKind == "aptos-fullnode" {
+				if directIndexer == referencedIndexer {
+					return ErrInvalid
+				}
+			} else if directIndexer || referencedIndexer {
+				return ErrInvalid
+			}
 			if providerID, ok := o["provider_id"].(string); !ok || !logicalKeyPattern.MatchString(providerID) {
 				return ErrInvalid
 			}
 		}
 		if ref, exists := o["credential_ref"]; exists && ref != nil {
+			value, ok := ref.(string)
+			if !ok || !refPattern.MatchString(value) {
+				return ErrInvalid
+			}
+		}
+		if ref, exists := o["indexer_credential_ref"]; exists && ref != nil {
+			value, ok := ref.(string)
+			if !ok || !refPattern.MatchString(value) {
+				return ErrInvalid
+			}
+		}
+		if ref, exists := o["indexer_endpoint_ref"]; exists && ref != nil {
 			value, ok := ref.(string)
 			if !ok || !refPattern.MatchString(value) {
 				return ErrInvalid

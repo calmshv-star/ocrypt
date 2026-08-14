@@ -179,6 +179,7 @@ type scannerConfig struct {
 	databaseURL, chainID, genesisHash, shard, workerID, providerToken, healthAddress string
 	providerKind, providerMode, nativeAssetID                                        string
 	providerURLs, providerIDs                                                        []string
+	providerHeadTags                                                                 []string
 	watchedAddresses                                                                 []string
 	assets                                                                           map[string]providers.AssetConfig
 	providerHeaders                                                                  []http.Header
@@ -203,6 +204,7 @@ func loadScannerConfig() (scannerConfig, error) {
 		healthAddress: env("SCANNER_HEALTH_ADDRESS", ":9091"), providerKind: env("SCANNER_PROVIDER_KIND", "normalized-gateway"),
 		providerMode: env("SCANNER_PROVIDER_MODE", "quorum"),
 		providerURLs: splitNonempty(os.Getenv("SCANNER_PROVIDER_URLS")), providerIDs: splitNonempty(os.Getenv("SCANNER_PROVIDER_IDS")),
+		providerHeadTags: splitNonempty(os.Getenv("SCANNER_PROVIDER_HEAD_TAGS")),
 		watchedAddresses: splitNonempty(os.Getenv("SCANNER_WATCHED_ADDRESSES")),
 		nativeAssetID:    os.Getenv("SCANNER_NATIVE_ASSET_ID"), gasFreeContracts: splitNonempty(os.Getenv("SCANNER_GASFREE_CONTRACTS")),
 		gasFreeFeeCollectors: splitNonempty(os.Getenv("SCANNER_GASFREE_FEE_COLLECTORS")),
@@ -287,6 +289,9 @@ func loadScannerConfig() (scannerConfig, error) {
 	if len(config.providerIDs) != 0 && len(config.providerIDs) != len(config.providerURLs) {
 		return config, errors.New("SCANNER_PROVIDER_IDS must be empty or contain one ID per provider URL")
 	}
+	if len(config.providerHeadTags) != 0 && len(config.providerHeadTags) != len(config.providerURLs) {
+		return config, errors.New("SCANNER_PROVIDER_HEAD_TAGS must be empty or contain one tag per provider URL")
+	}
 	if config.providerMode != "quorum" && config.providerMode != "failover" {
 		return config, errors.New("SCANNER_PROVIDER_MODE must be quorum or failover")
 	}
@@ -309,13 +314,17 @@ func scannerSource(config scannerConfig) (scanner.Source, error) {
 		if len(config.providerIDs) > 0 {
 			providerID = config.providerIDs[index]
 		}
+		headTag := ""
+		if len(config.providerHeadTags) > 0 {
+			headTag = config.providerHeadTags[index]
+		}
 		headers := config.providerHeaders[index].Clone()
 		if config.providerToken != "" && headers.Get("Authorization") == "" {
 			headers.Set("Authorization", "Bearer "+config.providerToken)
 		}
 		source, err := providers.NewSource(providers.Config{
 			Kind: providers.Kind(config.providerKind), HTTP: providers.HTTPConfig{Endpoint: endpoint, Headers: headers, Timeout: 20 * time.Second, MinInterval: config.providerMinInterval},
-			ProviderID: providerID, ChainID: config.chainID, NativeAssetID: config.nativeAssetID, NativeDecimals: config.nativeDecimals,
+			ProviderID: providerID, ChainID: config.chainID, HeadTag: headTag, GenesisHash: config.genesisHash, NativeAssetID: config.nativeAssetID, NativeDecimals: config.nativeDecimals,
 			Assets: config.assets, IncludeInternal: config.includeInternal, GasFreeContracts: config.gasFreeContracts,
 			GasFreeFeeCollectors: config.gasFreeFeeCollectors, WatchedAddresses: config.watchedAddresses, AddressFiltered: config.addressFiltered, Overlap: config.overlap, PageSize: config.pageSize,
 		})
@@ -334,7 +343,7 @@ func scannerSource(config scannerConfig) (scanner.Source, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(config.watchedAddresses) > 0 {
+	if config.addressFiltered {
 		return providers.NewDestinationFilterSource(source, config.watchedAddresses)
 	}
 	return source, nil

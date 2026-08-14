@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -78,6 +79,10 @@ type finalityPayload struct {
 type rpcPayload struct {
 	ChainRef           string                              `json:"chain_ref"`
 	Endpoint           string                              `json:"endpoint"`
+	HeadTag            string                              `json:"head_tag,omitempty"`
+	IndexerEndpoint    string                              `json:"indexer_endpoint,omitempty"`
+	IndexerEndpointRef string                              `json:"indexer_endpoint_ref,omitempty"`
+	IndexerCredential  string                              `json:"indexer_credential_ref,omitempty"`
 	Capabilities       []string                            `json:"capabilities"`
 	ProviderKind       string                              `json:"provider_kind"`
 	ProviderID         string                              `json:"provider_id"`
@@ -202,7 +207,7 @@ func (l ScannerLoader) Load(ctx context.Context, keys ScannerKeys, now time.Time
 	for _, key := range keys.RPCProviders {
 		snapshot := byKey[platformadmin.RuntimeSnapshotKey{Kind: platformadmin.KindRPCProvider, LogicalKey: key}]
 		var rpc rpcPayload
-		if strictDecode(snapshot.Payload, &rpc) != nil || rpc.ChainRef != keys.Chain || rpc.ProviderID == "" || !contains(rpc.Capabilities, "blocks") || !contains(rpc.Capabilities, "transactions") {
+		if strictDecode(snapshot.Payload, &rpc) != nil || rpc.ChainRef != keys.Chain || rpc.ProviderID == "" || !contains(rpc.Capabilities, "blocks") || !contains(rpc.Capabilities, "transactions") || (chain.Family == "evm" && len(assets) > 0 && !contains(rpc.Capabilities, "logs")) {
 			return ScannerRuntime{}, fmt.Errorf("RPC snapshot %s lacks required capabilities", key)
 		}
 		if _, duplicate := rpcByProvider[rpc.ProviderID]; duplicate {
@@ -256,7 +261,21 @@ func (l ScannerLoader) Load(ctx context.Context, keys ScannerKeys, now time.Time
 		if rangePolicy.Timeout < timeout {
 			timeout = rangePolicy.Timeout
 		}
-		source, err := providers.NewSource(providers.Config{Kind: providers.Kind(rpc.ProviderKind), HTTP: providers.HTTPConfig{Endpoint: rpc.Endpoint, Headers: headers, Timeout: timeout}, ProviderID: rpc.ProviderID, ChainID: keys.Chain, NativeAssetID: nativeAssetID, NativeDecimals: nativeDecimals, Assets: assets, IncludeInternal: chain.IncludeInternal, GasFreeContracts: chain.GasFreeContracts, GasFreeFeeCollectors: chain.GasFreeFeeCollectors, WatchedAddresses: watchedAddresses, AddressFiltered: true, Overlap: chain.Overlap, PageSize: chain.PageSize})
+		var indexerHeaders http.Header
+		indexerEndpoint := rpc.IndexerEndpoint
+		if rpc.IndexerEndpointRef != "" {
+			indexerEndpoint, err = l.readEndpoint(rpc.IndexerEndpointRef)
+			if err != nil {
+				return ScannerRuntime{}, fmt.Errorf("resolve indexer endpoint reference %s: %w", key, err)
+			}
+		}
+		if rpc.IndexerCredential != "" {
+			indexerHeaders, err = l.readHeaders(rpc.IndexerCredential)
+			if err != nil {
+				return ScannerRuntime{}, fmt.Errorf("resolve indexer credential reference %s: %w", key, err)
+			}
+		}
+		source, err := providers.NewSource(providers.Config{Kind: providers.Kind(rpc.ProviderKind), HTTP: providers.HTTPConfig{Endpoint: rpc.Endpoint, Headers: headers, Timeout: timeout}, IndexerHTTP: providers.HTTPConfig{Endpoint: indexerEndpoint, Headers: indexerHeaders, Timeout: timeout}, ProviderID: rpc.ProviderID, ChainID: keys.Chain, HeadTag: rpc.HeadTag, GenesisHash: chain.GenesisHash, NativeAssetID: nativeAssetID, NativeDecimals: nativeDecimals, Assets: assets, IncludeInternal: chain.IncludeInternal, GasFreeContracts: chain.GasFreeContracts, GasFreeFeeCollectors: chain.GasFreeFeeCollectors, WatchedAddresses: watchedAddresses, AddressFiltered: true, Overlap: chain.Overlap, PageSize: chain.PageSize})
 		if err != nil {
 			return ScannerRuntime{}, fmt.Errorf("initialize admitted RPC provider %s: %w", key, err)
 		}
@@ -404,16 +423,9 @@ func (l ScannerLoader) readHeaders(reference string) (http.Header, error) {
 	if reference == "" {
 		return make(http.Header), nil
 	}
-	if !referencePattern.MatchString(reference) || l.SecretDir == "" || filepath.IsAbs(reference) || strings.Contains(reference, "..") {
-		return nil, errors.New("invalid external credential reference")
-	}
-	root, err := filepath.EvalSymlinks(l.SecretDir)
+	path, err := l.secretPath(reference, ".json")
 	if err != nil {
 		return nil, err
-	}
-	path, err := filepath.EvalSymlinks(filepath.Join(root, filepath.FromSlash(reference)+".json"))
-	if err != nil || path == root || !strings.HasPrefix(path, root+string(os.PathSeparator)) {
-		return nil, errors.New("credential reference escapes secret root")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil || len(data) == 0 || len(data) > 16<<10 {
@@ -431,4 +443,36 @@ func (l ScannerLoader) readHeaders(reference string) (http.Header, error) {
 		headers.Set(name, value)
 	}
 	return headers, nil
+}
+
+func (l ScannerLoader) readEndpoint(reference string) (string, error) {
+	path, err := l.secretPath(reference, ".url")
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 || len(data) > 4096 {
+		return "", errors.New("endpoint credential file unavailable")
+	}
+	value := strings.TrimSpace(string(data))
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || strings.ContainsAny(value, "\\\r\n\x00") {
+		return "", errors.New("endpoint credential file contains an unsafe URL")
+	}
+	return value, nil
+}
+
+func (l ScannerLoader) secretPath(reference, suffix string) (string, error) {
+	if !referencePattern.MatchString(reference) || l.SecretDir == "" || filepath.IsAbs(reference) || strings.Contains(reference, "..") {
+		return "", errors.New("invalid external credential reference")
+	}
+	root, err := filepath.EvalSymlinks(l.SecretDir)
+	if err != nil {
+		return "", err
+	}
+	path, err := filepath.EvalSymlinks(filepath.Join(root, filepath.FromSlash(reference)+suffix))
+	if err != nil || path == root || !strings.HasPrefix(path, root+string(os.PathSeparator)) {
+		return "", errors.New("credential reference escapes secret root")
+	}
+	return path, nil
 }

@@ -4,7 +4,7 @@
     "chain_id": "eip155:1",
     "genesis_hash": "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
     "native_asset_id": "eth-ethereum",
-    "endpoints": ["https://ethereum.publicnode.com", "https://eth.drpc.org"],
+    "endpoints": ["https://ethereum.publicnode.com", "https://eth.drpc.org", "https://rpc.mevblocker.io"],
     "tokens": {
       "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48": {"asset_id": "usdc-ethereum", "decimals": 6},
       "0xdAC17F958D2ee523a2206206994597C13D831ec7": {"asset_id": "usdt-ethereum", "decimals": 6}
@@ -55,9 +55,11 @@
     "chain_id": "eip155:137",
     "genesis_hash": "0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b",
     "native_asset_id": "pol-polygon",
-    "endpoints": ["https://tenderly.rpc.polygon.community", "https://polygon.publicnode.com"],
+    "endpoints": ["https://polygon-bor-rpc.publicnode.com", "https://tenderly.rpc.polygon.community", "https://polygon.drpc.org"],
     "tokens": {
-      "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359": {"asset_id": "usdc-polygon", "decimals": 6}
+      "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359": {"asset_id": "usdc-polygon", "decimals": 6},
+      "0xc2132D05D31c914a87C6611C10748AEb04B58e8F": {"asset_id": "usdt-polygon", "decimals": 6},
+      "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174": {"asset_id": "usdce-polygon", "decimals": 6}
     }
   },
   {
@@ -65,7 +67,21 @@
     "chain_id": "eip155:56",
     "genesis_hash": "0x0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b",
     "native_asset_id": "bnb-bsc",
-    "endpoints": ["https://bsc-rpc.publicnode.com", "https://bsc-dataseed.binance.org"],
-    "tokens": {}
+    "endpoints": ["https://bsc-rpc.publicnode.com", "https://1rpc.io/bnb"],
+    "head_tags": {"https://1rpc.io/bnb": "safe"},
+    "tokens": {
+      "0x55d398326f99059fF775485246999027B3197955": {"asset_id": "usdt-bsc", "decimals": 18},
+      "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d": {"asset_id": "usdc-bsc", "decimals": 18}
+    }
+  },
+  {
+    "name": "plasma",
+    "chain_id": "eip155:9745",
+    "genesis_hash": "0x0d0ccca452bdb244100115e37de64ca640a255585d5a94df5610052a6dada558",
+    "native_asset_id": "xpl-plasma",
+    "endpoints": ["https://rpc.plasma.to", "https://9745.rpc.thirdweb.com"],
+    "tokens": {
+      "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb": {"asset_id": "usdt-plasma", "decimals": 6}
+    }
   }
 ]

@@ -1,0 +1,134 @@
+{
+  "source": {
+    "repository": "https://github.com/GMWalletApp/epusdt.git",
+    "base_commit": "d564ef6fa1dffa597c1a59c695a831dc9aeb95d1",
+    "server_overlay": "/opt/epusdt-src-v1.0.10-gram-rate1-eth1/src/model/dao/mdb_table_init.go"
+  },
+  "chains": [
+    {
+      "network": "tron",
+      "chain_id": "tron:mainnet",
+      "family": "tron",
+      "display_name": "TRON",
+      "confirmations": 1,
+      "scan_interval_seconds": 5,
+      "nodes": [
+        {"url": "https://api.trongrid.io", "type": "http", "purpose": "general"}
+      ],
+      "assets": [
+        {"id": "usdt-tron", "symbol": "USDT", "contract": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", "decimals": 6},
+        {"id": "trx-tron", "symbol": "TRX", "contract": "native", "decimals": 6}
+      ]
+    },
+    {
+      "network": "ethereum",
+      "chain_id": "eip155:1",
+      "family": "evm",
+      "display_name": "Ethereum",
+      "confirmations": 3,
+      "scan_interval_seconds": 5,
+      "nodes": [
+        {"url": "wss://ethereum.publicnode.com", "http_url": "https://ethereum.publicnode.com", "type": "ws", "purpose": "general"},
+        {"url": "https://rpc.epusdt.com/ethereum", "type": "http", "purpose": "manual_verify"}
+      ],
+      "assets": [
+        {"id": "eth-ethereum", "symbol": "ETH", "contract": "native", "decimals": 18},
+        {"id": "usdt-ethereum", "symbol": "USDT", "contract": "0xdAC17F958D2ee523a2206206994597C13D831ec7", "decimals": 6},
+        {"id": "usdc-ethereum", "symbol": "USDC", "contract": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "decimals": 6}
+      ]
+    },
+    {
+      "network": "solana",
+      "chain_id": "solana:mainnet",
+      "family": "solana",
+      "display_name": "Solana",
+      "confirmations": 1,
+      "scan_interval_seconds": 5,
+      "nodes": [
+        {"url": "https://api.mainnet-beta.solana.com", "type": "http", "purpose": "general"}
+      ],
+      "assets": [
+        {"id": "usdt-solana", "symbol": "USDT", "contract": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", "decimals": 6},
+        {"id": "usdc-solana", "symbol": "USDC", "contract": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "decimals": 6},
+        {"id": "sol-solana", "symbol": "SOL", "contract": "native", "decimals": 9}
+      ]
+    },
+    {
+      "network": "binance",
+      "chain_id": "eip155:56",
+      "family": "evm",
+      "display_name": "BNB Smart Chain",
+      "confirmations": 3,
+      "scan_interval_seconds": 5,
+      "nodes": [
+        {"url": "wss://bsc.drpc.org", "http_url": "https://bsc.drpc.org", "type": "ws", "purpose": "general"},
+        {"url": "https://rpc.epusdt.com/binance", "type": "http", "purpose": "manual_verify"}
+      ],
+      "assets": [
+        {"id": "usdt-bsc", "symbol": "USDT", "contract": "0x55d398326f99059fF775485246999027B3197955", "decimals": 18},
+        {"id": "usdc-bsc", "symbol": "USDC", "contract": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", "decimals": 18}
+      ]
+    },
+    {
+      "network": "polygon",
+      "chain_id": "eip155:137",
+      "family": "evm",
+      "display_name": "Polygon",
+      "confirmations": 3,
+      "scan_interval_seconds": 5,
+      "nodes": [
+        {"url": "wss://polygon-bor-rpc.publicnode.com", "http_url": "https://polygon-bor-rpc.publicnode.com", "type": "ws", "purpose": "general"},
+        {"url": "https://rpc.epusdt.com/polygon", "type": "http", "purpose": "manual_verify"}
+      ],
+      "assets": [
+        {"id": "usdt-polygon", "symbol": "USDT", "contract": "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", "decimals": 6},
+        {"id": "usdc-polygon", "symbol": "USDC", "contract": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", "decimals": 6},
+        {"id": "usdce-polygon", "symbol": "USDC.e", "contract": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174", "decimals": 6}
+      ]
+    },
+    {
+      "network": "plasma",
+      "chain_id": "eip155:9745",
+      "family": "evm",
+      "display_name": "Plasma",
+      "confirmations": 1,
+      "scan_interval_seconds": 5,
+      "nodes": [
+        {"url": "wss://rpc.plasma.to", "http_url": "https://rpc.plasma.to", "type": "ws", "purpose": "general"}
+      ],
+      "assets": [
+        {"id": "usdt-plasma", "symbol": "USDT", "contract": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb", "decimals": 6}
+      ]
+    },
+    {
+      "network": "ton",
+      "chain_id": "ton:mainnet",
+      "family": "ton",
+      "display_name": "TON",
+      "confirmations": 1,
+      "scan_interval_seconds": 5,
+      "nodes": [
+        {"url": "https://ton-blockchain.github.io/global.config.json", "type": "lite", "purpose": "general"}
+      ],
+      "assets": [
+        {"id": "ton-ton", "symbol": "TON", "contract": "native", "decimals": 9},
+        {"id": "usdt-ton", "symbol": "USDT", "contract": "0:b113a994b5024a16719f69139328eb759596c38a25f59028b146fecdc3621dfe", "decimals": 6}
+      ]
+    },
+    {
+      "network": "aptos",
+      "chain_id": "aptos:1",
+      "family": "aptos",
+      "display_name": "Aptos",
+      "confirmations": 1,
+      "scan_interval_seconds": 5,
+      "nodes": [
+        {"url": "https://aptos-rest.publicnode.com/", "type": "http", "purpose": "general"}
+      ],
+      "assets": [
+        {"id": "usdc-aptos", "symbol": "USDC", "contract": "0xbae207659db88bea0cbead6da0ed00aac12edcdda169e591cd41c94180b46f3b", "decimals": 6, "fungible_asset": true},
+        {"id": "usdt-aptos", "symbol": "USDT", "contract": "0x357b0b74bc833e95a115ad22604854d6b0fca151cecd94111770e5d6ffc9dc2b", "decimals": 6, "fungible_asset": true}
+      ]
+    }
+  ]
+}

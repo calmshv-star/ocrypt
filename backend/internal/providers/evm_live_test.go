@@ -31,6 +31,7 @@ func TestEVMPublicRPCQuorum(t *testing.T) {
 		GenesisHash   string              `json:"genesis_hash"`
 		NativeAssetID string              `json:"native_asset_id"`
 		Endpoints     []string            `json:"endpoints"`
+		HeadTags      map[string]string   `json:"head_tags"`
 		Tokens        map[string]EVMToken `json:"tokens"`
 	}
 	if err := json.Unmarshal([]byte(raw), &cases); err != nil || len(cases) == 0 {
@@ -48,6 +49,7 @@ func TestEVMPublicRPCQuorum(t *testing.T) {
 					HTTP:             HTTPConfig{Endpoint: endpoint, Timeout: 15 * time.Second, MinInterval: 300 * time.Millisecond},
 					ProviderID:       item.Name + "-" + string(rune('a'+index)),
 					ChainID:          item.ChainID,
+					HeadTag:          item.HeadTags[endpoint],
 					NativeAssetID:    item.NativeAssetID,
 					NativeDecimals:   18,
 					Tokens:           item.Tokens,

@@ -49,6 +49,28 @@ func TestConfigurationValidationRejectsSecretsMoneyAndInvalidPolicies(t *testing
 	}
 }
 
+func TestRPCValidationPinsSafeHeadsAndAptosIndexer(t *testing.T) {
+	valid := []string{
+		`{"chain_ref":"eip155:56","endpoint":"https://1rpc.io/bnb","head_tag":"safe","capabilities":["blocks","transactions"],"provider_kind":"evm-jsonrpc","provider_id":"bsc-1rpc"}`,
+		`{"chain_ref":"aptos:1","endpoint":"https://fullnode.mainnet.aptoslabs.com","indexer_endpoint":"https://api.mainnet.aptoslabs.com/v1/graphql","capabilities":["blocks","transactions"],"provider_kind":"aptos-fullnode","provider_id":"aptos-labs"}`,
+		`{"chain_ref":"aptos:1","endpoint":"https://aptos-rest.publicnode.com","indexer_endpoint_ref":"aptos/nodit-mainnet","capabilities":["blocks","transactions"],"provider_kind":"aptos-fullnode","provider_id":"aptos-nodit"}`,
+	}
+	for _, payload := range valid {
+		if err := ValidateCreate(CreateInput{TenantID: testTenant, Kind: KindRPCProvider, LogicalKey: "rpc/main", Payload: json.RawMessage(payload), Reason: "provider admission"}); err != nil {
+			t.Fatalf("valid provider rejected: %v", err)
+		}
+	}
+	invalid := []string{
+		`{"chain_ref":"eip155:56","endpoint":"https://rpc.example","head_tag":"latest","capabilities":["blocks","transactions"],"provider_kind":"evm-jsonrpc","provider_id":"bsc-latest"}`,
+		`{"chain_ref":"aptos:1","endpoint":"https://fullnode.mainnet.aptoslabs.com","capabilities":["blocks","transactions"],"provider_kind":"aptos-fullnode","provider_id":"aptos-without-indexer"}`,
+	}
+	for _, payload := range invalid {
+		if err := ValidateCreate(CreateInput{TenantID: testTenant, Kind: KindRPCProvider, LogicalKey: "rpc/main", Payload: json.RawMessage(payload), Reason: "provider admission"}); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("unsafe provider accepted: %v", err)
+		}
+	}
+}
+
 func FuzzValidateCreateNeverPanics(f *testing.F) {
 	f.Add([]byte(`{"name":"Acme","status":"active"}`))
 	f.Add([]byte(`{"starts_at":1}`))
