@@ -6,17 +6,19 @@ therefore starts with exact rate policies for every combination of:
 
 - invoice currencies: `RUB`, `USD`, `EUR`, `KZT`, `INR`, `CNY`;
 - payment networks: Ethereum, Solana, TON, TRON, Base, Arbitrum One,
-  OP Mainnet, Avalanche C-Chain, Polygon PoS, and BNB Smart Chain;
-- payment assets: each network's native asset plus issuer-native USDC/USDT
-  contracts admitted by `bootstrap-public-assets.sql`.
+  OP Mainnet, Avalanche C-Chain, Polygon PoS, BNB Smart Chain, and Plasma;
+- payment assets: the 28 exact network/contract pairs admitted by
+  `bootstrap-public-assets.sql`, including the full GMPay catalog. The two
+  Aptos assets are recorded as `deposit_disabled`, not offered to payers.
 
-Only the 21 `RUB` targets are enabled in the supplied worker configuration.
+Only the 26 usable `RUB` targets are enabled in the supplied worker configuration.
 The other admitted currencies cause no background or upstream traffic until a
 deployment explicitly adds their policy keys to `RATE_TARGETS_JSON`.
 
-The catalog intentionally excludes bridged and exchange-pegged lookalikes. In
-particular, BNB Smart Chain enables native BNB but does not label Binance-Peg
-tokens as USDT or USDC. The scanners use external public RPC endpoints, keep no
+`gmpay-network-catalog.json` records the exact GMPay chain, contract, decimal,
+confirmation, and public-node provenance. BSC USDT/USDC and Polygon USDC.e are
+therefore named as they are in GMPay rather than being silently substituted for
+issuer-native assets. The scanners use external public RPC endpoints, keep no
 chain database, and receive deposit addresses only; private keys remain outside
 Ocrypt. EVM token reads use address-filtered `eth_getLogs`, and every new scanner
 has a CPU, memory, and process limit in the supplied Compose definition.
@@ -24,7 +26,7 @@ has a CPU, memory, and process limit in the supplied Compose definition.
 Pass `rate_gateway_origin` to `bootstrap.sql` along with its other documented
 psql variables. It must be the public HTTPS origin of the same API deployment,
 where `RATE_SOURCE_GATEWAY_ENABLED=true`. The supplied standalone Compose file
-already enables that gateway and starts the rate worker with the 21 RUB policy
+already enables that gateway and starts the rate worker with the 26 RUB policy
 targets. A successful pair is refreshed once per 30 minutes. Route creation
 uses the cached tick immediately when it is younger than 30 minutes; only a
 missing or stale tick wakes one deduplicated on-demand collection.
@@ -40,6 +42,34 @@ EVM_DEPOSIT_ADDRESS='0x…' \
 
 The command is transactional: chain, asset, wallet-pool, address, and runtime
 catalog changes commit together, and rate admission runs only after that commit.
+The exact GMPay nodes remain recorded in `gmpay-network-catalog.json`; endpoints
+marked `manual_verify` are never promoted into a scanner quorum. Copy the
+supplied `scanner-polygon.env.example`, `scanner-bsc.env.example`, and
+`scanner-plasma.env.example` files into the host configuration directory,
+replacing only the database credential. Polygon uses three independently
+verified range providers. BSC uses PublicNode `finalized` as its finality anchor
+and 1RPC `safe` as its second proof; the scanner always chooses the lower common
+height and still requires two byte-identical range results. Plasma uses two
+independent providers.
+
+The Aptos event parser and low-load scan path are implemented: an address-indexed
+candidate is checked against the exact transaction events and state changes from
+two independent full nodes. That avoids a local node and avoids downloading the
+full Aptos ledger. Activation still requires a second independent hosted indexer
+credential (for example a free Nodit project) in addition to the Aptos Labs
+indexer. The anonymous Labs endpoint is rate-limited and one shared indexer
+cannot prove that it did not omit a whole transaction. Until that credential is
+installed and a two-indexer reconciliation check passes, Aptos remains
+`deposit_disabled`, its wallet pool remains disabled, and its scanner/proof
+services stay behind the `aptos-disabled` Compose profile. No private key or seed
+phrase is imported.
+
+The secondary Aptos GraphQL URL is a secret because providers such as Nodit and
+Dwellir put the API key in the endpoint path. Store the complete HTTPS endpoint
+in `/opt/ocrypt/secrets/scanner/aptos/secondary-indexer.url` (mode `0600`). The
+runtime snapshot contains only the reference `aptos/secondary-indexer`; it never
+stores or returns the URL. Activation is allowed only after both indexers return
+the same candidate set and both full nodes return the same transaction proof.
 
 Before starting a newly admitted EVM scanner, initialize only its absent cursor
 at a quorum-verified finalized block:

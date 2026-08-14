@@ -69,7 +69,14 @@ var assets = map[string]asset{
 	"usdc-avalanche": {ID: "usdc-avalanche", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
 	"pol-polygon":    {ID: "pol-polygon", CoinGeckoID: "polygon-ecosystem-token", CoinPaprikaID: "pol-polygon-ecosystem-token"},
 	"usdc-polygon":   {ID: "usdc-polygon", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
+	"usdt-polygon":   {ID: "usdt-polygon", CoinGeckoID: "tether", CoinPaprikaID: "usdt-tether"},
+	"usdce-polygon":  {ID: "usdce-polygon", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
 	"bnb-bsc":        {ID: "bnb-bsc", CoinGeckoID: "binancecoin", CoinPaprikaID: "bnb-binance-coin"},
+	"usdt-bsc":       {ID: "usdt-bsc", CoinGeckoID: "tether", CoinPaprikaID: "usdt-tether"},
+	"usdc-bsc":       {ID: "usdc-bsc", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
+	"usdt-plasma":    {ID: "usdt-plasma", CoinGeckoID: "tether", CoinPaprikaID: "usdt-tether"},
+	"usdc-aptos":     {ID: "usdc-aptos", CoinGeckoID: "usd-coin", CoinPaprikaID: "usdc-usd-coin"},
+	"usdt-aptos":     {ID: "usdt-aptos", CoinGeckoID: "tether", CoinPaprikaID: "usdt-tether"},
 }
 
 type Fetcher interface {

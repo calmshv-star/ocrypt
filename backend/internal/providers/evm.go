@@ -28,6 +28,7 @@ type EVMConfig struct {
 	HTTP             HTTPConfig
 	ProviderID       string
 	ChainID          string
+	HeadTag          string
 	NativeAssetID    string
 	NativeDecimals   uint8
 	Tokens           map[string]EVMToken
@@ -41,6 +42,7 @@ type EVMSource struct {
 	http            *endpointClient
 	providerID      string
 	chainID         string
+	headTag         string
 	nativeAssetID   string
 	nativeDecimals  uint8
 	tokens          map[string]EVMToken
@@ -55,8 +57,15 @@ func NewEVMSource(config EVMConfig) (*EVMSource, error) {
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(config.ProviderID) == "" || strings.TrimSpace(config.ChainID) == "" || strings.TrimSpace(config.NativeAssetID) == "" || config.NativeDecimals > 36 {
+	if strings.TrimSpace(config.ProviderID) == "" || strings.TrimSpace(config.ChainID) == "" || config.NativeDecimals > 36 || (strings.TrimSpace(config.NativeAssetID) == "" && len(config.Tokens) == 0) {
 		return nil, errors.New("invalid EVM provider identity or native asset")
+	}
+	headTag := strings.TrimSpace(strings.ToLower(config.HeadTag))
+	if headTag == "" {
+		headTag = "finalized"
+	}
+	if headTag != "finalized" && headTag != "safe" {
+		return nil, errors.New("EVM head tag must be finalized or safe")
 	}
 	tokens := make(map[string]EVMToken, len(config.Tokens))
 	for address, token := range config.Tokens {
@@ -78,7 +87,7 @@ func NewEVMSource(config EVMConfig) (*EVMSource, error) {
 	if overlap == 0 {
 		overlap = 1
 	}
-	return &EVMSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, tokens: tokens, includeInternal: config.IncludeInternal, watched: watched, addressFiltered: config.AddressFiltered, overlap: overlap}, nil
+	return &EVMSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, headTag: headTag, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, tokens: tokens, includeInternal: config.IncludeInternal, watched: watched, addressFiltered: config.AddressFiltered, overlap: overlap}, nil
 }
 
 type evmBlock struct {
@@ -149,7 +158,7 @@ func (s *EVMSource) Heads(ctx context.Context) ([]scanner.ProviderHead, error) {
 	if err != nil {
 		return nil, err
 	}
-	finalized, err := s.taggedBlock(ctx, "finalized", false)
+	finalized, err := s.taggedBlock(ctx, s.headTag, false)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +180,7 @@ func (s *EVMSource) ScanRange(ctx context.Context, from, to uint64) (scanner.Ran
 	if s.addressFiltered && !s.includeInternal {
 		return s.scanWatchedRange(ctx, from, to)
 	}
-	head, err := s.taggedBlock(ctx, "finalized", false)
+	head, err := s.taggedBlock(ctx, s.headTag, false)
 	if err != nil {
 		return scanner.RangeBatch{}, err
 	}
@@ -265,7 +274,7 @@ func (s *EVMSource) ScanRange(ctx context.Context, from, to uint64) (scanner.Ran
 // selected from block transaction envelopes and verified with one receipt;
 // allowlisted ERC-20 transfers are selected server-side with eth_getLogs.
 func (s *EVMSource) scanWatchedRange(ctx context.Context, from, to uint64) (scanner.RangeBatch, error) {
-	head, err := s.taggedBlock(ctx, "finalized", false)
+	head, err := s.taggedBlock(ctx, s.headTag, false)
 	if err != nil {
 		return scanner.RangeBatch{}, err
 	}
@@ -309,7 +318,7 @@ func (s *EVMSource) scanWatchedRange(ctx context.Context, from, to uint64) (scan
 	}
 	blocks := make(map[uint64]scanner.Block, to-from+1)
 	for height := from; height <= to; height++ {
-		block, err := s.block(ctx, height, len(s.watched) > 0)
+		block, err := s.block(ctx, height, s.nativeAssetID != "")
 		if err != nil {
 			return scanner.RangeBatch{}, err
 		}
@@ -323,6 +332,9 @@ func (s *EVMSource) scanWatchedRange(ctx context.Context, from, to uint64) (scan
 		blocks[height] = canonicalBlock
 		batch.Blocks = append(batch.Blocks, canonicalBlock)
 		for _, raw := range block.Transactions {
+			if s.nativeAssetID == "" {
+				break
+			}
 			var transaction evmTransaction
 			if err := json.Unmarshal(raw, &transaction); err != nil {
 				return scanner.RangeBatch{}, malformed("evm transaction", err)
@@ -384,6 +396,9 @@ func (s *EVMSource) scanWatchedRange(ctx context.Context, from, to uint64) (scan
 }
 
 func (s *EVMSource) normalizeWatchedNative(ctx context.Context, transaction evmTransaction, block scanner.Block, safeHeight uint64) ([]domain.TransferEvent, error) {
+	if s.nativeAssetID == "" {
+		return nil, nil
+	}
 	txHash, err := canonicalEVMHash(transaction.Hash)
 	if err != nil {
 		return nil, malformed("evm transaction", err)
@@ -519,7 +534,7 @@ func (s *EVMSource) normalizeEVMTransaction(transaction evmTransaction, receipts
 		if err != nil {
 			return nil, malformed("evm native transfer", err)
 		}
-		if value != "0" && transaction.To != "" {
+		if s.nativeAssetID != "" && value != "0" && transaction.To != "" {
 			from, err := canonicalEVMAddress(transaction.From)
 			if err != nil {
 				return nil, malformed("evm native transfer", err)
@@ -564,7 +579,7 @@ func (s *EVMSource) normalizeEVMTransaction(transaction evmTransaction, receipts
 			parsed.Logs = append(parsed.Logs, chains.EVMLog{Index: uint32(index), From: from, To: to, Amount: amount, AssetID: token.AssetID, Decimals: token.Decimals, Transfer: true})
 		}
 		sort.Slice(parsed.Logs, func(i, j int) bool { return parsed.Logs[i].Index < parsed.Logs[j].Index })
-		if s.includeInternal {
+		if s.includeInternal && s.nativeAssetID != "" {
 			root, ok := traces[txHash]
 			if !ok {
 				return nil, malformed("evm trace", errors.New("trace missing for transaction"))
@@ -584,6 +599,9 @@ func (s *EVMSource) normalizeEVMTransaction(transaction evmTransaction, receipts
 }
 
 func (s *EVMSource) appendEVMTraces(receipt *chains.EVMReceipt, calls []evmTraceCall, prefix []uint32) error {
+	if s.nativeAssetID == "" {
+		return nil
+	}
 	for index, call := range calls {
 		path := append(append([]uint32(nil), prefix...), uint32(index))
 		if call.Error != "" {

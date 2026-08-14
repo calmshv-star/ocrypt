@@ -64,7 +64,9 @@ SELECT pg_temp.activate_rate_snapshot(
     ('ton-ton'),('usdt-ton'),('trx-tron'),('usdt-tron'),
     ('eth-base'),('usdc-base'),('eth-arbitrum'),('usdc-arbitrum'),
     ('eth-optimism'),('usdc-optimism'),('avax-avalanche'),('usdc-avalanche'),
-    ('pol-polygon'),('usdc-polygon'),('bnb-bsc')
+    ('pol-polygon'),('usdc-polygon'),('usdt-polygon'),('usdce-polygon'),
+    ('bnb-bsc'),('usdt-bsc'),('usdc-bsc'),
+    ('usdt-plasma'),('usdc-aptos'),('usdt-aptos')
   ) AS assets(asset_id)
   CROSS JOIN (VALUES('RUB'),('USD'),('EUR'),('KZT'),('INR'),('CNY')) AS currencies(currency);
 
@@ -83,7 +85,9 @@ SELECT pg_temp.activate_rate_snapshot(
     ('ton-ton'),('usdt-ton'),('trx-tron'),('usdt-tron'),
     ('eth-base'),('usdc-base'),('eth-arbitrum'),('usdc-arbitrum'),
     ('eth-optimism'),('usdc-optimism'),('avax-avalanche'),('usdc-avalanche'),
-    ('pol-polygon'),('usdc-polygon'),('bnb-bsc')
+    ('pol-polygon'),('usdc-polygon'),('usdt-polygon'),('usdce-polygon'),
+    ('bnb-bsc'),('usdt-bsc'),('usdc-bsc'),
+    ('usdt-plasma'),('usdc-aptos'),('usdt-aptos')
   ) AS assets(asset_id)
   CROSS JOIN (VALUES('RUB'),('USD'),('EUR'),('KZT'),('INR'),('CNY')) AS currencies(currency);
 
@@ -102,7 +106,9 @@ SELECT pg_temp.activate_rate_snapshot(
     ('ton-ton'),('usdt-ton'),('trx-tron'),('usdt-tron'),
     ('eth-base'),('usdc-base'),('eth-arbitrum'),('usdc-arbitrum'),
     ('eth-optimism'),('usdc-optimism'),('avax-avalanche'),('usdc-avalanche'),
-    ('pol-polygon'),('usdc-polygon'),('bnb-bsc')
+    ('pol-polygon'),('usdc-polygon'),('usdt-polygon'),('usdce-polygon'),
+    ('bnb-bsc'),('usdt-bsc'),('usdc-bsc'),
+    ('usdt-plasma'),('usdc-aptos'),('usdt-aptos')
   ) AS assets(asset_id)
   CROSS JOIN (VALUES('RUB'),('USD'),('EUR'),('KZT'),('INR'),('CNY')) AS currencies(currency);
 

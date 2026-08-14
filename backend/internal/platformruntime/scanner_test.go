@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -35,8 +37,8 @@ func admittedState() (ScannerKeys, platformadmin.RuntimeState) {
 	snapshots := []platformadmin.Snapshot{
 		runtimeSnapshot(0, platformadmin.KindChain, keys.Chain, `{"family":"evm","network":"mainnet","status":"active","genesis_hash":"0xgenesis","quorum":2,"overlap":64,"range_size":256,"max_head_age_seconds":60}`),
 		runtimeSnapshot(1, platformadmin.KindFinalityPolicy, keys.Finality, `{"chain_ref":"eip155:1","confirmations":12,"reorg_depth":64}`),
-		runtimeSnapshot(2, platformadmin.KindRPCProvider, keys.RPCProviders[0], `{"chain_ref":"eip155:1","endpoint":"https://one.example/rpc","capabilities":["blocks","transactions"],"provider_kind":"evm-jsonrpc","provider_id":"rpc/one"}`),
-		runtimeSnapshot(3, platformadmin.KindRPCProvider, keys.RPCProviders[1], `{"chain_ref":"eip155:1","endpoint":"https://two.example/rpc","capabilities":["blocks","transactions"],"provider_kind":"evm-jsonrpc","provider_id":"rpc/two"}`),
+		runtimeSnapshot(2, platformadmin.KindRPCProvider, keys.RPCProviders[0], `{"chain_ref":"eip155:1","endpoint":"https://one.example/rpc","capabilities":["blocks","transactions","logs"],"provider_kind":"evm-jsonrpc","provider_id":"rpc/one"}`),
+		runtimeSnapshot(3, platformadmin.KindRPCProvider, keys.RPCProviders[1], `{"chain_ref":"eip155:1","endpoint":"https://two.example/rpc","capabilities":["blocks","transactions","logs"],"provider_kind":"evm-jsonrpc","provider_id":"rpc/two"}`),
 		runtimeSnapshot(4, platformadmin.KindAssetContract, keys.Assets[0], `{"chain_ref":"eip155:1","asset_code":"eth-ethereum","family":"evm","contract":"native","decimals":18,"status":"active"}`),
 		runtimeSnapshot(5, platformadmin.KindAssetContract, keys.Assets[1], `{"chain_ref":"eip155:1","asset_code":"usdt-ethereum","family":"evm","contract":"0xdac17f958d2ee523a2206206994597c13d831ec7","decimals":6,"status":"active"}`),
 		runtimeSnapshot(6, platformadmin.KindMaintenanceWindow, keys.Maintenance[0], `{"starts_at":"2026-08-12T01:00:00Z","ends_at":"2026-08-12T02:00:00Z","effect":"pause_scanner"}`),
@@ -59,6 +61,28 @@ func TestScannerLoaderBuildsAtomicFencedRuntime(t *testing.T) {
 	}
 }
 
+func TestScannerLoaderKeepsSecretIndexerEndpointOutOfSnapshots(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "aptos"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	want := "https://api-aptos-mainnet.n.dwellir.com/redacted-key/v1/graphql"
+	if err := os.WriteFile(filepath.Join(root, "aptos", "secondary.url"), []byte(want), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loader := ScannerLoader{SecretDir: root}
+	got, err := loader.readEndpoint("aptos/secondary")
+	if err != nil || got != want {
+		t.Fatalf("secret indexer endpoint was not resolved: got=%q err=%v", got, err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "aptos", "unsafe.url"), []byte("http://127.0.0.1/indexer"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loader.readEndpoint("aptos/unsafe"); err == nil {
+		t.Fatal("unsafe indexer endpoint was accepted")
+	}
+}
+
 func TestScannerLoaderHonorsMaintenanceAndEmergencyPause(t *testing.T) {
 	keys, state := admittedState()
 	runtime, err := testScannerLoader(state).Load(context.Background(), keys, time.Date(2026, 8, 12, 1, 30, 0, 0, time.UTC))
@@ -77,6 +101,14 @@ func TestScannerLoaderRejectsFinalityBeyondOverlap(t *testing.T) {
 	state.Snapshots[1].Payload = json.RawMessage(`{"chain_ref":"eip155:1","confirmations":12,"reorg_depth":65}`)
 	if _, err := testScannerLoader(state).Load(context.Background(), keys, time.Now().UTC()); err == nil {
 		t.Fatal("expected finality/overlap fence rejection")
+	}
+}
+
+func TestScannerLoaderRequiresLogsCapabilityForEVMTokenAssets(t *testing.T) {
+	keys, state := admittedState()
+	state.Snapshots[2].Payload = json.RawMessage(`{"chain_ref":"eip155:1","endpoint":"https://one.example/rpc","capabilities":["blocks","transactions"],"provider_kind":"evm-jsonrpc","provider_id":"rpc/one"}`)
+	if _, err := testScannerLoader(state).Load(context.Background(), keys, time.Now().UTC()); err == nil {
+		t.Fatal("EVM token scanner admitted a provider without logs capability")
 	}
 }
 

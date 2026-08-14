@@ -61,15 +61,19 @@ def finalized_anchor(item):
     expected_chain = int(chain_id.split(":", 1)[1])
     expected_genesis = item["genesis_hash"].lower()
     endpoints = item["endpoints"]
+    head_tags = item.get("head_tags", {})
     if not CHAIN.fullmatch(chain_id) or not HASH.fullmatch(expected_genesis) or len(set(endpoints)) != len(endpoints) or len(endpoints) < 2:
         raise RuntimeError(f"invalid catalog identity for {item.get('name', chain_id)}")
+    if set(head_tags) - set(endpoints) or any(tag not in ("finalized", "safe") for tag in head_tags.values()):
+        raise RuntimeError(f"invalid head tag policy for {item.get('name', chain_id)}")
 
     verified = []
     for endpoint in endpoints:
         try:
             reported_chain = int(rpc(endpoint, "eth_chainId", []), 16)
             genesis = rpc(endpoint, "eth_getBlockByNumber", ["0x0", False])
-            finalized = rpc(endpoint, "eth_getBlockByNumber", ["finalized", False])
+            head_tag = head_tags.get(endpoint, "finalized")
+            finalized = rpc(endpoint, "eth_getBlockByNumber", [head_tag, False])
         except Exception as error:
             print(f"{chain_id}: provider unavailable: {endpoint}: {error}", file=sys.stderr)
             continue
