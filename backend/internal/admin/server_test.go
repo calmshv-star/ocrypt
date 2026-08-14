@@ -361,6 +361,49 @@ func TestSameOriginCSRFRefreshRepairsAStaleActionToken(t *testing.T) {
 	}
 }
 
+func TestWatchWalletReplacementRequiresValidatedChainAndRecentStepUp(t *testing.T) {
+	handler, repo, raw, csrf, tenant := serverFixture(t, false)
+	merchant := "018f22b0-4db4-7c58-8f18-4d2f9d7b6a44"
+	repo.identity.Bindings[0].MerchantID = merchant
+	repo.identity.Bindings[0].Permissions[PermissionInfrastructureEdit] = true
+	walletID := "018f22b0-4db4-7c58-8f18-4d2f9d7b6a55"
+	body := `{"chain_id":"eip155:1","address":"0x8077444bEd90f3cA9157ab8BF8d2C51103b2CE89","version":1,"reason":"replace receiving address"}`
+	request := mutationRequest(http.MethodPut, "/admin/v1/financial-settings/wallets/"+walletID, body, raw, csrf)
+	request.Header.Set("X-Admin-Tenant-ID", tenant)
+	request.Header.Set("X-Admin-Merchant-ID", merchant)
+	request.Header.Set("Idempotency-Key", "wallet-replace-001")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("wallet replacement expected 200, got %d %s", response.Code, response.Body.String())
+	}
+	if repo.walletInput.ChainID != "eip155:1" || repo.walletInput.CanonicalAddress != "0x8077444bed90f3ca9157ab8bf8d2c51103b2ce89" {
+		t.Fatalf("wallet replacement did not preserve validated chain binding: %#v", repo.walletInput)
+	}
+
+	request = mutationRequest(http.MethodPut, "/admin/v1/financial-settings/wallets/"+walletID, `{"chain_id":"tron:mainnet","address":"not-a-tron-address","version":1,"reason":"replace receiving address"}`, raw, csrf)
+	request.Header.Set("X-Admin-Tenant-ID", tenant)
+	request.Header.Set("X-Admin-Merchant-ID", merchant)
+	request.Header.Set("Idempotency-Key", "wallet-replace-002")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("cross-chain address expected 400, got %d %s", response.Code, response.Body.String())
+	}
+
+	expired := time.Now().UTC().Add(-time.Minute)
+	repo.session.StepUpUntil = &expired
+	request = mutationRequest(http.MethodPut, "/admin/v1/financial-settings/wallets/"+walletID, body, raw, csrf)
+	request.Header.Set("X-Admin-Tenant-ID", tenant)
+	request.Header.Set("X-Admin-Merchant-ID", merchant)
+	request.Header.Set("Idempotency-Key", "wallet-replace-003")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "step_up_required") {
+		t.Fatalf("expired step-up expected 403, got %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestCSRFRefreshRejectsCrossSiteAndMissingOrigin(t *testing.T) {
 	handler, _, raw, _, _ := serverFixture(t, false)
 	for _, test := range []struct {

@@ -325,6 +325,20 @@ func (s *Service) RefreshCSRF(ctx context.Context, authenticated AuthResult) (st
 	return csrfToken, nil
 }
 
+func (s *Service) ReplaceWatchWalletAddress(ctx context.Context, principal Principal, scope Scope, walletID string, input WatchWalletReplacement) (FinancialSettingsWallet, error) {
+	resolved, err := principal.Authorize(PermissionInfrastructureEdit, scope)
+	if err != nil {
+		return FinancialSettingsWallet{}, err
+	}
+	if err = principal.RequireStepUp(s.now(), s.config.RequiredACR, s.config.AcceptedAMR); err != nil {
+		return FinancialSettingsWallet{}, err
+	}
+	if !ids.Valid(walletID) || !ids.Valid(input.AddressID) || input.ChainID == "" || input.ExpectedVersion < 1 || len(input.CanonicalAddress) < 8 || len(input.CanonicalAddress) > 256 || len(input.DisplayAddress) < 8 || len(input.DisplayAddress) > 256 || strings.TrimSpace(input.Reason) == "" || len(input.Reason) > 1000 || len(input.IdempotencyKey) < 8 || len(input.IdempotencyKey) > 255 {
+		return FinancialSettingsWallet{}, ErrInvalid
+	}
+	return s.repository.ReplaceWatchWalletAddress(ctx, principal, resolved, walletID, input)
+}
+
 func (s *Service) Logout(ctx context.Context, authenticated AuthResult) error {
 	now := s.now()
 	if err := s.repository.RevokeSession(ctx, authenticated.Session.SessionHash, "user_logout", now); err != nil {

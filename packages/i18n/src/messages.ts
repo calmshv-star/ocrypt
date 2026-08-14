@@ -1165,6 +1165,18 @@ export const en = {
   ,"financialSettings.safetyBody": "This page never displays or accepts seed phrases, private keys, signer references or full receiving addresses."
   ,"financialSettings.changesTitle": "Changes are intentionally read-only for now"
   ,"financialSettings.changesBody": "The current backend has no safe merchant-scoped approval contract for adding wallets or switching fiat and crypto routes. Controls will remain unavailable until that contract provides validation, separate approval, activation fencing and rollback."
+  ,"financialSettings.walletsTitle": "Receiving wallets"
+  ,"financialSettings.walletsBody": "Public addresses used for new crypto payment orders."
+  ,"financialSettings.noWalletAddress": "No receiving address"
+  ,"financialSettings.changeWallet": "Change"
+  ,"financialSettings.addWallet": "Add address"
+  ,"financialSettings.publicAddress": "Public receiving address"
+  ,"financialSettings.publicAddressPlaceholder": "Paste the address for this network"
+  ,"financialSettings.walletSaved": "Address saved. New orders will use it."
+  ,"financialSettings.walletSaveError": "The address was not changed. Check the address and try again."
+  ,"financialSettings.stepUpRequired": "Confirm your sign-in before changing the address."
+  ,"financialSettings.confirmLogin": "Confirm sign-in"
+  ,"financialSettings.noWallets": "No receiving networks are configured."
 } as const;
 
 export type MessageKey = keyof typeof en;

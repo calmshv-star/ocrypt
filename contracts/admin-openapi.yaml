@@ -175,12 +175,25 @@ paths:
   /admin/v1/financial-settings:
     get:
       tags: [Read models]
-      summary: Effective merchant financial configuration without wallet addresses or secrets
-      description: Read-only inventory of admitted fiat and crypto routes plus aggregate receiving capacity. Private keys, signer references and full addresses are never returned.
+      summary: Effective merchant financial configuration and public receiving addresses
+      description: Inventory of admitted fiat and crypto routes plus merchant-owned watch-only receiving addresses. Private keys and signer references are never returned.
       parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
       responses:
         '200': {description: Effective financial configuration, content: {application/json: {schema: {$ref: '#/components/schemas/FinancialSettingsInventory'}}}}
         '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/financial-settings/wallets/{id}:
+    put:
+      tags: [Merchant management]
+      summary: Replace the public receiving address used for new orders on one network
+      description: The previous address is retired from new allocation but retained for already issued payment routes. Requires recent MFA. Private keys and seed phrases are not accepted.
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WatchWalletReplacementInput'}}}}
+      responses:
+        '200': {description: Active watch-only receiving wallet, content: {application/json: {schema: {$ref: '#/components/schemas/FinancialSettingsWallet'}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
   /admin/v1/reconciliation:
     get:
       tags: [Read models]
@@ -1271,11 +1284,32 @@ components:
     FinancialSettingsInventory:
       type: object
       additionalProperties: false
-      required: [settlement_currency,accepted_currencies,routes]
+      required: [settlement_currency,accepted_currencies,routes,wallets]
       properties:
         settlement_currency: {type: string, pattern: '^[A-Z]{3}$'}
         accepted_currencies: {type: array, maxItems: 64, uniqueItems: true, items: {type: string, pattern: '^[A-Z]{3}$'}}
         routes: {type: array, maxItems: 512, items: {$ref: '#/components/schemas/FinancialSettingsRoute'}}
+        wallets: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/FinancialSettingsWallet'}}
+    FinancialSettingsWallet:
+      type: object
+      additionalProperties: false
+      required: [id,chain_id,chain_name,address,status,version]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        chain_id: {type: string, minLength: 1, maxLength: 128}
+        chain_name: {type: string, minLength: 1, maxLength: 128}
+        address: {type: string, maxLength: 256}
+        status: {type: string, enum: [active,disabled,quarantined]}
+        version: {type: integer, minimum: 1}
+    WatchWalletReplacementInput:
+      type: object
+      additionalProperties: false
+      required: [chain_id,address,version,reason]
+      properties:
+        chain_id: {type: string, minLength: 1, maxLength: 128}
+        address: {type: string, minLength: 8, maxLength: 256}
+        version: {type: integer, minimum: 1}
+        reason: {type: string, minLength: 3, maxLength: 1000}
     Reconciliation: {type: object, required: [id,run_type,status,started_at], properties: {id: {$ref: '#/components/schemas/UUID'}, run_type: {type: string}, status: {type: string}, started_at: {type: string, format: date-time}, ended_at: {type: string, format: date-time}}}
     Audit: {type: object, required: [event_id,actor_user_id,action,resource_type,resource_id,reason,details,occurred_at,entry_hash], properties: {event_id: {$ref: '#/components/schemas/UUID'}, actor_user_id: {$ref: '#/components/schemas/UUID'}, action: {type: string}, resource_type: {type: string}, resource_id: {type: string}, reason: {type: string}, details: {type: object}, occurred_at: {type: string, format: date-time}, entry_hash: {type: string, pattern: '^[0-9a-f]{64}$'}}}
     Action: {type: object, required: [id,tenant_id,kind,resource_type,resource_id,object_version,requested_by,reason,payload,status,requires_step_up,created_at,expires_at], properties: {id: {$ref: '#/components/schemas/UUID'}, tenant_id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, kind: {const: manual_resolution}, resource_type: {type: string}, resource_id: {type: string}, object_version: {type: integer}, requested_by: {$ref: '#/components/schemas/UUID'}, approved_by: {$ref: '#/components/schemas/UUID'}, rejected_by: {$ref: '#/components/schemas/UUID'}, reason: {type: string}, payload: {type: object}, status: {type: string}, requires_step_up: {type: boolean}, created_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time}}}

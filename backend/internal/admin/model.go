@@ -323,10 +323,30 @@ type FinancialSettingsRoute struct {
 	QuarantinedAddressCount int64  `json:"quarantined_address_count"`
 }
 
+type FinancialSettingsWallet struct {
+	ID        string `json:"id"`
+	ChainID   string `json:"chain_id"`
+	ChainName string `json:"chain_name"`
+	Address   string `json:"address"`
+	Status    string `json:"status"`
+	Version   int64  `json:"version"`
+}
+
 type FinancialSettingsInventory struct {
-	SettlementCurrency string                   `json:"settlement_currency"`
-	AcceptedCurrencies []string                 `json:"accepted_currencies"`
-	Routes             []FinancialSettingsRoute `json:"routes"`
+	SettlementCurrency string                    `json:"settlement_currency"`
+	AcceptedCurrencies []string                  `json:"accepted_currencies"`
+	Routes             []FinancialSettingsRoute  `json:"routes"`
+	Wallets            []FinancialSettingsWallet `json:"wallets"`
+}
+
+type WatchWalletReplacement struct {
+	AddressID        string
+	ChainID          string
+	CanonicalAddress string
+	DisplayAddress   string
+	ExpectedVersion  int64
+	Reason           string
+	IdempotencyKey   string
 }
 
 type ReconciliationRow struct {
