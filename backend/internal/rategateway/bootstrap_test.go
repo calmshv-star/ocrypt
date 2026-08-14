@@ -154,10 +154,10 @@ func TestGMPayCatalogIsExactAndAdmittedWithoutManualRPCPromotion(t *testing.T) {
 		}
 	}
 	for _, required := range []string{
-		`"endpoints": ["https://bsc-rpc.publicnode.com", "https://1rpc.io/bnb"]`,
-		`"head_tags": {"https://1rpc.io/bnb": "safe"}`,
+		`"endpoints": ["https://bsc-rpc.publicnode.com", "https://bsc.rpc.blxrbdn.com"]`,
 		`'rpc/polygon-publicnode'`, `'rpc/polygon-tenderly'`, `'rpc/polygon-drpc'`,
-		`'rpc/bsc-publicnode'`, `'rpc/bsc-1rpc'`,
+		`'rpc/bsc-publicnode'`, `'rpc/bsc-blxr'`,
+		`provider_id='bsc-1rpc' AND status='active'`,
 		`'rpc/plasma-public'`, `'rpc/plasma-thirdweb'`,
 		`'indexer_endpoint_ref',indexer_endpoint_ref`, `'aptos/secondary-indexer'`,
 		`jsonb_build_array('blocks','transactions','logs','receipts')`,

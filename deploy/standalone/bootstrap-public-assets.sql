@@ -234,7 +234,7 @@ WITH rpc(logical_key,chain_id,endpoint,indexer_endpoint,indexer_endpoint_ref,hea
     ('rpc/polygon-tenderly','eip155:137','https://tenderly.rpc.polygon.community',NULL,NULL,'finalized','evm-jsonrpc','polygon-tenderly',20,'polygon-tenderly'),
     ('rpc/polygon-drpc','eip155:137','https://polygon.drpc.org',NULL,NULL,'finalized','evm-jsonrpc','polygon-drpc',30,'polygon-drpc'),
     ('rpc/bsc-publicnode','eip155:56','https://bsc-rpc.publicnode.com',NULL,NULL,'finalized','evm-jsonrpc','bsc-publicnode',10,'bsc-publicnode'),
-    ('rpc/bsc-1rpc','eip155:56','https://1rpc.io/bnb',NULL,NULL,'safe','evm-jsonrpc','bsc-1rpc',20,'bsc-1rpc'),
+    ('rpc/bsc-blxr','eip155:56','https://bsc.rpc.blxrbdn.com',NULL,NULL,'finalized','evm-jsonrpc','bsc-blxr',20,'blxr-bdn'),
     ('rpc/plasma-public','eip155:9745','https://rpc.plasma.to',NULL,NULL,'finalized','evm-jsonrpc','plasma-public',10,'plasma-public'),
     ('rpc/plasma-thirdweb','eip155:9745','https://9745.rpc.thirdweb.com',NULL,NULL,'finalized','evm-jsonrpc','plasma-thirdweb',20,'plasma-thirdweb'),
     ('rpc/aptos-publicnode','aptos:1','https://aptos-rest.publicnode.com','https://api.mainnet.aptoslabs.com/v1/graphql',NULL,NULL,'aptos-fullnode','aptos-publicnode',10,'aptos-publicnode'),
@@ -266,6 +266,12 @@ SELECT pg_temp.reconcile_platform_snapshot(
   '0198a100-0000-7000-8000-000000000003','0198a100-0000-7000-8000-000000000004'
 )
 FROM payloads p;
+
+-- Retain the old snapshot for audit, but never let the stale public 1RPC
+-- endpoint participate in admission after the replacement is installed.
+UPDATE provider_operation_bindings
+SET status='paused',version=version+1,updated_at=clock_timestamp()
+WHERE provider_kind='on_chain' AND provider_id='bsc-1rpc' AND status='active';
 
 SELECT pg_temp.reconcile_platform_snapshot(
   '0198a100-0000-7000-8000-000000000001','wallet_pool',wallet_id::text,

@@ -67,8 +67,7 @@
     "chain_id": "eip155:56",
     "genesis_hash": "0x0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b",
     "native_asset_id": "bnb-bsc",
-    "endpoints": ["https://bsc-rpc.publicnode.com", "https://1rpc.io/bnb"],
-    "head_tags": {"https://1rpc.io/bnb": "safe"},
+    "endpoints": ["https://bsc-rpc.publicnode.com", "https://bsc.rpc.blxrbdn.com"],
     "tokens": {
       "0x55d398326f99059fF775485246999027B3197955": {"asset_id": "usdt-bsc", "decimals": 18},
       "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d": {"asset_id": "usdc-bsc", "decimals": 18}
