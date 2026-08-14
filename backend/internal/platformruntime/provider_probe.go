@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/domain"
@@ -74,11 +75,7 @@ func (p ProviderHealthProber) Probe(ctx context.Context, probe providerops.Probe
 	if err != nil {
 		return failure(providerops.ErrorAuthRejected)
 	}
-	source, err := providers.NewSource(providers.Config{
-		Kind:       providers.Kind(rpc.ProviderKind),
-		HTTP:       providers.HTTPConfig{Endpoint: rpc.Endpoint, Headers: headers, Timeout: probe.Candidate.Policy.Timeout},
-		ProviderID: rpc.ProviderID, ChainID: rpc.ChainRef,
-	})
+	source, err := providers.NewSource(providerHealthSourceConfig(rpc, chain, headers, probe.Candidate.Policy.Timeout))
 	if err != nil {
 		return failure(providerops.ErrorPolicyDenied)
 	}
@@ -97,6 +94,32 @@ func (p ProviderHealthProber) Probe(ctx context.Context, probe providerops.Probe
 	}
 	height, headObserved := heads[0].SafeHeight, heads[0].ObservedAt
 	return providerops.Observation{Success: true, Error: providerops.ErrorNone, Latency: time.Since(started), ObservedAt: observed, HeadHeight: &height, HeadObservedAt: &headObserved}
+}
+
+func providerHealthSourceConfig(rpc rpcPayload, chain chainPayload, headers http.Header, timeout time.Duration) providers.Config {
+	config := providers.Config{
+		Kind:            providers.Kind(rpc.ProviderKind),
+		HTTP:            providers.HTTPConfig{Endpoint: rpc.Endpoint, Headers: headers, Timeout: timeout},
+		ProviderID:      rpc.ProviderID,
+		ChainID:         rpc.ChainRef,
+		HeadTag:         rpc.HeadTag,
+		GenesisHash:     chain.GenesisHash,
+		NativeAssetID:   "provider-health",
+		NativeDecimals:  0,
+		AddressFiltered: true,
+		Overlap:         1,
+	}
+	if config.Kind == providers.KindEVMJSONRPC {
+		// Exercise the same bounded eth_getLogs capability used by token scanners.
+		// The zero contract and burn destination cannot represent a payable route,
+		// so the probe remains read-only and cannot manufacture a payment event.
+		config.NativeAssetID = ""
+		config.Assets = map[string]providers.AssetConfig{
+			"0x0000000000000000000000000000000000000000": {ID: "provider-health-token", Decimals: 0},
+		}
+		config.WatchedAddresses = []string{"0x000000000000000000000000000000000000dEaD"}
+	}
+	return config
 }
 
 func (p ProviderHealthProber) probeHosted(ctx context.Context, probe providerops.Probe, started, observed time.Time) providerops.Observation {
