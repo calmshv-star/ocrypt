@@ -39,19 +39,22 @@ func TestRangeProbeCannotCloseFromHeadsAlone(t *testing.T) {
 }
 
 func TestProviderHealthSourceConfigIsBoundedAndUsesAdmittedHeadTag(t *testing.T) {
-	config := providerHealthSourceConfig(
+	config, err := providerHealthSourceConfig(
 		rpcPayload{ProviderKind: "evm-jsonrpc", ProviderID: "provider-a", ChainRef: "eip155:56", Endpoint: "https://rpc.example", HeadTag: "safe"},
 		chainPayload{GenesisHash: "0xgenesis"},
 		http.Header{"X-Test": []string{"value"}},
 		3*time.Second,
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if config.ProviderID != "provider-a" || config.ChainID != "eip155:56" || config.HeadTag != "safe" || config.GenesisHash != "0xgenesis" {
 		t.Fatalf("provider health config lost admitted identity: %+v", config)
 	}
 	if config.NativeAssetID != "" || !config.AddressFiltered || config.Overlap != 1 || len(config.WatchedAddresses) != 1 || len(config.Assets) != 1 {
 		t.Fatalf("provider health config is not bounded to sparse read-only evidence: %+v", config)
 	}
-	asset, ok := config.Assets["0x0000000000000000000000000000000000000000"]
+	asset, ok := config.Assets["0x55d398326f99059fF775485246999027B3197955"]
 	if !ok || asset.ID != "provider-health-token" || config.WatchedAddresses[0] != "0x000000000000000000000000000000000000dEaD" {
 		t.Fatalf("EVM provider health config does not exercise bounded token-log evidence: %+v", config)
 	}
@@ -85,10 +88,13 @@ func TestProviderHealthEVMRangeExercisesLogsCapability(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(payload)), Request: request}, nil
 	})}
-	config := providerHealthSourceConfig(
+	config, err := providerHealthSourceConfig(
 		rpcPayload{ProviderKind: "evm-jsonrpc", ProviderID: "provider-a", ChainRef: "eip155:56", Endpoint: "https://rpc.example", HeadTag: "safe"},
 		chainPayload{GenesisHash: "0xgenesis"}, nil, 3*time.Second,
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	config.HTTP.Client = client
 	source, err := providers.NewSource(config)
 	if err != nil {
@@ -100,5 +106,15 @@ func TestProviderHealthEVMRangeExercisesLogsCapability(t *testing.T) {
 	}
 	if logCalls != 1 {
 		t.Fatalf("provider range health did not exercise eth_getLogs exactly once: %d", logCalls)
+	}
+}
+
+func TestProviderHealthRejectsUnknownEVMProbeContract(t *testing.T) {
+	_, err := providerHealthSourceConfig(
+		rpcPayload{ProviderKind: "evm-jsonrpc", ProviderID: "provider-a", ChainRef: "eip155:999", Endpoint: "https://rpc.example", HeadTag: "finalized"},
+		chainPayload{GenesisHash: "0xgenesis"}, nil, 3*time.Second,
+	)
+	if err == nil {
+		t.Fatal("unknown EVM chain received a synthetic health contract")
 	}
 }
