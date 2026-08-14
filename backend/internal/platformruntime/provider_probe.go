@@ -75,7 +75,11 @@ func (p ProviderHealthProber) Probe(ctx context.Context, probe providerops.Probe
 	if err != nil {
 		return failure(providerops.ErrorAuthRejected)
 	}
-	source, err := providers.NewSource(providerHealthSourceConfig(rpc, chain, headers, probe.Candidate.Policy.Timeout))
+	sourceConfig, err := providerHealthSourceConfig(rpc, chain, headers, probe.Candidate.Policy.Timeout)
+	if err != nil {
+		return failure(providerops.ErrorPolicyDenied)
+	}
+	source, err := providers.NewSource(sourceConfig)
 	if err != nil {
 		return failure(providerops.ErrorPolicyDenied)
 	}
@@ -96,7 +100,18 @@ func (p ProviderHealthProber) Probe(ctx context.Context, probe providerops.Probe
 	return providerops.Observation{Success: true, Error: providerops.ErrorNone, Latency: time.Since(started), ObservedAt: observed, HeadHeight: &height, HeadObservedAt: &headObserved}
 }
 
-func providerHealthSourceConfig(rpc rpcPayload, chain chainPayload, headers http.Header, timeout time.Duration) providers.Config {
+var evmHealthProbeContracts = map[string]string{
+	"eip155:1":     "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+	"eip155:10":    "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+	"eip155:56":    "0x55d398326f99059fF775485246999027B3197955",
+	"eip155:137":   "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+	"eip155:8453":  "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+	"eip155:42161": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+	"eip155:43114": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+	"eip155:9745":  "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb",
+}
+
+func providerHealthSourceConfig(rpc rpcPayload, chain chainPayload, headers http.Header, timeout time.Duration) (providers.Config, error) {
 	config := providers.Config{
 		Kind:            providers.Kind(rpc.ProviderKind),
 		HTTP:            providers.HTTPConfig{Endpoint: rpc.Endpoint, Headers: headers, Timeout: timeout},
@@ -111,15 +126,21 @@ func providerHealthSourceConfig(rpc rpcPayload, chain chainPayload, headers http
 	}
 	if config.Kind == providers.KindEVMJSONRPC {
 		// Exercise the same bounded eth_getLogs capability used by token scanners.
-		// The zero contract and burn destination cannot represent a payable route,
-		// so the probe remains read-only and cannot manufacture a payment event.
+		// Public RPCs legitimately reject the zero address as a token contract, so
+		// use one issuer/native contract from the admitted public asset catalog.
+		// The burn destination is never a payable route and the result is not
+		// persisted as a transfer, keeping this a read-only capability probe.
+		contract, ok := evmHealthProbeContracts[rpc.ChainRef]
+		if !ok {
+			return providers.Config{}, errors.New("EVM health probe contract is not admitted")
+		}
 		config.NativeAssetID = ""
 		config.Assets = map[string]providers.AssetConfig{
-			"0x0000000000000000000000000000000000000000": {ID: "provider-health-token", Decimals: 0},
+			contract: {ID: "provider-health-token", Decimals: 0},
 		}
 		config.WatchedAddresses = []string{"0x000000000000000000000000000000000000dEaD"}
 	}
-	return config
+	return config, nil
 }
 
 func (p ProviderHealthProber) probeHosted(ctx context.Context, probe providerops.Probe, started, observed time.Time) providerops.Observation {
