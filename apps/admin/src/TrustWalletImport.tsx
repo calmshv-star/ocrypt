@@ -24,6 +24,7 @@ type Props = {
 };
 
 type Phase = "closed"|"connecting"|"pairing"|"ready"|"signing"|"done"|"error";
+const solanaMainnet="solana:mainnet";
 
 function shortAddress(address:string):string {
   return address.length>20?`${address.slice(0,10)}…${address.slice(-8)}`:address;
@@ -114,13 +115,14 @@ export function TrustWalletImport({canEdit,client,scope,wallets,onImported}:Prop
 
   const toggle=(id:string)=>setSelected(current=>{const next=new Set(current);if(next.has(id))next.delete(id);else next.add(id);return next});
   const errorKey=stepUp?"financialSettings.stepUpRequired":error==="walletconnect_not_configured"?"trustWallet.mobileNotConfigured":error==="solana_in_app_required"?"trustWallet.solanaInApp":error==="no_supported_networks"?"trustWallet.noNetworks":"trustWallet.connectionError";
+  const hasSolana=wallets.some(wallet=>wallet.chain_id===solanaMainnet);
 
   return <>
     <div className="trust-wallet-entry">
       <div className="trust-wallet-entry__icon"><Wallet size={22}/></div>
       <div><strong>{t("trustWallet.title")}</strong><span>{t("trustWallet.body")}</span></div>
       <Button disabled={!canEdit||!client||phase!=="closed"} onClick={()=>void beginEVM()} size="sm"><Wallet size={16}/>{t("trustWallet.connect")}</Button>
-      {wallets.some(wallet=>wallet.chain_id==="solana:mainnet")&&<Button disabled={!canEdit||!client||phase!=="closed"} onClick={()=>void beginSolana()} size="sm" variant="secondary">{t("trustWallet.solana")}</Button>}
+      {hasSolana&&<Button disabled={!canEdit||!client||phase!=="closed"} onClick={()=>void beginSolana()} size="sm" variant="secondary">{t("trustWallet.solana")}</Button>}
     </div>
     {phase!=="closed"&&<div aria-label={t("trustWallet.dialogTitle")} aria-modal="true" className="trust-wallet-overlay" role="dialog">
       <div className="trust-wallet-dialog">

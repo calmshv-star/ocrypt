@@ -67,8 +67,9 @@ export async function connectInjectedTrustEVM():Promise<TrustWalletConnection|nu
   const provider=await discoverTrustEVMProvider();
   if(!provider)return null;
   const accounts=asStringArray(await provider.request({method:"eth_requestAccounts"}));
-  if(accounts.length===0)throw new Error("wallet_no_account");
-  const address=normalizedEVMAddress(accounts[0]);
+  const account=accounts[0];
+  if(!account)throw new Error("wallet_no_account");
+  const address=normalizedEVMAddress(account);
   return {
     kind:"evm_personal_sign",address,source:walletWindow().trustwallet?.ethereum===provider?"in-app":"extension",
     async sign(message){
@@ -88,6 +89,7 @@ function accountAddress(account:string):string {
 export async function connectMobileTrustEVM(projectId:string,chainIDs:string[],onURI:(uri:string)=>void):Promise<TrustWalletConnection> {
   if(!/^[0-9a-f]{32}$/i.test(projectId)||chainIDs.length===0||chainIDs.some(chain=>!/^eip155:[1-9][0-9]*$/.test(chain)))throw new Error("walletconnect_not_configured");
   const authorizationChain=chainIDs.includes("eip155:1")?"eip155:1":chainIDs[0];
+  if(!authorizationChain)throw new Error("walletconnect_not_configured");
   const {default:SignClient}=await import("@walletconnect/sign-client");
   const client=await SignClient.init({
     projectId,

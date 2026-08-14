@@ -29,8 +29,8 @@ describe("Trust Wallet import",()=>{
     } as unknown as AdminClient;
     const imported=vi.fn().mockResolvedValue(undefined);
     render(<ThemeProvider><I18nProvider><TrustWalletImport canEdit client={client} onImported={imported} scope={{tenantId:"10000000-0000-4000-8000-000000000001",merchantId:"10000000-0000-4000-8000-000000000002"}} wallets={[
-      {id:challenge.wallets[0].wallet_id,chain_id:"eip155:1",chain_name:"Ethereum",address:"0x1111111111111111111111111111111111111111",status:"active",version:1},
-      {id:challenge.wallets[1].wallet_id,chain_id:"eip155:137",chain_name:"Polygon",address:"0x2222222222222222222222222222222222222222",status:"active",version:2}
+      {id:challenge.wallets[0]!.wallet_id,chain_id:"eip155:1",chain_name:"Ethereum",address:"0x1111111111111111111111111111111111111111",status:"active",version:1},
+      {id:challenge.wallets[1]!.wallet_id,chain_id:"eip155:137",chain_name:"Polygon",address:"0x2222222222222222222222222222222222222222",status:"active",version:2}
     ]}/></I18nProvider></ThemeProvider>);
     fireEvent.click(screen.getByRole("button",{name:"Connect Trust Wallet"}));
     expect(await screen.findByRole("heading",{name:"Choose receiving networks"})).toBeInTheDocument();
