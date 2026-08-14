@@ -73,8 +73,7 @@ func (s *OutboxStore) MarkPublished(ctx context.Context, job outbox.Job, now tim
 	return pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.Serializable}, func(tx pgx.Tx) error {
 		command, err := tx.Exec(ctx, `INSERT INTO event_history (event_id,tenant_id,merchant_id,aggregate_type,aggregate_id,aggregate_version,aggregate_sequence,event_type,schema_version,payload,correlation_id,causation_id,occurred_at,recorded_at,published_at)
 SELECT id,tenant_id,merchant_id,aggregate_type,aggregate_id,aggregate_version,aggregate_sequence,event_type,schema_version,payload,correlation_id,causation_id,occurred_at,recorded_at,$3
-FROM outbox_events WHERE id=$1 AND published_at IS NULL AND lease_token=$2 AND locked_until>clock_timestamp()
-ON CONFLICT (event_id) DO NOTHING`, job.EventID, job.ClaimToken, now)
+FROM outbox_events WHERE id=$1 AND published_at IS NULL AND lease_token=$2 AND locked_until>clock_timestamp()`, job.EventID, job.ClaimToken, now)
 		if err != nil {
 			return err
 		}
