@@ -73,3 +73,27 @@ func TestProviderOperationsRollbackDropsEveryCapability(t *testing.T) {
 		t.Fatal("rollback does not restore the independent 000016 recovery functions before dropping provider admission")
 	}
 }
+
+func TestProviderHealthUUIDOrderingMigrationIsExactAndReversible(t *testing.T) {
+	up, err := os.ReadFile("../../migrations/000046_provider_health_uuid_order.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	down, err := os.ReadFile("../../migrations/000046_provider_health_uuid_order.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, sql := range map[string]string{"up": string(up), "down": string(down)} {
+		for _, required := range []string{
+			"claim_provider_health_probes(text,integer,timestamptz)",
+			"ORDER BY min(e.binding_id) LIMIT 1",
+			"ORDER BY min(e.binding_id::text) LIMIT 1",
+			"pg_get_functiondef",
+			"EXECUTE patched",
+		} {
+			if !strings.Contains(sql, required) {
+				t.Fatalf("%s migration lacks %q", name, required)
+			}
+		}
+	}
+}
