@@ -178,6 +178,7 @@ func TestGMPayCatalogIsExactAndAdmittedWithoutManualRPCPromotion(t *testing.T) {
 	}
 	compose := readFixture(t, filepath.Join(root, "deploy", "standalone", "compose.shadow.yaml"))
 	installer := readFixture(t, filepath.Join(root, "deploy", "standalone", "install-nodit-aptos-indexer.sh"))
+	reconcile := readFixture(t, filepath.Join(root, "deploy", "standalone", "reconcile-aptos-nodit.sql"))
 	if !strings.Contains(bootstrap, "'aptos:1','aptos','Aptos Mainnet','disabled'") ||
 		strings.Count(bootstrap, "'aptos:1','US") < 2 ||
 		strings.Count(bootstrap, "'deposit_disabled'") < 3 {
@@ -200,6 +201,20 @@ func TestGMPayCatalogIsExactAndAdmittedWithoutManualRPCPromotion(t *testing.T) {
 	if strings.Contains(strings.ToLower(installer+bootstrap), "blockeden") ||
 		strings.Contains(installer, `curl "$nodit_endpoint"`) {
 		t.Fatal("Nodit credential was exposed or a rejected Aptos indexer was promoted")
+	}
+	for _, required := range []string{
+		`BEGIN;`, `COMMIT;`, `Aptos chain must remain disabled`,
+		`Aptos assets must remain deposit_disabled`, `Aptos wallet pool must remain disabled`,
+		`'rpc_provider','rpc/aptos-nodit'`, `'indexer_endpoint_ref','aptos/nodit-indexer'`,
+		`provider_id='aptos-labs' AND status='active'`,
+		`Nodit provider reconciliation changed Aptos payment admission state`,
+	} {
+		if !strings.Contains(reconcile, required) {
+			t.Fatalf("targeted Aptos reconcile is missing guard %q", required)
+		}
+	}
+	if strings.Contains(reconcile, "bootstrap-public-assets.sql") {
+		t.Fatal("targeted Aptos reconcile must not invoke the broad public-assets bootstrap")
 	}
 }
 
