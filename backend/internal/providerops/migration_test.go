@@ -97,3 +97,27 @@ func TestProviderHealthUUIDOrderingMigrationIsExactAndReversible(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderHealthConfiguredEvidenceJoinMigrationIsExactAndReversible(t *testing.T) {
+	up, err := os.ReadFile("../../migrations/000047_provider_health_explicit_config_join.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	down, err := os.ReadFile("../../migrations/000047_provider_health_explicit_config_join.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, sql := range map[string]string{"up": string(up), "down": string(down)} {
+		for _, required := range []string{
+			"claim_provider_health_probes(text,integer,timestamptz)",
+			"JOIN configured USING(binding_id,operation);",
+			"JOIN configured ON configured.binding_id=c.binding_id AND configured.operation=c.operation;",
+			"pg_get_functiondef",
+			"EXECUTE patched",
+		} {
+			if !strings.Contains(sql, required) {
+				t.Fatalf("%s migration lacks %q", name, required)
+			}
+		}
+	}
+}
