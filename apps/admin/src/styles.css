@@ -402,6 +402,35 @@
 .financial-settings-summary strong { color: var(--mp-text-strong); font-size: 20px; }
 .financial-settings-feedback { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid color-mix(in srgb, var(--mp-positive) 35%, var(--mp-border)); border-radius: 14px; background: var(--mp-positive-soft); color: var(--mp-text-strong); padding: 12px 14px; }
 .financial-settings-feedback--error { border-color: color-mix(in srgb, var(--mp-negative) 35%, var(--mp-border)); background: var(--mp-negative-soft); }
+.trust-wallet-entry { display: grid; grid-template-columns: auto minmax(0,1fr) auto auto; align-items: center; gap: 12px; margin-bottom: 8px; border: 1px solid var(--mp-border); border-radius: 16px; background: var(--mp-surface-soft); padding: 14px; }
+.trust-wallet-entry__icon,.trust-wallet-dialog__mark { display: grid; width: 42px; height: 42px; place-items: center; flex: 0 0 auto; border-radius: 13px; background: var(--mp-text-strong); color: var(--mp-surface); }
+.trust-wallet-entry strong,.trust-wallet-entry span { display: block; }
+.trust-wallet-entry strong { color: var(--mp-text-strong); font-size: 12px; }
+.trust-wallet-entry span { margin-top: 3px; color: var(--mp-muted); font-size: 10px; }
+.trust-wallet-overlay { position: fixed; z-index: 120; inset: 0; display: grid; place-items: center; overflow-y: auto; background: color-mix(in srgb, #000 58%, transparent); padding: 24px; }
+.trust-wallet-dialog { position: relative; width: min(520px,100%); max-height: min(760px,calc(100vh - 48px)); overflow-y: auto; border: 1px solid var(--mp-border); border-radius: 22px; background: var(--mp-surface); color: var(--mp-text); box-shadow: 0 28px 80px rgb(0 0 0 / 28%); padding: 24px; }
+.trust-wallet-dialog__close { position: absolute; z-index: 1; top: 16px; right: 16px; display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid var(--mp-border); border-radius: 11px; background: var(--mp-surface); color: var(--mp-text); cursor: pointer; }
+.trust-wallet-dialog__close:disabled { cursor: not-allowed; opacity: .45; }
+.trust-wallet-dialog__heading { display: flex; align-items: flex-start; gap: 14px; padding-right: 40px; }
+.trust-wallet-dialog h2 { margin: 0; color: var(--mp-text-strong); font-size: 20px; line-height: 1.2; }
+.trust-wallet-dialog p { margin: 6px 0 0; color: var(--mp-muted); font-size: 11px; line-height: 1.55; }
+.trust-wallet-dialog__center { display: grid; justify-items: center; gap: 12px; padding: 22px 12px 8px; text-align: center; }
+.trust-wallet-dialog__center p { max-width: 360px; margin: 0; }
+.trust-wallet-dialog__mark.is-success { background: var(--mp-positive); color: #fff; }
+.trust-wallet-address { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; border: 1px solid var(--mp-border); border-radius: 13px; background: var(--mp-surface-soft); padding: 12px 14px; }
+.trust-wallet-address span { color: var(--mp-muted); font-size: 10px; }
+.trust-wallet-address strong { color: var(--mp-text-strong); font-size: 11px; }
+.trust-wallet-network-list { display: grid; gap: 8px; margin-top: 14px; }
+.trust-wallet-network { display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; gap: 11px; border: 1px solid var(--mp-border); border-radius: 13px; padding: 11px 13px; cursor: pointer; }
+.trust-wallet-network:has(input:checked) { border-color: var(--mp-text-strong); background: var(--mp-surface-soft); }
+.trust-wallet-network input { width: 17px; height: 17px; accent-color: var(--mp-text-strong); }
+.trust-wallet-network strong,.trust-wallet-network small { display: block; }
+.trust-wallet-network strong { color: var(--mp-text-strong); font-size: 11px; }
+.trust-wallet-network small { margin-top: 2px; color: var(--mp-muted); font-size: 9px; }
+.trust-wallet-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; }
+.trust-wallet-safety { border-top: 1px solid var(--mp-border); padding-top: 12px; text-align: center; }
+.trust-wallet-qr { width: 240px; height: 240px; border: 1px solid var(--mp-border); border-radius: 16px; background: #fff; padding: 8px; }
+.trust-wallet-qr-placeholder { width: 240px; height: 240px; border-radius: 16px; background: var(--mp-surface-soft); }
 .financial-network-list { display: grid; gap: 0; }
 .financial-network-row { display: grid; grid-template-columns: minmax(180px,.75fr) minmax(170px,.65fr) minmax(280px,1.4fr) auto auto; align-items: center; gap: 16px; border-bottom: 1px solid var(--mp-border); padding: 17px 0; }
 .financial-network-row:last-child { border-bottom: 0; }
@@ -422,7 +451,7 @@
 .financial-wallet-form>div { display: flex; gap: 8px; }
 @media (max-width: 1180px) { .financial-network-row { grid-template-columns: minmax(180px,.8fr) minmax(150px,.6fr) minmax(260px,1.2fr) auto; } .financial-network-meta { grid-column: 2; } }
 @media (max-width: 800px) { .financial-settings-summary { grid-template-columns: 1fr; } .financial-network-row { grid-template-columns: 1fr auto; gap: 12px; } .financial-network-assets,.financial-network-address,.financial-network-meta { grid-column: 1/-1; } }
-@media (max-width: 620px) { .financial-network-row,.financial-wallet-form { grid-template-columns: 1fr; } .financial-network-row>.mp-button { width: 100%; } .financial-network-heading { align-items: center; } }
+@media (max-width: 620px) { .trust-wallet-entry { grid-template-columns: auto minmax(0,1fr); } .trust-wallet-entry>.mp-button { grid-column: 1/-1; width: 100%; } .trust-wallet-overlay { align-items: end; padding: 0; } .trust-wallet-dialog { width: 100%; max-height: 90vh; border-radius: 22px 22px 0 0; padding: 22px 18px; } .trust-wallet-actions { display: grid; width: 100%; } .trust-wallet-actions>* { width: 100%; } .financial-network-row,.financial-wallet-form { grid-template-columns: 1fr; } .financial-network-row>.mp-button { width: 100%; } .financial-network-heading { align-items: center; } }
 .admin-management-card { display: grid; align-content: start; gap: 14px; min-width: 0; border: 1px solid var(--mp-border); border-radius: 15px; background: var(--mp-surface); padding: 16px; box-shadow: var(--mp-shadow-xs); }
 .admin-management-card.is-selected { border-color: var(--mp-primary); box-shadow: 0 0 0 3px var(--mp-primary-soft); }
 .admin-management-card > header, .admin-management-card__select { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 12px; }

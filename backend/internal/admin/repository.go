@@ -62,6 +62,7 @@ type OperatorRepository interface {
 	DecideActionRequest(context.Context, Principal, Scope, string, string, string, time.Time) (ActionRequest, error)
 	ReplayDelivery(context.Context, Principal, Scope, string, string, string) error
 	ReplaceWatchWalletAddress(context.Context, Principal, Scope, string, WatchWalletReplacement) (FinancialSettingsWallet, error)
+	ImportWatchWallets(context.Context, Principal, Scope, WatchWalletImport) (WatchWalletImportResult, error)
 }
 
 type AuditRepository interface {

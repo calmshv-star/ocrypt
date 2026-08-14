@@ -152,6 +152,8 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /admin/v1/assets", s.authenticated(http.HandlerFunc(s.assets)))
 	s.mux.Handle("GET /admin/v1/financial-settings", s.authenticated(http.HandlerFunc(s.financialSettings)))
 	s.mux.Handle("PUT /admin/v1/financial-settings/wallets/{id}", s.authenticated(s.mutating(http.HandlerFunc(s.replaceWatchWalletAddress))))
+	s.mux.Handle("POST /admin/v1/financial-settings/wallet-import-challenges", s.authenticated(s.mutating(http.HandlerFunc(s.createWatchWalletImportChallenge))))
+	s.mux.Handle("POST /admin/v1/financial-settings/wallet-imports", s.authenticated(s.mutating(http.HandlerFunc(s.importWatchWallets))))
 	s.mux.Handle("GET /admin/v1/reconciliation", s.authenticated(http.HandlerFunc(s.reconciliation)))
 	s.mux.Handle("GET /admin/v1/audit", s.authenticated(http.HandlerFunc(s.audit)))
 	s.mux.Handle("GET /admin/v1/api-clients", s.authenticated(s.managementHandler(PermissionAPIClientsRead, false)))
@@ -746,6 +748,18 @@ type replaceWatchWalletRequest struct {
 	Reason  string `json:"reason"`
 }
 
+type watchWalletImportChallengeRequest struct {
+	Kind    string                  `json:"kind"`
+	Address string                  `json:"address"`
+	Wallets []WatchWalletImportItem `json:"wallets"`
+}
+
+type watchWalletImportRequest struct {
+	Challenge WatchWalletImportChallenge `json:"challenge"`
+	Signature string                     `json:"signature"`
+	Reason    string                     `json:"reason"`
+}
+
 func (s *Server) replaceWatchWalletAddress(w http.ResponseWriter, request *http.Request) {
 	auth, scope, ok := s.authorize(w, request, PermissionInfrastructureEdit)
 	if !ok {
@@ -771,6 +785,41 @@ func (s *Server) replaceWatchWalletAddress(w http.ResponseWriter, request *http.
 	value, err := s.service.ReplaceWatchWalletAddress(request.Context(), auth.Principal, scope, request.PathValue("id"), WatchWalletReplacement{
 		AddressID: addressID, ChainID: chainID, CanonicalAddress: canonical, DisplayAddress: display,
 		ExpectedVersion: input.Version, Reason: strings.TrimSpace(input.Reason), IdempotencyKey: key,
+	})
+	respond(w, value, err)
+}
+
+func (s *Server) createWatchWalletImportChallenge(w http.ResponseWriter, request *http.Request) {
+	auth, scope, ok := s.authorize(w, request, PermissionInfrastructureEdit)
+	if !ok || scope.MerchantID == "" {
+		if ok {
+			respond[any](w, nil, ErrInvalid)
+		}
+		return
+	}
+	var input watchWalletImportChallengeRequest
+	if !s.decode(w, request, &input) {
+		return
+	}
+	value, err := s.service.CreateWatchWalletImportChallenge(auth.Principal, scope, s.origin.Host, input.Kind, input.Address, input.Wallets)
+	respond(w, value, err)
+}
+
+func (s *Server) importWatchWallets(w http.ResponseWriter, request *http.Request) {
+	auth, scope, ok := s.authorize(w, request, PermissionInfrastructureEdit)
+	if !ok || scope.MerchantID == "" {
+		if ok {
+			respond[any](w, nil, ErrInvalid)
+		}
+		return
+	}
+	var input watchWalletImportRequest
+	if !s.decode(w, request, &input) {
+		return
+	}
+	key := strings.TrimSpace(request.Header.Get("Idempotency-Key"))
+	value, err := s.service.ImportWatchWallets(request.Context(), auth.Principal, scope, s.origin.Host, WatchWalletImport{
+		Challenge: input.Challenge, Signature: strings.TrimSpace(input.Signature), Reason: strings.TrimSpace(input.Reason), IdempotencyKey: key,
 	})
 	respond(w, value, err)
 }

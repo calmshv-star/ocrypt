@@ -194,6 +194,32 @@ paths:
         '400': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/financial-settings/wallet-import-challenges:
+    post:
+      tags: [Merchant management]
+      summary: Build a short-lived message proving control of public receiving addresses
+      description: Produces a domain-bound five-minute challenge for Trust Wallet. The endpoint accepts public addresses only and never requests seed phrases or private keys. Requires recent MFA.
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WatchWalletImportChallengeInput'}}}}
+      responses:
+        '200': {description: Message to sign in the connected wallet, content: {application/json: {schema: {$ref: '#/components/schemas/WatchWalletImportChallenge'}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/financial-settings/wallet-imports:
+    post:
+      tags: [Merchant management]
+      summary: Atomically import Trust Wallet public receiving addresses
+      description: Verifies an EVM personal_sign or Solana ed25519 ownership proof and replaces all selected watch-only addresses in one transaction. Historic payment routes remain watched. Requires recent MFA.
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WatchWalletImportInput'}}}}
+      responses:
+        '200': {description: Imported receiving wallets, content: {application/json: {schema: {$ref: '#/components/schemas/WatchWalletImportResult'}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '410': {$ref: '#/components/responses/Problem'}
   /admin/v1/reconciliation:
     get:
       tags: [Read models]
@@ -1310,6 +1336,50 @@ components:
         address: {type: string, minLength: 8, maxLength: 256}
         version: {type: integer, minimum: 1}
         reason: {type: string, minLength: 3, maxLength: 1000}
+    WatchWalletImportItem:
+      type: object
+      additionalProperties: false
+      required: [wallet_id,chain_id,address,version]
+      properties:
+        wallet_id: {$ref: '#/components/schemas/UUID'}
+        chain_id: {type: string, minLength: 1, maxLength: 128}
+        address: {type: string, minLength: 8, maxLength: 256}
+        version: {type: integer, minimum: 1}
+    WatchWalletImportChallengeInput:
+      type: object
+      additionalProperties: false
+      required: [kind,address,wallets]
+      properties:
+        kind: {type: string, enum: [evm_personal_sign,solana_sign_message]}
+        address: {type: string, minLength: 8, maxLength: 256}
+        wallets: {type: array, minItems: 1, maxItems: 16, uniqueItems: true, items: {$ref: '#/components/schemas/WatchWalletImportItem'}}
+    WatchWalletImportChallenge:
+      type: object
+      additionalProperties: false
+      required: [kind,address,wallets,nonce,issued_at,expires_at,message,token]
+      properties:
+        kind: {type: string, enum: [evm_personal_sign,solana_sign_message]}
+        address: {type: string, minLength: 8, maxLength: 256}
+        wallets: {type: array, minItems: 1, maxItems: 16, uniqueItems: true, items: {$ref: '#/components/schemas/WatchWalletImportItem'}}
+        nonce: {$ref: '#/components/schemas/UUID'}
+        issued_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        message: {type: string, minLength: 1, maxLength: 8192}
+        token: {type: string, minLength: 32, maxLength: 16384, description: Opaque encrypted server challenge; clients must return it unchanged}
+    WatchWalletImportInput:
+      type: object
+      additionalProperties: false
+      required: [challenge,signature,reason]
+      properties:
+        challenge: {$ref: '#/components/schemas/WatchWalletImportChallenge'}
+        signature: {type: string, minLength: 64, maxLength: 512}
+        reason: {type: string, minLength: 3, maxLength: 1000}
+    WatchWalletImportResult:
+      type: object
+      additionalProperties: false
+      required: [wallets]
+      properties:
+        wallets: {type: array, minItems: 1, maxItems: 16, items: {$ref: '#/components/schemas/FinancialSettingsWallet'}}
     Reconciliation: {type: object, required: [id,run_type,status,started_at], properties: {id: {$ref: '#/components/schemas/UUID'}, run_type: {type: string}, status: {type: string}, started_at: {type: string, format: date-time}, ended_at: {type: string, format: date-time}}}
     Audit: {type: object, required: [event_id,actor_user_id,action,resource_type,resource_id,reason,details,occurred_at,entry_hash], properties: {event_id: {$ref: '#/components/schemas/UUID'}, actor_user_id: {$ref: '#/components/schemas/UUID'}, action: {type: string}, resource_type: {type: string}, resource_id: {type: string}, reason: {type: string}, details: {type: object}, occurred_at: {type: string, format: date-time}, entry_hash: {type: string, pattern: '^[0-9a-f]{64}$'}}}
     Action: {type: object, required: [id,tenant_id,kind,resource_type,resource_id,object_version,requested_by,reason,payload,status,requires_step_up,created_at,expires_at], properties: {id: {$ref: '#/components/schemas/UUID'}, tenant_id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, kind: {const: manual_resolution}, resource_type: {type: string}, resource_id: {type: string}, object_version: {type: integer}, requested_by: {$ref: '#/components/schemas/UUID'}, approved_by: {$ref: '#/components/schemas/UUID'}, rejected_by: {$ref: '#/components/schemas/UUID'}, reason: {type: string}, payload: {type: object}, status: {type: string}, requires_step_up: {type: boolean}, created_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time}}}

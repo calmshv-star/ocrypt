@@ -31,3 +31,18 @@ func CanonicalWatchAddress(chainID, value string) (string, error) {
 		return "", errors.New("unsupported watch-only chain")
 	}
 }
+
+// SolanaPublicKey returns the 32-byte public key represented by a canonical
+// Solana address. It is intentionally public-key-only and is used to verify
+// wallet ownership proofs without ever accepting signer material.
+func SolanaPublicKey(value string) ([]byte, error) {
+	value = strings.TrimSpace(value)
+	if !validBase58Length(value, 32) {
+		return nil, errors.New("invalid Solana public key")
+	}
+	decoded, err := decodeBase58(value)
+	if err != nil || len(decoded) != 32 {
+		return nil, errors.New("invalid Solana public key")
+	}
+	return decoded, nil
+}

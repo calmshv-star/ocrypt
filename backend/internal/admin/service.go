@@ -1,8 +1,10 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -337,6 +339,110 @@ func (s *Service) ReplaceWatchWalletAddress(ctx context.Context, principal Princ
 		return FinancialSettingsWallet{}, ErrInvalid
 	}
 	return s.repository.ReplaceWatchWalletAddress(ctx, principal, resolved, walletID, input)
+}
+
+func (s *Service) CreateWatchWalletImportChallenge(principal Principal, scope Scope, domain, kind, address string, wallets []WatchWalletImportItem) (WatchWalletImportChallenge, error) {
+	_, err := principal.Authorize(PermissionInfrastructureEdit, scope)
+	if err != nil {
+		return WatchWalletImportChallenge{}, err
+	}
+	if err = principal.RequireStepUp(s.now(), s.config.RequiredACR, s.config.AcceptedAMR); err != nil {
+		return WatchWalletImportChallenge{}, err
+	}
+	canonical, normalized, err := normalizeWalletImport(kind, address, wallets)
+	if err != nil {
+		return WatchWalletImportChallenge{}, err
+	}
+	for _, wallet := range normalized {
+		if !ids.Valid(wallet.WalletID) {
+			return WatchWalletImportChallenge{}, ErrInvalid
+		}
+	}
+	nonce, err := ids.New()
+	if err != nil {
+		return WatchWalletImportChallenge{}, err
+	}
+	now := s.now().UTC().Truncate(time.Second)
+	challenge := WatchWalletImportChallenge{Kind: strings.TrimSpace(kind), Address: canonical, Wallets: normalized, Nonce: nonce, IssuedAt: now, ExpiresAt: now.Add(walletProofTTL)}
+	challenge.Message, err = walletImportMessage(domain, challenge)
+	if err != nil {
+		return WatchWalletImportChallenge{}, err
+	}
+	challenge.Token, err = s.sealWalletImportChallenge(challenge)
+	if err != nil {
+		return WatchWalletImportChallenge{}, err
+	}
+	return challenge, nil
+}
+
+func (s *Service) ImportWatchWallets(ctx context.Context, principal Principal, scope Scope, domain string, input WatchWalletImport) (WatchWalletImportResult, error) {
+	resolved, err := principal.Authorize(PermissionInfrastructureEdit, scope)
+	if err != nil {
+		return WatchWalletImportResult{}, err
+	}
+	if err = principal.RequireStepUp(s.now(), s.config.RequiredACR, s.config.AcceptedAMR); err != nil {
+		return WatchWalletImportResult{}, err
+	}
+	sealedChallenge, err := s.openWalletImportChallenge(input.Challenge.Token)
+	if err != nil {
+		return WatchWalletImportResult{}, ErrInvalid
+	}
+	sealedChallenge.Token = input.Challenge.Token
+	sealedChallenge.Message, err = walletImportMessage(domain, sealedChallenge)
+	if err != nil || !bytes.Equal(requestDigest(input.Challenge), requestDigest(sealedChallenge)) {
+		return WatchWalletImportResult{}, ErrInvalid
+	}
+	input.Challenge = sealedChallenge
+	canonical, normalized, err := normalizeWalletImport(input.Challenge.Kind, input.Challenge.Address, input.Challenge.Wallets)
+	if err != nil || input.IdempotencyKey != input.Challenge.Nonce || !ids.Valid(input.Challenge.Nonce) || len(strings.TrimSpace(input.Reason)) < 3 || len(input.Reason) > 1000 {
+		return WatchWalletImportResult{}, ErrInvalid
+	}
+	for index := range normalized {
+		if !ids.Valid(normalized[index].WalletID) {
+			return WatchWalletImportResult{}, ErrInvalid
+		}
+		normalized[index].AddressID, err = ids.New()
+		if err != nil {
+			return WatchWalletImportResult{}, err
+		}
+	}
+	input.Challenge.Address = canonical
+	input.Challenge.Wallets = normalized
+	input.Reason = strings.TrimSpace(input.Reason)
+	if err = verifyWalletImportProof(domain, input.Challenge, input.Signature, s.now().UTC()); err != nil {
+		return WatchWalletImportResult{}, err
+	}
+	return s.repository.ImportWatchWallets(ctx, principal, resolved, input)
+}
+
+func (s *Service) sealWalletImportChallenge(challenge WatchWalletImportChallenge) (string, error) {
+	challenge.Message = ""
+	challenge.Token = ""
+	payload, err := json.Marshal(challenge)
+	if err != nil {
+		return "", err
+	}
+	sealed, err := s.stateBox.Seal(payload)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(sealed), nil
+}
+
+func (s *Service) openWalletImportChallenge(token string) (WatchWalletImportChallenge, error) {
+	var challenge WatchWalletImportChallenge
+	if token == "" || len(token) > 16384 {
+		return challenge, ErrInvalid
+	}
+	sealed, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil {
+		return challenge, ErrInvalid
+	}
+	payload, err := s.stateBox.Open(sealed)
+	if err != nil || json.Unmarshal(payload, &challenge) != nil {
+		return WatchWalletImportChallenge{}, ErrInvalid
+	}
+	return challenge, nil
 }
 
 func (s *Service) Logout(ctx context.Context, authenticated AuthResult) error {
