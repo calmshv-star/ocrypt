@@ -379,7 +379,15 @@ func (r *PostgresRepository) AdmissionCandidates(ctx context.Context, input Admi
 }
 
 func (r *PostgresRepository) ClaimProbes(ctx context.Context, owner string, limit int) ([]Probe, error) {
-	rows, err := r.pool.Query(ctx, `SELECT * FROM claim_provider_health_probes($1,$2,$3)`, owner, limit, r.now())
+	rows, err := r.pool.Query(ctx, `SELECT
+		binding_id,scope_id,COALESCE(tenant_id::text,''),provider_kind,provider_id,
+		COALESCE(merchant_id::text,''),COALESCE(chain_id,''),COALESCE(config_logical_key,''),
+		COALESCE(platform_snapshot_id::text,''),operation,timeout_ms,max_attempts,backoff_ms,
+		rate_limit,rate_window_seconds,max_health_age_seconds,max_lag_blocks,failure_threshold,
+		open_seconds,half_open_required,priority,failure_domain,state,consecutive_failures,
+		half_successes,opened_until,last_success_at,last_observed_at,lease_token,fence_token,
+		circuit_version,COALESCE(probe_reference,'')
+		FROM claim_provider_health_probes($1,$2,$3)`, owner, limit, r.now())
 	if err != nil {
 		return nil, classify(err)
 	}
