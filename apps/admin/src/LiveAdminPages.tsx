@@ -38,7 +38,7 @@ const previewOverview: Overview = {
     { date: "2026-08-12", created: 143, settled: 131 },
   ],
   recent_intents: [
-    { id: "20000000-0000-4000-8000-000000000061", merchant_id: "10000000-0000-4000-8000-000000000002", merchant_order_id: "ORDER-1061", amount_minor: "49900", currency: "RUB", currency_scale: 2, status: "settled", created_at: "2026-08-12T09:31:00Z", expires_at: "2026-08-12T09:51:00Z" },
+    { id: "20000000-0000-4000-8000-000000000061", merchant_id: "10000000-0000-4000-8000-000000000002", merchant_order_id: "ORDER-1061", amount_minor: "49900", currency: "RUB", currency_scale: 2, status: "settled", created_at: "2026-08-12T09:31:00Z", expires_at: "2026-08-12T09:51:00Z", received_amount_atomic: "79874490", received_asset_symbol: "SOL", received_asset_decimals: 9 },
     { id: "20000000-0000-4000-8000-000000000060", merchant_id: "10000000-0000-4000-8000-000000000002", merchant_order_id: "ORDER-1060", amount_minor: "129900", currency: "RUB", currency_scale: 2, status: "confirmed", created_at: "2026-08-12T09:28:00Z", expires_at: "2026-08-12T09:48:00Z" },
     { id: "20000000-0000-4000-8000-000000000059", merchant_id: "10000000-0000-4000-8000-000000000002", merchant_order_id: "ORDER-1059", amount_minor: "79900", currency: "RUB", currency_scale: 2, status: "partially_paid", created_at: "2026-08-12T09:22:00Z", expires_at: "2026-08-12T09:42:00Z" },
     { id: "20000000-0000-4000-8000-000000000058", merchant_id: "10000000-0000-4000-8000-000000000002", merchant_order_id: "ORDER-1058", amount_minor: "249900", currency: "RUB", currency_scale: 2, status: "pending", created_at: "2026-08-12T09:16:00Z", expires_at: "2026-08-12T09:36:00Z" },
@@ -221,7 +221,12 @@ export function LiveOverviewPage() {
                 <div aria-hidden="true" className="admin-live-recent-head"><span>{t("admin.reference")}</span><span>{t("common.amount")}</span><span>{t("common.status")}</span><span>{t("admin.createdAt")}</span></div>
                 {recent.map((intent) => <a className="admin-live-recent-row" href="#/intents" key={intent.id}>
                   <span><strong>{intent.merchant_order_id}</strong><code>{short(intent.id)}</code></span>
-                  <strong>{formatOverviewMoney(intent.amount_minor, intent.currency_scale, intent.currency, locale)}</strong>
+                  <span className="admin-live-recent-money">
+                    <strong>{formatOverviewMoney(intent.amount_minor, intent.currency_scale, intent.currency, locale)}</strong>
+                    {intent.received_amount_atomic !== undefined && intent.received_asset_symbol && intent.received_asset_decimals !== undefined
+                      ? <small>{formatAtomic(intent.received_amount_atomic, intent.received_asset_decimals)} {intent.received_asset_symbol}</small>
+                      : null}
+                  </span>
                   <StatusBadge status={intent.status}>{t(overviewIntentStatusKey(intent.status))}</StatusBadge>
                   <time dateTime={intent.created_at}>{formatDate(intent.created_at, locale)}</time>
                 </a>)}

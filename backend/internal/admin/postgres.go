@@ -575,17 +575,38 @@ GROUP BY days.day ORDER BY days.day`, flowArgs...)
 		recentFilter := ""
 		if s.MerchantID != "" {
 			recentArgs = append(recentArgs, s.MerchantID)
-			recentFilter = " WHERE merchant_id=$1"
+			recentFilter = " WHERE pi.merchant_id=$1"
 		}
 		recentArgs = append(recentArgs, 6)
-		recentRows, err := tx.Query(ctx, `SELECT id::text,merchant_id::text,merchant_order_id,amount_minor::text,currency,currency_scale,status::text,created_at,expires_at
-FROM payment_intents`+recentFilter+fmt.Sprintf(" ORDER BY created_at DESC,id DESC LIMIT $%d", len(recentArgs)), recentArgs...)
+		recentRows, err := tx.Query(ctx, `WITH recent AS MATERIALIZED (
+  SELECT pi.id,pi.tenant_id,pi.merchant_id,pi.merchant_order_id,pi.amount_minor,pi.currency,pi.currency_scale,pi.status,pi.created_at,pi.expires_at
+  FROM payment_intents pi`+recentFilter+fmt.Sprintf(" ORDER BY pi.created_at DESC,pi.id DESC LIMIT $%d", len(recentArgs))+`
+), received_groups AS (
+  SELECT pm.intent_id,sum(pm.received_atomic)::text AS amount_atomic,a.symbol AS asset_symbol,
+    COALESCE(te.asset_decimals,pr.asset_decimals) AS asset_decimals,
+    max(pm.finalized_at) AS last_finalized_at,max(pm.created_at) AS last_created_at
+  FROM payment_matches pm
+  JOIN recent pi ON pi.id=pm.intent_id AND pi.tenant_id=pm.tenant_id
+  JOIN payment_routes pr ON pr.id=pm.route_id AND pr.tenant_id=pm.tenant_id
+  LEFT JOIN transfer_events te ON te.id=pm.event_id
+  JOIN assets a ON a.id=COALESCE(te.asset_id,pr.asset_id)
+  WHERE pm.state<>'reversed' AND pm.allocation_role='payment'
+  GROUP BY pm.intent_id,a.id,a.symbol,COALESCE(te.asset_decimals,pr.asset_decimals)
+), received AS (
+  SELECT DISTINCT ON (intent_id) intent_id,amount_atomic,asset_symbol,asset_decimals
+  FROM received_groups
+  ORDER BY intent_id,last_finalized_at DESC NULLS LAST,last_created_at DESC,asset_symbol
+)
+SELECT pi.id::text,pi.merchant_id::text,pi.merchant_order_id,pi.amount_minor::text,pi.currency,pi.currency_scale,pi.status::text,pi.created_at,pi.expires_at,
+received.amount_atomic,received.asset_symbol,received.asset_decimals
+FROM recent pi LEFT JOIN received ON received.intent_id=pi.id
+ORDER BY pi.created_at DESC,pi.id DESC`, recentArgs...)
 		if err != nil {
 			return err
 		}
 		for recentRows.Next() {
 			var intent IntentRow
-			if err := recentRows.Scan(&intent.ID, &intent.MerchantID, &intent.MerchantOrderID, &intent.AmountMinor, &intent.Currency, &intent.CurrencyScale, &intent.Status, &intent.CreatedAt, &intent.ExpiresAt); err != nil {
+			if err := recentRows.Scan(&intent.ID, &intent.MerchantID, &intent.MerchantOrderID, &intent.AmountMinor, &intent.Currency, &intent.CurrencyScale, &intent.Status, &intent.CreatedAt, &intent.ExpiresAt, &intent.ReceivedAmountAtomic, &intent.ReceivedAssetSymbol, &intent.ReceivedAssetDecimals); err != nil {
 				recentRows.Close()
 				return err
 			}

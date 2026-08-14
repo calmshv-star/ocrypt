@@ -536,7 +536,9 @@
 .admin-live-recent-row > span:first-child { min-width: 0; display: grid; gap: 4px; }
 .admin-live-recent-row > span:first-child strong { overflow: hidden; color: var(--mp-text-strong); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .admin-live-recent-row code { overflow: hidden; color: var(--mp-muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
-.admin-live-recent-row > strong { color: var(--mp-text-strong); font-size: 10px; }
+.admin-live-recent-money { display: grid; gap: 4px; color: var(--mp-text-strong); }
+.admin-live-recent-money strong { font-size: 10px; }
+.admin-live-recent-money small { color: var(--mp-muted); font-size: 9px; font-weight: 700; }
 .admin-live-recent-row time { color: var(--mp-muted); font-size: 9px; }
 
 @media (max-width: 1220px) {
@@ -604,7 +606,7 @@
   .admin-live-recent-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 9px 0; }
   .admin-live-recent-row time { grid-column: 1; }
   .admin-live-recent-row > .mp-badge { grid-column: 2; grid-row: 1; }
-  .admin-live-recent-row > strong { grid-column: 2; grid-row: 2; }
+  .admin-live-recent-money { grid-column: 2; grid-row: 2; justify-items: end; }
 }
 
 @media (max-width: 430px) {

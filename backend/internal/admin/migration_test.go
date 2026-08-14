@@ -112,6 +112,24 @@ func TestOverviewWebhookHealthIsMerchantScopedAndReadable(t *testing.T) {
 	}
 }
 
+func TestOverviewRecentPaymentsExposeActualReceivedAsset(t *testing.T) {
+	repository, err := os.ReadFile("postgres.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(repository)
+	for _, fragment := range []string{
+		"sum(pm.received_atomic)::text AS amount_atomic",
+		"COALESCE(te.asset_id,pr.asset_id)",
+		"pm.state<>'reversed' AND pm.allocation_role='payment'",
+		"&intent.ReceivedAmountAtomic, &intent.ReceivedAssetSymbol, &intent.ReceivedAssetDecimals",
+	} {
+		if !strings.Contains(source, fragment) {
+			t.Errorf("overview recent payment is missing actual crypto facts: %q", fragment)
+		}
+	}
+}
+
 func TestFinancialSettingsInventoryIsReadOnlyAndSecretFree(t *testing.T) {
 	raw, err := os.ReadFile("../../migrations/000040_admin_financial_settings_read.up.sql")
 	if err != nil {
