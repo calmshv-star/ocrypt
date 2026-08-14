@@ -41,6 +41,7 @@ func main() {
 	var readiness httpapi.ReadinessProbe
 	var sandboxService *sandbox.Service
 	var hostedRuntime *hostedproviders.Runtime
+	var nonceCleaner expiredNonceCleaner
 	if cfg.Environment == "production" || cfg.Environment == "test" || cfg.Environment == "sandbox" {
 		pool, err := postgres.NewPool(context.Background(), cfg.DatabaseURL)
 		if err != nil {
@@ -60,6 +61,7 @@ func main() {
 		}
 		store = postgresStore
 		nonces = database
+		nonceCleaner = database
 		envelopeKey, err := decodeEnvelopeKey(os.Getenv("API_CREDENTIAL_ENVELOPE_KEY"))
 		if err != nil {
 			slog.Error("invalid API_CREDENTIAL_ENVELOPE_KEY", "error", err)
@@ -195,6 +197,14 @@ func main() {
 	if sandboxService != nil {
 		apiServer.EnableSandbox(sandboxService)
 	}
+	var nonceCleanup nonceCleanupConfig
+	if nonceCleaner != nil {
+		nonceCleanup, err = loadNonceCleanupConfig(os.Getenv("AUTH_NONCE_CLEANUP_INTERVAL"), os.Getenv("AUTH_NONCE_CLEANUP_BATCH"), os.Getenv("AUTH_NONCE_CLEANUP_MAX_BATCHES"))
+		if err != nil {
+			slog.Error("invalid authentication nonce cleanup configuration", "error", err)
+			os.Exit(1)
+		}
+	}
 	applicationHandler := apiServer.Handler()
 	if os.Getenv("RATE_SOURCE_GATEWAY_ENABLED") == "true" {
 		mux := http.NewServeMux()
@@ -213,6 +223,9 @@ func main() {
 	}()
 	stop, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+	if nonceCleaner != nil {
+		go runNonceCleanup(stop, nonceCleaner, nonceCleanup)
+	}
 	<-stop.Done()
 	ctx, cancelShutdown := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancelShutdown()

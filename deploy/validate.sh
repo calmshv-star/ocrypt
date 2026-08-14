@@ -35,6 +35,17 @@ tool_commands = %w[migration-control migration-control-worker migration-traffic-
 local_commands = %w[bootstrap-envelope]
 compose = load_yaml.call("infra/compose.yaml")
 services = compose.fetch("services")
+standalone = load_yaml.call("deploy/standalone/compose.shadow.yaml")
+standalone_services = standalone.fetch("services")
+standalone_runtime = standalone.fetch("x-runtime")
+abort("standalone logs are not bounded") unless standalone_runtime.dig("logging", "driver") == "json-file" && standalone_runtime.dig("logging", "options", "max-size") == "20m" && standalone_runtime.dig("logging", "options", "max-file") == "3"
+abort("standalone Solana scanner name is not canonical") unless standalone_services.dig("scanner-solana", "container_name") == "ocrypt-scanner-solana"
+abort("standalone nonce cleanup is not bounded") unless standalone_services.dig("api", "environment", "AUTH_NONCE_CLEANUP_INTERVAL") == "1m" && standalone_services.dig("api", "environment", "AUTH_NONCE_CLEANUP_BATCH") == "10000" && standalone_services.dig("api", "environment", "AUTH_NONCE_CLEANUP_MAX_BATCHES") == "5"
+abort("standalone outbox history projection is absent") unless standalone_services.dig("outbox-worker", "environment", "OUTBOX_PUBLISHER") == "history" && standalone_services.dig("outbox-worker", "environment", "OUTBOX_HISTORY_SINK_ACKNOWLEDGED") == "true"
+maintenance = File.read("deploy/standalone/host-maintenance.sh")
+abort("standalone maintenance is not explicit apply-only") unless maintenance.include?('--apply') && maintenance.include?('if [[ "$apply" != true ]]')
+abort("standalone maintenance target is not scoped to ocrypt") unless maintenance.include?('"$name" == /ocrypt-*') && maintenance.include?('org.opencontainers.image.source')
+abort("standalone maintenance may not remove volumes or all unused images") if maintenance.match?(/docker\s+(volume\s+(rm|prune)|system\s+prune|image\s+prune\s+-a)/)
 missing = expected + %w[migration migration-control-worker migration-traffic-actuator gateway] - services.keys
 abort("Compose is missing workloads: #{missing.join(', ')}") unless missing.empty?
 exposed = services.select { |_name, service| service.key?("ports") }
@@ -215,7 +226,7 @@ end
 abort("000021 down migration does not remove runtime fences") unless %w[migration_payment_credit_fence migration_provider_observation migration_transfer_observation migration_imported_address_never_release].all? { |name| migration_down.include?(name) }
 outbox_contract = contracts.fetch("outbox-worker")
 outbox_modes = outbox_contract.fetch("publisherModes")
-abort("outbox publisher modes drift") unless outbox_modes.keys.sort == %w[https jetstream]
+abort("outbox publisher modes drift") unless outbox_modes.keys.sort == %w[history https jetstream]
 outbox_expected_keys = (outbox_contract.fetch("requiredEnv") + outbox_modes.values.flatten).uniq.select { |key| key == "APP_ENV" || key.start_with?("OUTBOX_") }.sort
 outbox_source = Dir["backend/cmd/worker/*.go"].map { |path| File.read(path) }.join("\n")
 outbox_source_keys = outbox_source.scan(/"(APP_ENV|OUTBOX_[A-Z0-9_]+)"/).flatten.uniq.sort

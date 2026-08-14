@@ -37,6 +37,20 @@ func TestHTTPSPublisherReadsTokenOnlyFromFile(t *testing.T) {
 	}
 }
 
+func TestHistoryPublisherRequiresExplicitStandaloneAcknowledgement(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("OUTBOX_PUBLISHER", "history")
+	t.Setenv("OUTBOX_HISTORY_SINK_ACKNOWLEDGED", "")
+	if _, err := newOutboxPublisher(t.Context()); err == nil {
+		t.Fatal("expected local history acknowledgement rejection")
+	}
+	t.Setenv("OUTBOX_HISTORY_SINK_ACKNOWLEDGED", "true")
+	runtime, err := newOutboxPublisher(t.Context())
+	if err != nil || runtime.publisher == nil || runtime.readiness != nil {
+		t.Fatalf("runtime=%+v err=%v", runtime, err)
+	}
+}
+
 func TestJetStreamConfigUsesOneRetryAndDuplicateSafetyBoundary(t *testing.T) {
 	t.Setenv("OUTBOX_NATS_URLS", "tls://nats-a.internal:4222,tls://nats-b.internal:4222")
 	t.Setenv("OUTBOX_NATS_CA_FILE", "/run/secrets/nats/ca.pem")
