@@ -44,7 +44,7 @@ export type Overview = {
   payment_flow:OverviewFlowPoint[];
   recent_intents:IntentRow[];
 };
-export type IntentRow = { id:string;merchant_id:string;merchant_order_id:string;amount_minor:string;currency:string;currency_scale:number;status:string;created_at:string;expires_at:string };
+export type IntentRow = { id:string;merchant_id:string;merchant_order_id:string;amount_minor:string;currency:string;currency_scale:number;status:string;created_at:string;expires_at:string;received_amount_atomic?:string;received_asset_symbol?:string;received_asset_decimals?:number };
 export type TransferRow = { id:string;chain_id:string;transaction_id:string;asset_id:string;asset_symbol:string;asset_decimals:number;amount_atomic:string;status:string;confirmations:number;observed_at:string };
 export type CandidateRow = { id:string;route_id:string;rank:number;score:number;evidence:unknown;disqualified:boolean;merchant_order_id:string;expected_display:string;expected_atomic:string;asset_symbol:string;order_amount_minor:string;order_currency:string;order_currency_scale:number;order_created_at:string };
 export type UnmatchedRow = { id:string;event_id:string;classification:string;status:string;severity:string;assigned_operator_id?:string;version:number;created_at:string;chain_id:string;transaction_id:string;asset_symbol:string;asset_decimals:number;amount_atomic:string;on_chain_time:string;candidates:CandidateRow[] };

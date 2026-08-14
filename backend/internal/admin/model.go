@@ -224,15 +224,18 @@ type OverviewFlowPoint struct {
 }
 
 type IntentRow struct {
-	ID              string    `json:"id"`
-	MerchantID      string    `json:"merchant_id"`
-	MerchantOrderID string    `json:"merchant_order_id"`
-	AmountMinor     string    `json:"amount_minor"`
-	Currency        string    `json:"currency"`
-	CurrencyScale   int16     `json:"currency_scale"`
-	Status          string    `json:"status"`
-	CreatedAt       time.Time `json:"created_at"`
-	ExpiresAt       time.Time `json:"expires_at"`
+	ID                    string    `json:"id"`
+	MerchantID            string    `json:"merchant_id"`
+	MerchantOrderID       string    `json:"merchant_order_id"`
+	AmountMinor           string    `json:"amount_minor"`
+	Currency              string    `json:"currency"`
+	CurrencyScale         int16     `json:"currency_scale"`
+	Status                string    `json:"status"`
+	CreatedAt             time.Time `json:"created_at"`
+	ExpiresAt             time.Time `json:"expires_at"`
+	ReceivedAmountAtomic  *string   `json:"received_amount_atomic,omitempty"`
+	ReceivedAssetSymbol   *string   `json:"received_asset_symbol,omitempty"`
+	ReceivedAssetDecimals *int16    `json:"received_asset_decimals,omitempty"`
 }
 
 type TransferRow struct {

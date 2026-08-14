@@ -46,7 +46,7 @@ function client(overrides: Record<string, unknown> = {}) {
         { date:"2026-08-09", created:14, settled:12 }, { date:"2026-08-10", created:11, settled:9 }, { date:"2026-08-11", created:15, settled:13 },
         { date:"2026-08-12", created:16, settled:11 }
       ],
-      recent_intents: [{ id:"20000000-0000-4000-8000-000000000010", merchant_id:merchantId, merchant_order_id:"ORDER-1042", amount_minor:"128000", currency:"USD", currency_scale:2, status:"settled", created_at:"2026-08-12T08:40:00Z", expires_at:"2026-08-12T09:00:00Z" }]
+      recent_intents: [{ id:"20000000-0000-4000-8000-000000000010", merchant_id:merchantId, merchant_order_id:"ORDER-1042", amount_minor:"128000", currency:"USD", currency_scale:2, status:"settled", created_at:"2026-08-12T08:40:00Z", expires_at:"2026-08-12T09:00:00Z", received_amount_atomic:"1279985000", received_asset_symbol:"USDT", received_asset_decimals:6 }]
     }),
     intents: vi.fn().mockResolvedValue({ items: [] }),
     transfers: vi.fn().mockResolvedValue({ items: [] }),
@@ -117,6 +117,7 @@ describe("admin application", () => {
     const liveClient = client();
     renderApp("/overview", { client: liveClient, preview: false });
     expect((await screen.findAllByText("1,280.00 USD")).length).toBeGreaterThan(0);
+    expect(screen.getByText("1279.985 USDT")).toBeInTheDocument();
     expect(screen.getByText("ORDER-1042")).toBeInTheDocument();
     expect(screen.getByText("Action queue")).toBeInTheDocument();
     expect(screen.queryByText("cursor_live_01")).not.toBeInTheDocument();
