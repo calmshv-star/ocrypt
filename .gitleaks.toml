@@ -25,3 +25,10 @@ rules = ["generic-api-key"]
 paths = ['''(?:^|/)backend/migrations/000021_shadow_migration_control\.up\.sql$''']
 regexTarget = "line"
 regexes = ['''lease_token\s*=\s*excluded\.lease_token''']
+
+[[allowlists]]
+description = "Public Aptos fungible-asset contract identifiers are not credentials"
+rules = ["generic-api-key"]
+paths = ['''(?:^|/)deploy/standalone/bootstrap-public-assets\.sql$''']
+regexTarget = "line"
+regexes = ['''['"]fungible_token['"],['"]0x[0-9a-f]{64}['"],6,['"]deposit_disabled['"]''']
