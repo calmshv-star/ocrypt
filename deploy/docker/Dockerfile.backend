@@ -35,7 +35,8 @@ ARG VERSION=dev
 ARG REVISION=unknown
 LABEL org.opencontainers.image.title="Merchant Platform ${BINARY}" \
       org.opencontainers.image.version="${VERSION}" \
-      org.opencontainers.image.revision="${REVISION}"
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.source="https://github.com/calmshv-star/ocrypt"
 COPY --from=build --chown=65532:65532 /out/service /app/service
 COPY --from=build --chown=65532:65532 /out/probe /app/probe
 USER 65532:65532

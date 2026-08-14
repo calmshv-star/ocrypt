@@ -94,8 +94,16 @@ func (d *Database) DeleteExpiredNonces(ctx context.Context, limit int) (int64, e
 	if limit <= 0 || limit > 100_000 {
 		return 0, errors.New("nonce cleanup limit must be between 1 and 100000")
 	}
-	command, err := d.pool.Exec(ctx, `DELETE FROM auth_nonces WHERE (key_id, nonce) IN (
-SELECT key_id, nonce FROM auth_nonces WHERE expires_at < clock_timestamp() ORDER BY expires_at LIMIT $1)`, limit)
+	command, err := d.pool.Exec(ctx, `WITH expired AS (
+SELECT key_id, nonce FROM auth_nonces
+WHERE expires_at < clock_timestamp()
+ORDER BY expires_at
+LIMIT $1
+FOR UPDATE SKIP LOCKED
+)
+DELETE FROM auth_nonces current
+USING expired
+WHERE current.key_id=expired.key_id AND current.nonce=expired.nonce`, limit)
 	if err != nil {
 		return 0, fmt.Errorf("delete expired authentication nonces: %w", err)
 	}

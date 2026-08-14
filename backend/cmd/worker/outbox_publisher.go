@@ -33,6 +33,11 @@ func newOutboxPublisher(ctx context.Context) (outboxPublisherRuntime, error) {
 		return outboxPublisherRuntime{}, errors.New("OUTBOX_MAX_RETRY_DELAY must be at most 24h")
 	}
 	switch os.Getenv("OUTBOX_PUBLISHER") {
+	case "history":
+		if os.Getenv("OUTBOX_HISTORY_SINK_ACKNOWLEDGED") != "true" {
+			return outboxPublisherRuntime{}, errors.New("OUTBOX_HISTORY_SINK_ACKNOWLEDGED=true is required for the local history sink")
+		}
+		return outboxPublisherRuntime{publisher: outbox.HistoryPublisher{}, close: func() {}, maxRetryDelay: maxRetryDelay}, nil
 	case "https":
 		token, err := readOutboxSecret("OUTBOX_PUBLISH_TOKEN_FILE", 4096)
 		if err != nil {
@@ -58,7 +63,7 @@ func newOutboxPublisher(ctx context.Context) (outboxPublisherRuntime, error) {
 			publisher: publisher, readiness: publisher, close: publisher.Close, maxRetryDelay: maxRetryDelay,
 		}, nil
 	default:
-		return outboxPublisherRuntime{}, errors.New("OUTBOX_PUBLISHER must be explicitly set to https or jetstream")
+		return outboxPublisherRuntime{}, errors.New("OUTBOX_PUBLISHER must be explicitly set to history, https, or jetstream")
 	}
 }
 

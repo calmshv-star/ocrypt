@@ -21,7 +21,9 @@ therefore named as they are in GMPay rather than being silently substituted for
 issuer-native assets. The scanners use external public RPC endpoints, keep no
 chain database, and receive deposit addresses only; private keys remain outside
 Ocrypt. EVM token reads use address-filtered `eth_getLogs`, and every new scanner
-has a CPU, memory, and process limit in the supplied Compose definition.
+has a CPU, memory, and process limit in the supplied Compose definition. Base
+and OP Mainnet use Tenderly as an independent free range provider instead of
+relying only on the rate-limited public project endpoints.
 
 Pass `rate_gateway_origin` to `bootstrap.sql` along with its other documented
 psql variables. It must be the public HTTPS origin of the same API deployment,
@@ -48,9 +50,29 @@ supplied `scanner-polygon.env.example`, `scanner-bsc.env.example`, and
 `scanner-plasma.env.example` files into the host configuration directory,
 replacing only the database credential. Polygon uses three independently
 verified range providers. BSC uses PublicNode `finalized` as its finality anchor
-and 1RPC `safe` as its second proof; the scanner always chooses the lower common
+and bloXroute as its second proof; the scanner always chooses the lower common
 height and still requires two byte-identical range results. Plasma uses two
 independent providers.
+
+The standalone API removes expired request nonces in bounded batches once per
+minute. The supplied outbox worker uses the explicit local `history` sink: it
+validates each canonical event, then atomically advances `event_history` and
+`published_at` in PostgreSQL. Signed customer webhooks remain a separate
+`callback_events` delivery path. Use HTTPS or JetStream mode instead when an
+external broker is configured; never run both outbox modes against one queue.
+
+Compose limits each Ocrypt JSON log to three 20 MiB files. Host cleanup is a
+dry run by default and only targets stopped containers whose names begin with
+`ocrypt-` plus dangling images built from this repository:
+
+```sh
+./deploy/standalone/host-maintenance.sh
+./deploy/standalone/host-maintenance.sh --apply --prune-build-cache
+```
+
+The optional build-cache pass removes cache older than seven days. It never
+removes volumes, databases, secrets, active containers, or images used by a
+running service.
 
 The Aptos event parser and low-load scan path are implemented: an address-indexed
 candidate is checked against the exact transaction events and state changes from
