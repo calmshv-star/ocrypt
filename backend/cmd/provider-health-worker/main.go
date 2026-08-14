@@ -165,7 +165,7 @@ func loadConfiguration() (configuration, error) {
 		healthAddress: environment("PROVIDER_HEALTH_ADDRESS", ":9100"),
 	}
 	var err error
-	if result.pollInterval, err = durationValue("PROVIDER_HEALTH_POLL_INTERVAL", 15*time.Second); err != nil {
+	if result.pollInterval, err = durationValue("PROVIDER_HEALTH_POLL_INTERVAL", 3*time.Second); err != nil {
 		return result, err
 	}
 	if result.readyAge, err = durationValue("PROVIDER_HEALTH_READY_AGE", 2*time.Minute); err != nil {

@@ -31,7 +31,7 @@ func TestLoadConfigurationUsesBoundedDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.healthAddress != ":9100" || config.pollInterval != 15*time.Second || config.readyAge != 2*time.Minute || config.batchSize != 64 || config.concurrency != 8 {
+	if config.healthAddress != ":9100" || config.pollInterval != 3*time.Second || config.readyAge != 2*time.Minute || config.batchSize != 64 || config.concurrency != 8 {
 		t.Fatalf("unexpected defaults: %#v", config)
 	}
 }
