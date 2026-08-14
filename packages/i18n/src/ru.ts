@@ -1145,7 +1145,7 @@ export const ru = {
   "migrationControl.noPendingAction": "Нет ожидающего действия актуатора",
   "migrationControl.empty": "Для этого тенанта миграций нет."
   ,"financialSettings.title": "Финансовые настройки"
-  ,"financialSettings.description": "Фиатные валюты, криптомаршруты и ёмкость приёма платежей для этого проекта."
+  ,"financialSettings.description": "Сети, валюты и адреса для получения платежей."
   ,"financialSettings.active": "Включено"
   ,"financialSettings.disabled": "Отключено"
   ,"financialSettings.merchantScope": "Выберите проект, чтобы увидеть его финансовую конфигурацию."
@@ -1179,4 +1179,10 @@ export const ru = {
   ,"financialSettings.stepUpRequired": "Подтвердите вход перед сменой адреса."
   ,"financialSettings.confirmLogin": "Подтвердить вход"
   ,"financialSettings.noWallets": "Сети приёма ещё не настроены."
+  ,"financialSettings.networksTitle": "Сети и кошельки"
+  ,"financialSettings.networksBody": "Адрес получения и доступные валюты в одном месте."
+  ,"financialSettings.acceptedAssets": "Принимаем"
+  ,"financialSettings.noAcceptedAssets": "Приём пока не включён"
+  ,"financialSettings.notConnected": "Не подключено"
+  ,"financialSettings.aptosName": "Aptos Mainnet"
 } satisfies Messages;

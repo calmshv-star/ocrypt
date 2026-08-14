@@ -1145,7 +1145,7 @@ export const zhCN = {
   "migrationControl.noPendingAction": "无待处理执行器动作",
   "migrationControl.empty": "此租户没有迁移任务。"
   ,"financialSettings.title": "财务设置"
-  ,"financialSettings.description": "该商户当前生效的法币、加密支付路由和收款容量。"
+  ,"financialSettings.description": "支付网络、币种和收款地址。"
   ,"financialSettings.active": "已启用"
   ,"financialSettings.disabled": "已停用"
   ,"financialSettings.merchantScope": "请选择商户工作区。"
@@ -1179,4 +1179,10 @@ export const zhCN = {
   ,"financialSettings.stepUpRequired": "更改地址前请确认登录。"
   ,"financialSettings.confirmLogin": "确认登录"
   ,"financialSettings.noWallets": "尚未配置收款网络。"
+  ,"financialSettings.networksTitle": "网络和钱包"
+  ,"financialSettings.networksBody": "在一个位置查看收款地址和可接受币种。"
+  ,"financialSettings.acceptedAssets": "可接受币种"
+  ,"financialSettings.noAcceptedAssets": "尚未启用收款"
+  ,"financialSettings.notConnected": "未连接"
+  ,"financialSettings.aptosName": "Aptos 主网"
 } satisfies Messages;

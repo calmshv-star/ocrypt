@@ -1143,7 +1143,7 @@ export const en = {
   "migrationControl.noPendingAction": "No pending actuator action",
   "migrationControl.empty": "No migration runs exist for this tenant."
   ,"financialSettings.title": "Financial settings"
-  ,"financialSettings.description": "Effective fiat currencies, crypto routes and receiving capacity for this merchant."
+  ,"financialSettings.description": "Payment networks, currencies and receiving addresses."
   ,"financialSettings.active": "Active"
   ,"financialSettings.disabled": "Disabled"
   ,"financialSettings.merchantScope": "Select a merchant workspace to view its financial configuration."
@@ -1177,6 +1177,12 @@ export const en = {
   ,"financialSettings.stepUpRequired": "Confirm your sign-in before changing the address."
   ,"financialSettings.confirmLogin": "Confirm sign-in"
   ,"financialSettings.noWallets": "No receiving networks are configured."
+  ,"financialSettings.networksTitle": "Networks and wallets"
+  ,"financialSettings.networksBody": "Receiving address and accepted currencies in one place."
+  ,"financialSettings.acceptedAssets": "Accepted currencies"
+  ,"financialSettings.noAcceptedAssets": "Payments are not enabled"
+  ,"financialSettings.notConnected": "Not connected"
+  ,"financialSettings.aptosName": "Aptos Mainnet"
 } as const;
 
 export type MessageKey = keyof typeof en;

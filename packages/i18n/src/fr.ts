@@ -1145,7 +1145,7 @@ export const fr = {
   "migrationControl.noPendingAction": "Aucune action d’actionneur en attente",
   "migrationControl.empty": "Aucune migration pour ce tenant."
   ,"financialSettings.title": "Paramètres financiers"
-  ,"financialSettings.description": "Devises fiat, routes crypto et capacité de réception effectives du marchand."
+  ,"financialSettings.description": "Réseaux de paiement, devises et adresses de réception."
   ,"financialSettings.active": "Actif"
   ,"financialSettings.disabled": "Désactivé"
   ,"financialSettings.merchantScope": "Sélectionnez un espace marchand."
@@ -1179,4 +1179,10 @@ export const fr = {
   ,"financialSettings.stepUpRequired": "Confirmez la connexion avant de modifier l'adresse."
   ,"financialSettings.confirmLogin": "Confirmer la connexion"
   ,"financialSettings.noWallets": "Aucun réseau de réception configuré."
+  ,"financialSettings.networksTitle": "Réseaux et portefeuilles"
+  ,"financialSettings.networksBody": "Adresse de réception et devises acceptées au même endroit."
+  ,"financialSettings.acceptedAssets": "Devises acceptées"
+  ,"financialSettings.noAcceptedAssets": "Les paiements ne sont pas activés"
+  ,"financialSettings.notConnected": "Non connecté"
+  ,"financialSettings.aptosName": "Aptos Mainnet"
 } satisfies Messages;
