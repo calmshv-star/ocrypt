@@ -1145,7 +1145,7 @@ export const es = {
   "migrationControl.noPendingAction": "Sin acción pendiente del actuador",
   "migrationControl.empty": "No hay migraciones para este tenant."
   ,"financialSettings.title": "Configuración financiera"
-  ,"financialSettings.description": "Monedas fiat, rutas cripto y capacidad de recepción efectivas del comercio."
+  ,"financialSettings.description": "Redes de pago, monedas y direcciones de recepción."
   ,"financialSettings.active": "Activo"
   ,"financialSettings.disabled": "Desactivado"
   ,"financialSettings.merchantScope": "Selecciona un espacio de comercio."
@@ -1179,4 +1179,10 @@ export const es = {
   ,"financialSettings.stepUpRequired": "Confirme el acceso antes de cambiar la dirección."
   ,"financialSettings.confirmLogin": "Confirmar acceso"
   ,"financialSettings.noWallets": "No hay redes receptoras configuradas."
+  ,"financialSettings.networksTitle": "Redes y carteras"
+  ,"financialSettings.networksBody": "Dirección de recepción y monedas aceptadas en un solo lugar."
+  ,"financialSettings.acceptedAssets": "Monedas aceptadas"
+  ,"financialSettings.noAcceptedAssets": "Los pagos no están activados"
+  ,"financialSettings.notConnected": "No conectado"
+  ,"financialSettings.aptosName": "Aptos Mainnet"
 } satisfies Messages;

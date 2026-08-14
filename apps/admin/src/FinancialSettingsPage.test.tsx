@@ -19,6 +19,11 @@ describe("financial settings", () => {
     } as unknown as AdminClient;
     render(<ThemeProvider><I18nProvider><QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><AdminProvider client={client}><FinancialSettingsPage/></AdminProvider></QueryClientProvider></I18nProvider></ThemeProvider>);
     expect(await screen.findByRole("heading", { name:"Financial settings" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading",{name:"Networks and wallets"})).toBeInTheDocument();
+    expect(screen.queryByRole("heading",{name:"Receiving wallets"})).not.toBeInTheDocument();
+    expect(screen.getByText("USDT")).toBeInTheDocument();
+    expect(screen.getByText("Aptos Mainnet")).toBeInTheDocument();
+    expect(screen.getAllByText("Not connected")).toHaveLength(1);
     expect(await screen.findByText(wallet.address)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button",{name:"Change"}));
     fireEvent.change(screen.getByLabelText("Public receiving address"),{target:{value:"TJRabPrwbZy45sbavfcjinPJC18kjpRTv8"}});
