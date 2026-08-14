@@ -107,6 +107,16 @@ paths:
       responses:
         '204': {description: Session revoked and cookies cleared}
         '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/session/csrf:
+    post:
+      tags: [Authentication]
+      summary: Replace a stale action token for the current same-origin session
+      description: Requires the Strict server-side session cookie and an exact same-origin Origin header. It changes no payment or configuration data.
+      security: [{sessionCookie: []}]
+      responses:
+        '204': {description: Action token replaced and returned only as a Strict secure cookie}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
   /admin/v1/overview:
     get:
       tags: [Read models]

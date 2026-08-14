@@ -55,6 +55,7 @@ function client(overrides: Record<string, unknown> = {}) {
     assets: vi.fn().mockResolvedValue({ items: [] }),
     reconciliation: vi.fn().mockResolvedValue({ items: [] }),
     audit: vi.fn().mockResolvedValue({ items: [] }),
+    refreshCSRF: vi.fn().mockResolvedValue(undefined),
     logout: vi.fn().mockResolvedValue(undefined),
     loginURL: vi.fn(() => "https://admin.example/admin/v1/auth/login"),
     beginInvitationLogin: vi.fn().mockResolvedValue("https://id.example/authorize"),
@@ -270,12 +271,14 @@ describe("admin application", () => {
     const caseId = "20000000-0000-4000-8000-000000000011";
     const routeId = "20000000-0000-4000-8000-000000000012";
     const hideUnmatched = vi.fn().mockResolvedValue({ id:caseId, status:"ignored", version:5 });
+    const refreshCSRF = vi.fn().mockResolvedValue(undefined);
     const liveClient = client({
       unmatched: vi.fn().mockResolvedValue({ items: [{
         id:caseId,event_id:"20000000-0000-4000-8000-000000000013",classification:"ambiguous",status:"candidates_ready",severity:"low",version:4,created_at:new Date().toISOString(),chain_id:"tron",transaction_id:"abcdef",asset_symbol:"USDT",asset_decimals:6,amount_atomic:"1",on_chain_time:new Date().toISOString(),
         candidates:[{id:"20000000-0000-4000-8000-000000000014",route_id:routeId,rank:1,score:80,evidence:{},disqualified:false,merchant_order_id:"ORDER-2042",expected_display:"6.028",expected_atomic:"6028000",asset_symbol:"USDT",order_amount_minor:"49900",order_currency:"RUB",order_currency_scale:2,order_created_at:new Date().toISOString()}]
       }] }),
-      hideUnmatched
+      hideUnmatched,
+      refreshCSRF
     });
     renderApp("/unmatched", { client:liveClient, preview:false });
     expect((await screen.findAllByText("< 0.01 RUB")).length).toBeGreaterThan(0);
@@ -283,6 +286,7 @@ describe("admin application", () => {
     expect(hide).toHaveAttribute("title", "Hide from list");
     fireEvent.click(hide);
     expect(screen.queryByText("< 0.01 RUB")).not.toBeInTheDocument();
+    await waitFor(() => expect(refreshCSRF).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(hideUnmatched).toHaveBeenCalledWith({tenantId,merchantId},caseId,expect.objectContaining({version:4,reason:"Hidden by operator without order attribution",idempotency_key:expect.stringMatching(/.{8,}/)})));
   });
 

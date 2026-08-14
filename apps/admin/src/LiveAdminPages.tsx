@@ -457,6 +457,7 @@ export function LiveUnmatchedPage() {
     setHiddenIds((current) => new Set(current).add(item.id));
     setNotice(null);
     try {
+      await admin.client!.refreshCSRF();
       await admin.client!.hideUnmatched(admin.scope as AdminScope, item.id, { version: item.version, reason: "Hidden by operator without order attribution", idempotency_key: idempotencyKey });
       hideKeys.current.delete(item.id);
       await queryClient.invalidateQueries({ queryKey: ["admin", "unmatched"] });

@@ -314,6 +314,80 @@ func TestHideUnmatchedUsesScopedAuditedMutation(t *testing.T) {
 	}
 }
 
+func TestSameOriginCSRFRefreshRepairsAStaleActionToken(t *testing.T) {
+	handler, repo, raw, staleCSRF, tenant := serverFixture(t, false)
+	repo.identity.Bindings[0].Permissions[PermissionUnmatchedClaim] = true
+	repo.session.CSRFHash = tokenHash(strings.Repeat("d", 43))
+	id := "018f22b0-4db4-7c58-8f18-4d2f9d7b6a55"
+
+	stale := mutationRequest(http.MethodPost, "/admin/v1/unmatched/"+id+"/hide", `{"version":3,"reason":"Hidden by operator without order attribution","idempotency_key":"hide-stale-001"}`, raw, staleCSRF)
+	stale.Header.Set("X-Admin-Tenant-ID", tenant)
+	stale.Header.Set("X-Admin-Merchant-ID", repo.identity.Bindings[0].MerchantID)
+	staleResponse := httptest.NewRecorder()
+	handler.ServeHTTP(staleResponse, stale)
+	if staleResponse.Code != http.StatusForbidden {
+		t.Fatalf("stale CSRF expected 403, got %d", staleResponse.Code)
+	}
+
+	refresh := httptest.NewRequest(http.MethodPost, "https://admin.example/admin/v1/session/csrf", nil)
+	refresh.AddCookie(&http.Cookie{Name: sessionCookieName, Value: raw})
+	refresh.Header.Set("Origin", "https://admin.example")
+	refresh.Header.Set("Sec-Fetch-Site", "same-origin")
+	refreshResponse := httptest.NewRecorder()
+	handler.ServeHTTP(refreshResponse, refresh)
+	if refreshResponse.Code != http.StatusNoContent {
+		t.Fatalf("refresh expected 204, got %d %s", refreshResponse.Code, refreshResponse.Body.String())
+	}
+	refreshedCSRF := ""
+	for _, cookie := range refreshResponse.Result().Cookies() {
+		if cookie.Name == csrfCookieName {
+			refreshedCSRF = cookie.Value
+			if cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteStrictMode || cookie.Path != "/" {
+				t.Fatalf("refreshed CSRF cookie attributes are unsafe: %#v", cookie)
+			}
+		}
+	}
+	if len(refreshedCSRF) < 43 || repo.session.CSRFHash != tokenHash(refreshedCSRF) {
+		t.Fatal("refresh did not bind a new browser token to the active server session")
+	}
+
+	retry := mutationRequest(http.MethodPost, "/admin/v1/unmatched/"+id+"/hide", `{"version":3,"reason":"Hidden by operator without order attribution","idempotency_key":"hide-stale-001"}`, raw, refreshedCSRF)
+	retry.Header.Set("X-Admin-Tenant-ID", tenant)
+	retry.Header.Set("X-Admin-Merchant-ID", repo.identity.Bindings[0].MerchantID)
+	retryResponse := httptest.NewRecorder()
+	handler.ServeHTTP(retryResponse, retry)
+	if retryResponse.Code != http.StatusOK || !strings.Contains(retryResponse.Body.String(), `"status":"ignored"`) {
+		t.Fatalf("refreshed CSRF did not permit the intended mutation: %d %s", retryResponse.Code, retryResponse.Body.String())
+	}
+}
+
+func TestCSRFRefreshRejectsCrossSiteAndMissingOrigin(t *testing.T) {
+	handler, _, raw, _, _ := serverFixture(t, false)
+	for _, test := range []struct {
+		name      string
+		origin    string
+		fetchSite string
+	}{
+		{name: "missing origin", fetchSite: "same-origin"},
+		{name: "foreign origin", origin: "https://evil.example", fetchSite: "cross-site"},
+		{name: "cross-site metadata", origin: "https://admin.example", fetchSite: "cross-site"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "https://admin.example/admin/v1/session/csrf", nil)
+			request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: raw})
+			if test.origin != "" {
+				request.Header.Set("Origin", test.origin)
+			}
+			request.Header.Set("Sec-Fetch-Site", test.fetchSite)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "origin_rejected") {
+				t.Fatalf("unsafe refresh expected 403, got %d %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
 func TestSecurityHeadersAndUnavailablePagesFailClosed(t *testing.T) {
 	handler, _, raw, csrf, _ := serverFixture(t, false)
 	request := httptest.NewRequest(http.MethodGet, "https://admin.example/admin/v1/payment-links", nil)

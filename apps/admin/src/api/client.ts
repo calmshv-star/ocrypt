@@ -35,6 +35,13 @@ export class AdminClient {
     return parsed.toString();
   }
   me(signal?:AbortSignal){return this.request<AdminPrincipal>("/admin/v1/session/me",{signal})}
+  async refreshCSRF(signal?:AbortSignal):Promise<void>{
+    const response=await this.fetcher(`${this.origin}/admin/v1/session/csrf`,{method:"POST",headers:new Headers({Accept:"application/json"}),credentials:"include",redirect:"error",cache:"no-store",signal});
+    if(response.status===204)return;
+    const value:unknown=await response.json().catch(()=>null);
+    const problem=value as Partial<APIProblem>|null;
+    throw new AdminAPIError(response.status,problem?.code??"http_error",problem?.detail??"Action token refresh failed");
+  }
   logout(signal?:AbortSignal){return this.request<void>("/admin/v1/session/logout",{method:"POST",body:{},signal})}
   overview(scope:AdminScope,signal?:AbortSignal){return this.request<Overview>("/admin/v1/overview",{scope,signal})}
   intents(scope:AdminScope,cursor="",limit=50,signal?:AbortSignal){return this.page<IntentRow>("/admin/v1/intents",scope,cursor,limit,signal)}
