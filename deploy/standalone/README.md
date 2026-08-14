@@ -56,20 +56,31 @@ The Aptos event parser and low-load scan path are implemented: an address-indexe
 candidate is checked against the exact transaction events and state changes from
 two independent full nodes. That avoids a local node and avoids downloading the
 full Aptos ledger. Activation still requires a second independent hosted indexer
-credential (for example a free Nodit project) in addition to the Aptos Labs
-indexer. The anonymous Labs endpoint is rate-limited and one shared indexer
-cannot prove that it did not omit a whole transaction. Until that credential is
-installed and a two-indexer reconciliation check passes, Aptos remains
+from a free Nodit Starter project in addition to the Aptos Labs indexer. The
+anonymous Labs endpoint is rate-limited and one shared indexer cannot prove that
+it did not omit a whole transaction. Until the Nodit endpoint is installed and a
+two-indexer reconciliation check passes, Aptos remains
 `deposit_disabled`, its wallet pool remains disabled, and its scanner/proof
 services stay behind the `aptos-disabled` Compose profile. No private key or seed
 phrase is imported.
 
-The secondary Aptos GraphQL URL is a secret because providers such as Nodit and
-Dwellir put the API key in the endpoint path. Store the complete HTTPS endpoint
-in `/opt/ocrypt/secrets/scanner/aptos/secondary-indexer.url` (mode `0600`). The
-runtime snapshot contains only the reference `aptos/secondary-indexer`; it never
-stores or returns the URL. Activation is allowed only after both indexers return
-the same candidate set and both full nodes return the same transaction proof.
+The Nodit Aptos GraphQL URL is a secret because its API key is part of the
+endpoint path. Put the copied Nodit Mainnet Indexer URL in a local file readable
+only by the operator, then install and validate it without exposing the URL in a
+shell argument or database row:
+
+```sh
+NODIT_ENDPOINT_FILE=/secure/path/nodit-aptos-mainnet.url \
+./deploy/standalone/install-nodit-aptos-indexer.sh
+```
+
+The installer stores it in
+`/opt/ocrypt/secrets/scanner/aptos/nodit-indexer.url` with mode `0600` only
+after both Nodit and Aptos Labs pass the schema and freshness checks used by the
+low-load scanner. The runtime snapshot contains only the reference
+`aptos/nodit-indexer`; it never stores or returns the URL. Activation is allowed
+only after both indexers return the same candidate set and both full nodes
+return the same transaction proof.
 
 Before starting a newly admitted EVM scanner, initialize only its absent cursor
 at a quorum-verified finalized block:

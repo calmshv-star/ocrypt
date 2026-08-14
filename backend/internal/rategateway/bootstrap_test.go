@@ -159,7 +159,8 @@ func TestGMPayCatalogIsExactAndAdmittedWithoutManualRPCPromotion(t *testing.T) {
 		`'rpc/bsc-publicnode'`, `'rpc/bsc-blxr'`,
 		`provider_id='bsc-1rpc' AND status='active'`,
 		`'rpc/plasma-public'`, `'rpc/plasma-thirdweb'`,
-		`'indexer_endpoint_ref',indexer_endpoint_ref`, `'aptos/secondary-indexer'`,
+		`'indexer_endpoint_ref',indexer_endpoint_ref`, `'aptos/nodit-indexer'`,
+		`'rpc/aptos-nodit'`, `'aptos-nodit'`, `'nodit'`,
 		`jsonb_build_array('blocks','transactions','logs','receipts')`,
 	} {
 		if !strings.Contains(publicEVM+bootstrap, required) {
@@ -176,6 +177,7 @@ func TestGMPayCatalogIsExactAndAdmittedWithoutManualRPCPromotion(t *testing.T) {
 		t.Fatal("public catalog bootstrap must not reactivate quarantined wallets or addresses")
 	}
 	compose := readFixture(t, filepath.Join(root, "deploy", "standalone", "compose.shadow.yaml"))
+	installer := readFixture(t, filepath.Join(root, "deploy", "standalone", "install-nodit-aptos-indexer.sh"))
 	if !strings.Contains(bootstrap, "'aptos:1','aptos','Aptos Mainnet','disabled'") ||
 		strings.Count(bootstrap, "'aptos:1','US") < 2 ||
 		strings.Count(bootstrap, "'deposit_disabled'") < 3 {
@@ -185,6 +187,19 @@ func TestGMPayCatalogIsExactAndAdmittedWithoutManualRPCPromotion(t *testing.T) {
 		strings.Contains(compose, `{"policy_key":"rate-usdc-aptos-rub"}`) ||
 		strings.Contains(compose, `{"policy_key":"rate-usdt-aptos-rub"}`) {
 		t.Fatal("Aptos runtime or background rates were enabled without a sustainable proof source")
+	}
+	for _, required := range []string{
+		`secret_target=$secret_dir/nodit-indexer.url`, `curl --config "$nodit_curl_config"`,
+		`https://api.mainnet.aptoslabs.com/v1/graphql`, `APTOS_INDEXER_MAX_VERSION_LAG`,
+		`install -m 0600`,
+	} {
+		if !strings.Contains(installer, required) {
+			t.Fatalf("Nodit installer is missing safety control %q", required)
+		}
+	}
+	if strings.Contains(strings.ToLower(installer+bootstrap), "blockeden") ||
+		strings.Contains(installer, `curl "$nodit_endpoint"`) {
+		t.Fatal("Nodit credential was exposed or a rejected Aptos indexer was promoted")
 	}
 }
 
