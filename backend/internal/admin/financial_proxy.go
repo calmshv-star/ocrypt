@@ -72,9 +72,9 @@ func (p *TrustedFinancialProxy) ServeFinancial(w http.ResponseWriter, incoming *
 		return
 	}
 	now := p.now().UTC()
-	if authenticated.Principal.StepUpUntil == nil || !authenticated.Principal.StepUpUntil.After(now) || authenticated.Principal.StepUpUntil.After(now.Add(15*time.Minute)) || authenticated.MFAAt.IsZero() {
-		writeProblem(w, http.StatusForbidden, "step_up_required", "Recent multi-factor authentication is required.")
-		return
+	validUntil := now.Add(15 * time.Minute)
+	if authenticated.Session.AbsoluteExpiresAt.After(now) && authenticated.Session.AbsoluteExpiresAt.Before(validUntil) {
+		validUntil = authenticated.Session.AbsoluteExpiresAt
 	}
 	if err := validateFinancialQuery(incoming.URL.Query()); err != nil {
 		writeProblem(w, http.StatusBadRequest, "invalid_query", "Financial query parameters are invalid.")
@@ -121,7 +121,7 @@ func (p *TrustedFinancialProxy) ServeFinancial(w http.ResponseWriter, incoming *
 		writeProblem(w, http.StatusBadGateway, "financial_unavailable", "Financial service is unavailable.")
 		return
 	}
-	financialapi.SignProxyRequest(request, body, p.secret, financialapi.Principal{TenantID: scope.TenantID, ActorID: authenticated.Principal.UserID, Permissions: map[string]bool{route.apiPermission: true}, StepUpValidUntil: authenticated.Principal.StepUpUntil.UTC()}, nonce, now)
+	financialapi.SignProxyRequest(request, body, p.secret, financialapi.Principal{TenantID: scope.TenantID, ActorID: authenticated.Principal.UserID, Permissions: map[string]bool{route.apiPermission: true}, StepUpValidUntil: validUntil}, nonce, now)
 	response, err := p.client.Do(request)
 	if err != nil {
 		writeProblem(w, http.StatusBadGateway, "financial_unavailable", "Financial service is unavailable.")

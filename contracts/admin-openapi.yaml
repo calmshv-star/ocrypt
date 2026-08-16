@@ -5,8 +5,9 @@ info:
   description: >-
     Same-origin operator control plane. It uses an opaque server-side session;
     merchant HMAC credentials and signing secrets are never accepted from or
-    returned to the browser. All financial overrides require a recent MFA
-    step-up and an independent second operator before the core verifier runs.
+    returned to the browser. An active authenticated operator session is
+    sufficient; manual payment decisions always pass through the independent
+    core verifier before settlement.
 servers:
   - url: https://admin.example
     description: Replace with the exact ADMIN_PUBLIC_ORIGIN. Cross-origin use is unsupported.
@@ -270,18 +271,19 @@ paths:
   /admin/v1/unmatched/{id}/resolution-requests:
     post:
       tags: [Operations]
-      summary: Create the real core manual resolution and request second approval
+      summary: Start independent verification for the selected payment and order
       description: >-
         Atomically fences the latest merchant candidate, case version and route,
-        inserts core manual_resolutions in approval_required, updates the case,
-        stores idempotency, and appends audit. AI output alone is never sufficient.
+        inserts core manual_resolutions in verification_requested, updates the case,
+        stores idempotency, and appends audit. A second operator is not required;
+        AI output alone is never sufficient and the chain verifier still gates settlement.
       security: [{sessionCookie: [], csrfHeader: []}]
       parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/ResolutionInput'}}}
       responses:
-        '202': {description: Pending independent approval, content: {application/json: {schema: {$ref: '#/components/schemas/Action'}}}}
+        '202': {description: Independent verification queued, content: {application/json: {schema: {$ref: '#/components/schemas/Action'}}}}
         '403': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
   /admin/v1/action-requests/{id}:
@@ -293,8 +295,9 @@ paths:
         '200': {description: Action, content: {application/json: {schema: {$ref: '#/components/schemas/Action'}}}}
   /admin/v1/action-requests/{id}/approve:
     post:
+      deprecated: true
       tags: [Operations]
-      summary: Approve with a different operator and queue independent verification
+      summary: Approve a legacy action created before single-operator verification
       security: [{sessionCookie: [], csrfHeader: []}]
       parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
       requestBody: {$ref: '#/components/requestBodies/Decision'}
@@ -304,8 +307,9 @@ paths:
         '409': {$ref: '#/components/responses/Problem'}
   /admin/v1/action-requests/{id}/reject:
     post:
+      deprecated: true
       tags: [Operations]
-      summary: Reject with a different operator and reopen the case
+      summary: Reject a legacy action created before single-operator verification
       security: [{sessionCookie: [], csrfHeader: []}]
       parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
       requestBody: {$ref: '#/components/requestBodies/Decision'}

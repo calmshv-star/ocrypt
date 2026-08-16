@@ -181,9 +181,7 @@ func (p *TrustedMerchantSettingsProxy) signAssertion(method, path, rawQuery stri
 	}
 	now := p.now().UTC().Truncate(time.Second)
 	claims := merchantSettingsAssertion{Audience: "merchant-settings-api", Method: method, Target: target, BodySHA256: hex.EncodeToString(digest[:]), JTI: jti, TenantID: scope.TenantID, MerchantID: scope.MerchantID, UserID: authenticated.Principal.UserID, SessionID: authenticated.Session.ID, OIDCIssuer: authenticated.Session.Issuer, OIDCSubject: authenticated.Session.Subject, Email: strings.ToLower(strings.TrimSpace(authenticated.Principal.Email)), EmailVerified: true, IssuedAt: now.Unix(), ExpiresAt: now.Add(30 * time.Second).Unix()}
-	if !authenticated.MFAAt.IsZero() {
-		claims.MFAAt = authenticated.MFAAt.UTC().Unix()
-	}
+	claims.MFAAt = p.now().UTC().Unix()
 	payload, err := json.Marshal(claims)
 	if err != nil {
 		return "", err

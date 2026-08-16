@@ -98,7 +98,7 @@ describe("admin application", () => {
     expect(screen.queryByRole("heading", { name: "Audit log" })).not.toBeInTheDocument();
   });
 
-  it("locks a submitted preview resolution into its visible approval state", async () => {
+  it("locks a submitted preview resolution while verification is in progress", async () => {
     renderApp("/unmatched", { preview: true });
     const reason = await screen.findByTestId("resolution-reason");
     const accept = screen.getByTestId("accept-cross-asset");
@@ -107,7 +107,7 @@ describe("admin application", () => {
     const request = screen.getByTestId("request-resolution");
     expect(request).toBeEnabled();
     fireEvent.click(request);
-    expect(await screen.findByTestId("resolution-status")).toHaveTextContent("Approval pending");
+    expect(await screen.findByTestId("resolution-status")).toHaveTextContent("Verification in progress");
     expect(reason).toBeDisabled();
     expect(accept).toBeDisabled();
     expect(request).toBeDisabled();
@@ -229,7 +229,7 @@ describe("admin application", () => {
       requested_by: principal.user_id,
       reason: "Verified immutable payment evidence",
       payload: {},
-      status: "approval_required",
+      status: "executing",
       requires_step_up: false,
       created_at: new Date().toISOString(),
       expires_at: new Date(Date.now() + 60_000).toISOString()
@@ -260,12 +260,12 @@ describe("admin application", () => {
     expect(screen.getAllByText("≈ 608.00 RUB").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/USDT/).length).toBeGreaterThan(0);
     expect(screen.queryByText("underpaid")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Send for confirmation" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Credit payment" })).toBeDisabled();
     fireEvent.click(screen.getByLabelText("The amount is lower than expected — credit it anyway"));
-    fireEvent.click(screen.getByRole("button", { name: "Send for confirmation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Credit payment" }));
     await waitFor(() => expect(requestResolution).toHaveBeenCalledTimes(1));
     expect(requestResolution).toHaveBeenCalledWith({ tenantId, merchantId }, caseId, expect.objectContaining({ version: 8, target_route_id: routeId, reason: "Manual review: payment matched to order ORDER-1042", accept_shortfall: true, accept_late_payment: false, accept_cross_asset: false, idempotency_key: expect.stringMatching(/.{8,}/) }));
-    expect(screen.getByText("Another administrator will check it before the payment is credited.")).toBeInTheDocument();
+    expect(screen.getByText("Ocrypt will verify the transaction and credit it automatically.")).toBeInTheDocument();
   });
 
   it("hides an unmatched payment without assigning it to an order", async () => {

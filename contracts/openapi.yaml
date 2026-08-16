@@ -643,7 +643,7 @@ paths:
       tags: [Operations]
       operationId: requestManualResolution
       summary: Request a human-reviewed candidate binding and independent chain verification.
-      description: Shortfall or cross-asset acceptance requires approval by a different credential actor before verification. This request never settles immediately.
+      description: The authenticated operator chooses any explicit exception acceptance. This request queues independent chain verification and never settles immediately.
       parameters:
         - $ref: '#/components/parameters/UnmatchedID'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -664,9 +664,10 @@ paths:
         '409': { $ref: '#/components/responses/ConflictError' }
   /v1/operator/manual-resolutions/{resolution_id}/approve:
     post:
+      deprecated: true
       tags: [Operations]
       operationId: approveManualResolution
-      summary: Approve a four-eyes resolution using a different credential actor.
+      summary: Approve a legacy resolution created before single-operator verification.
       parameters:
         - $ref: '#/components/parameters/ResolutionID'
         - $ref: '#/components/parameters/MerchantKeyId'

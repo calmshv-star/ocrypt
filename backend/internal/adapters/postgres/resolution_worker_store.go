@@ -14,12 +14,21 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func (s *Store) ClaimResolutions(ctx context.Context, workerID string, now time.Time, lease time.Duration, limit int) (jobs []application.ResolutionJob, err error) {
-	if workerID == "" || lease < time.Second || limit < 1 || limit > 100 {
+func (s *Store) ClaimResolutions(ctx context.Context, workerID, chainID string, now time.Time, lease time.Duration, limit int) (jobs []application.ResolutionJob, err error) {
+	if workerID == "" || chainID == "" || lease < time.Second || limit < 1 || limit > 100 {
 		return nil, errors.New("invalid manual resolution claim")
 	}
 	err = pgx.BeginTxFunc(ctx, s.db.pool, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT id::text FROM manual_resolutions WHERE status IN ('verification_requested','verification_retry') AND next_attempt_at<=$1 AND (locked_until IS NULL OR locked_until<$1) ORDER BY next_attempt_at,id LIMIT $2 FOR UPDATE SKIP LOCKED`, now, limit)
+		rows, err := tx.Query(ctx, `SELECT mr.id::text
+FROM manual_resolutions mr
+JOIN transfer_events te ON te.id=mr.event_id
+WHERE te.chain_id=$1
+  AND mr.status IN ('verification_requested','verification_retry')
+  AND mr.next_attempt_at<=$2
+  AND (mr.locked_until IS NULL OR mr.locked_until<$2)
+ORDER BY mr.next_attempt_at,mr.id
+LIMIT $3
+FOR UPDATE OF mr SKIP LOCKED`, chainID, now, limit)
 		if err != nil {
 			return err
 		}

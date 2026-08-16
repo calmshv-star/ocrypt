@@ -68,7 +68,7 @@ func TestFinancialProxyDerivesMinimalPermissionAndSignsExactRequest(t *testing.T
 	}
 }
 
-func TestFinancialProxyRejectsConfusedDeputyInputsAndStaleStepUp(t *testing.T) {
+func TestFinancialProxyRejectsConfusedDeputyInputs(t *testing.T) {
 	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
 	authorizer := &financialAuthorizerFake{permissions: []Permission{PermissionFinancialSweepCreate}}
 	called := false
@@ -77,10 +77,6 @@ func TestFinancialProxyRejectsConfusedDeputyInputsAndStaleStepUp(t *testing.T) {
 	for name, mutate := range map[string]func(*http.Request, *AuthResult){
 		"merchant scope":      func(_ *http.Request, auth *AuthResult) { _ = auth },
 		"assertion injection": func(r *http.Request, _ *AuthResult) { r.Header.Set("Financial-Permissions", "treasury:sweeps:approve") },
-		"stale step up": func(_ *http.Request, auth *AuthResult) {
-			expired := now.Add(-time.Second)
-			auth.Principal.StepUpUntil = &expired
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, "https://admin.example/admin/v1/financial/sweeps", strings.NewReader(`{"asset_id":"usdt"}`))
@@ -101,6 +97,34 @@ func TestFinancialProxyRejectsConfusedDeputyInputsAndStaleStepUp(t *testing.T) {
 	}
 	if called {
 		t.Fatal("private financial service was contacted for rejected input")
+	}
+}
+
+func TestFinancialProxyUsesOrdinaryAuthenticatedSessionWithoutRepeatStepUp(t *testing.T) {
+	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	key := []byte("01234567890123456789012345678901")
+	authorizer := &financialAuthorizerFake{permissions: []Permission{PermissionFinancialSweepCreate}}
+	client := &http.Client{Transport: financialRoundTripper(func(request *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(request.Body)
+		principal, err := (financialapi.ProxyAuthenticator{Secret: key, Nonces: acceptNonce{}, Clock: func() time.Time { return now }}).Authenticate(context.Background(), request, body)
+		if err != nil || !principal.StepUpValidUntil.After(now) {
+			t.Fatalf("short-lived internal assertion was not created: principal=%#v err=%v", principal, err)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"data":{"id":"ok"}}`))}, nil
+	})}
+	proxy, _ := NewTrustedFinancialProxy("https://financial.internal", key, client, authorizer)
+	proxy.now = func() time.Time { return now }
+	auth := financialAuth(now)
+	expired := now.Add(-time.Hour)
+	auth.Principal.StepUpUntil = &expired
+	auth.MFAAt = time.Time{}
+	request := httptest.NewRequest(http.MethodPost, "https://admin.example/admin/v1/financial/sweeps", strings.NewReader(`{"asset_id":"usdt"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "create-0001")
+	recorder := httptest.NewRecorder()
+	proxy.ServeFinancial(recorder, request, auth, Scope{TenantID: "018f22b0-4db4-7c58-8f18-4d2f9d7b6002"})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("ordinary session was rejected: %d %s", recorder.Code, recorder.Body.String())
 	}
 }
 
