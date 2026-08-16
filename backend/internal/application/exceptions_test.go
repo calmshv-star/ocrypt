@@ -40,16 +40,19 @@ func TestCandidatePolicyPrefersRouteOwningReusedAddressAtPaymentTime(t *testing.
 	}
 }
 
-func TestUniqueAutomaticCandidateRequiresStrictlyAboveNinetyAndNoTie(t *testing.T) {
-	if _, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "ninety", Score: 90}}); ok {
-		t.Fatal("score equal to ninety was auto-matched")
+func TestUniqueAutomaticCandidateRequiresStrictlyAboveEightyAndNoTie(t *testing.T) {
+	if _, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "eighty", Score: 80}}); ok {
+		t.Fatal("score equal to eighty was auto-matched")
 	}
-	selected, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "winner", Score: 91}, {RouteID: "other", Score: 90}})
+	selected, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "winner", Score: 81}, {RouteID: "other", Score: 80}})
 	if !ok || selected.RouteID != "winner" {
-		t.Fatalf("unique score above ninety was not selected: %#v %v", selected, ok)
+		t.Fatalf("unique score above eighty was not selected: %#v %v", selected, ok)
 	}
 	if _, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "a", Score: 95}, {RouteID: "b", Score: 95}}); ok {
 		t.Fatal("equal high-score candidates were auto-matched")
+	}
+	if _, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "late", Score: 100, Class: ExceptionLate}}); ok {
+		t.Fatal("late candidate outside the automatic grace window was auto-matched")
 	}
 }
 
