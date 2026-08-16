@@ -205,12 +205,37 @@ func TestAutomatedMatchingUnderOverAndLateAreVersionedFailClosed(t *testing.T) {
 	late := automatedEvent("late", "100", now)
 	lateDecision, _ := EvaluateAutomatedMatch(route, []domain.TransferEvent{late}, now, policy)
 	if lateDecision.Outcome != AutomatedReview || lateDecision.Class != ExceptionLate {
-		t.Fatal("late payment settled without policy")
+		t.Fatal("payment more than thirty minutes late did not require review")
 	}
 	policy.AcceptLateWithinGrace = true
 	lateDecision, _ = EvaluateAutomatedMatch(route, []domain.TransferEvent{late}, now, policy)
-	if lateDecision.Outcome != AutomatedSettle || lateDecision.Class != ExceptionLate {
-		t.Fatalf("versioned late grace not applied: %#v", lateDecision)
+	if lateDecision.Outcome != AutomatedReview || lateDecision.Class != ExceptionLate {
+		t.Fatalf("legacy wide-grace policy bypassed the thirty-minute product limit: %#v", lateDecision)
+	}
+}
+
+func TestAutomatedMatchingUsesInclusiveThirtyMinuteLateGrace(t *testing.T) {
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	route, policy := automatedRoute(now), automatedPolicy()
+	route.StartsAt = now.Add(-time.Hour)
+	route.ExpiresAt = now
+	route.GraceEndsAt = now.Add(24 * time.Hour)
+
+	for _, test := range []struct {
+		name    string
+		paidAt  time.Time
+		outcome AutomatedMatchOutcome
+	}{
+		{name: "29m59s", paidAt: now.Add(29*time.Minute + 59*time.Second), outcome: AutomatedSettle},
+		{name: "30m00s", paidAt: now.Add(30 * time.Minute), outcome: AutomatedSettle},
+		{name: "30m01s", paidAt: now.Add(30*time.Minute + time.Second), outcome: AutomatedReview},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			decision, err := EvaluateAutomatedMatch(route, []domain.TransferEvent{automatedEvent(test.name, "100", test.paidAt)}, test.paidAt, policy)
+			if err != nil || decision.Outcome != test.outcome || decision.Class != ExceptionLate {
+				t.Fatalf("unexpected thirty-minute boundary decision: %#v %v", decision, err)
+			}
+		})
 	}
 }
 

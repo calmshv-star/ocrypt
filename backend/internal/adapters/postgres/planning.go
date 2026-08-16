@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/application"
@@ -226,5 +227,7 @@ func displayAtomic(value string, decimals uint8) string {
 		value = "0" + value
 	}
 	cut := len(value) - int(decimals)
-	return value[:cut] + "." + value[cut:]
+	display := value[:cut] + "." + value[cut:]
+	display = strings.TrimRight(display, "0")
+	return strings.TrimSuffix(display, ".")
 }

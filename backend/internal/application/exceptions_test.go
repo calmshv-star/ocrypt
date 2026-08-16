@@ -40,6 +40,39 @@ func TestCandidatePolicyPrefersRouteOwningReusedAddressAtPaymentTime(t *testing.
 	}
 }
 
+func TestUniqueAutomaticCandidateRequiresStrictlyAboveNinetyAndNoTie(t *testing.T) {
+	if _, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "ninety", Score: 90}}); ok {
+		t.Fatal("score equal to ninety was auto-matched")
+	}
+	selected, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "winner", Score: 91}, {RouteID: "other", Score: 90}})
+	if !ok || selected.RouteID != "winner" {
+		t.Fatalf("unique score above ninety was not selected: %#v %v", selected, ok)
+	}
+	if _, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "a", Score: 95}, {RouteID: "b", Score: 95}}); ok {
+		t.Fatal("equal high-score candidates were auto-matched")
+	}
+}
+
+func TestLateCandidateCrossesAutoThresholdOnlyInsideThirtyMinutes(t *testing.T) {
+	expires := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	route := domain.PaymentRoute{ID: "route", IntentID: "intent", ChainID: "eip155:1", AssetID: "eth-ethereum", Address: "merchant", ExpectedAmount: money.MustParse("100"), StartsAt: expires.Add(-30 * time.Minute), ExpiresAt: expires, GraceEndsAt: expires.Add(24 * time.Hour)}
+
+	inside := automatedEvent("inside-grace", "100", expires.Add(30*time.Minute))
+	inside.Identity.ChainID, inside.Identity.AssetID, inside.Identity.ToAddress = route.ChainID, route.AssetID, route.Address
+	insideCandidates := BuildCandidates(inside, []domain.PaymentRoute{route}, inside.OnChainTime)
+	if selected, ok := UniqueAutomaticCandidate(insideCandidates); !ok || selected.Score <= AutomaticCandidateScoreThreshold {
+		t.Fatalf("thirty-minute late candidate did not cross threshold: %#v", insideCandidates)
+	}
+
+	outside := inside
+	outside.ID, outside.OnChainTime = "outside-grace", expires.Add(30*time.Minute+time.Second)
+	outside.Identity.TransactionID = "tx-outside-grace"
+	outsideCandidates := BuildCandidates(outside, []domain.PaymentRoute{route}, outside.OnChainTime)
+	if _, ok := UniqueAutomaticCandidate(outsideCandidates); ok {
+		t.Fatalf("candidate after thirty minutes was auto-matched: %#v", outsideCandidates)
+	}
+}
+
 func TestAIResultCannotAuthorizeOrInventCandidate(t *testing.T) {
 	request := AIRankRequest{CaseID: "case", Candidates: []Candidate{{RouteID: "route"}}}
 	if err := ValidateAIResult(request, AIRankResult{RecommendedRouteID: "route", Confidence: .9, ReviewRequired: false}); err == nil {

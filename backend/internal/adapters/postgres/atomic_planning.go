@@ -69,7 +69,7 @@ func (s *Store) AllocateRouteInTx(ctx context.Context, tx pgx.Tx, p application.
 	if err != nil {
 		return planned, err
 	}
-	expected, err = selectUnreservedAmount(ctx, tx, p.TenantID, addressID, chainID, assetID, address, expected, s.now(), expiresAt.UTC().Add(24*time.Hour))
+	expected, err = selectUnreservedAmount(ctx, tx, p.TenantID, addressID, chainID, assetID, address, expected, decimals, s.now(), expiresAt.UTC().Add(24*time.Hour))
 	if err != nil {
 		return planned, err
 	}
@@ -113,10 +113,11 @@ func (s *Store) AllocateRouteInTx(ctx context.Context, tx pgx.Tx, p application.
 }
 
 // selectUnreservedAmount serializes on the already locked address row and
-// chooses the smallest atomic-unit suffix that does not collide with either a
+// chooses the smallest user-visible suffix that does not collide with either a
 // leased quote or an active exact-amount reservation in the requested window.
-// The suffix is bounded to 10,000 atomic units (0.01 for a 6-decimal asset).
-func selectUnreservedAmount(ctx context.Context, tx pgx.Tx, tenantID, addressID, chainID, assetID, address string, base money.Amount, startsAt, graceEndsAt time.Time) (money.Amount, error) {
+// Assets with more than eight decimals are rounded up and stepped at the
+// eighth decimal so common wallets can enter the amount exactly.
+func selectUnreservedAmount(ctx context.Context, tx pgx.Tx, tenantID, addressID, chainID, assetID, address string, base money.Amount, decimals uint8, startsAt, graceEndsAt time.Time) (money.Amount, error) {
 	rows, err := tx.Query(ctx, `SELECT q.crypto_amount_atomic::text
 FROM address_assignments aa JOIN rate_quotes q ON q.id=aa.quote_id AND q.tenant_id=aa.tenant_id
 WHERE aa.tenant_id=$1 AND aa.address_id=$2 AND aa.status='leased' AND aa.valid_until>$3 AND q.asset_id=$4
@@ -139,8 +140,16 @@ WHERE ar.tenant_id=$1 AND ar.chain_id=$5 AND ar.receiving_address=$6 AND ar.asse
 	if err = rows.Err(); err != nil {
 		return money.Amount{}, err
 	}
+	base, step, err := roundPayableAmount(base, decimals)
+	if err != nil {
+		return money.Amount{}, err
+	}
 	for offset := 0; offset < 10000; offset++ {
-		candidate, addErr := base.Add(money.MustParse(fmt.Sprintf("%d", offset)))
+		delta, multiplyErr := step.Mul(money.MustParse(fmt.Sprintf("%d", offset)))
+		if multiplyErr != nil {
+			return money.Amount{}, multiplyErr
+		}
+		candidate, addErr := base.Add(delta)
 		if addErr != nil {
 			return money.Amount{}, addErr
 		}
@@ -149,4 +158,23 @@ WHERE ar.tenant_id=$1 AND ar.chain_id=$5 AND ar.receiving_address=$6 AND ar.asse
 		}
 	}
 	return money.Amount{}, fmt.Errorf("%w: exact-amount reservation space exhausted", domain.ErrStateConflict)
+}
+
+const maximumPayerFractionalDigits uint8 = 8
+
+func roundPayableAmount(base money.Amount, decimals uint8) (money.Amount, money.Amount, error) {
+	step := money.MustParse("1")
+	if decimals > maximumPayerFractionalDigits {
+		var err error
+		step, err = step.MulPow10(decimals - maximumPayerFractionalDigits)
+		if err != nil {
+			return money.Amount{}, money.Amount{}, err
+		}
+	}
+	units, err := base.DivCeil(step)
+	if err != nil {
+		return money.Amount{}, money.Amount{}, err
+	}
+	rounded, err := units.Mul(step)
+	return rounded, step, err
 }

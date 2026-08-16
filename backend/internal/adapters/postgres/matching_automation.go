@@ -139,8 +139,8 @@ func (s *Store) ReconcileAutomatedMatching(ctx context.Context, workerID string,
 			if _, err := tx.Exec(ctx, `UPDATE payment_intents SET status='partially_paid',status_reason='deterministic_aggregate_collecting',updated_at=$1,version=version+1 WHERE id=$2 AND tenant_id=$3 AND status IN ('pending','observed','partially_paid','needs_review')`, now, route.IntentID, route.TenantID); err != nil {
 				return err
 			}
-			deadline := route.Route.ExpiresAt
-			if route.Policy.AcceptLateWithinGrace {
+			deadline := route.Route.ExpiresAt.Add(application.AutomaticLatePaymentGrace)
+			if route.Route.GraceEndsAt.Before(deadline) {
 				deadline = route.Route.GraceEndsAt
 			}
 			return finishAutomatedMatchingJob(ctx, tx, workerID, job, "pending", deadline, "")
