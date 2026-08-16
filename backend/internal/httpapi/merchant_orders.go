@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/application"
+	"github.com/calmshv-star/ocrypt/backend/internal/chains"
 	"github.com/calmshv-star/ocrypt/backend/internal/domain"
 	"github.com/calmshv-star/ocrypt/backend/internal/money"
 )
@@ -208,7 +209,7 @@ func (s *Server) merchantResponse(intent domain.PaymentIntent, checkoutToken str
 	result := merchantOrderResponse{PaymentID: intent.ID, OrderID: intent.MerchantOrderID, CustomerID: intent.CustomerReference, Status: status, StatusReason: intent.StatusReason, Amount: formatMinorAmount(intent.AmountMinor.String(), intent.CurrencyScale), Currency: intent.Currency, ExpiresAt: intent.ExpiresAt, UpdatedAt: intent.UpdatedAt, Version: intent.Version}
 	if len(intent.Routes) == 1 {
 		route := intent.Routes[0]
-		result.Payment = &merchantPayment{RouteID: route.ID, Network: route.ChainID, Asset: route.AssetID, Address: route.Address, Memo: route.Memo, Amount: route.DisplayAmount, ExpectedAmountAtomic: route.ExpectedAmount.String(), ReceivedAmount: route.ReceivedAmount, RemainingAmount: route.RemainingAmount, ExcessAmount: route.ExcessAmount, PaymentCount: route.PaymentCount, RequiredFinality: route.RequiredFinality, TopUpAllowed: intent.Status == domain.IntentPartiallyPaid && route.RemainingAmount != "" && route.RemainingAmount != "0" && time.Now().UTC().Before(route.ExpiresAt)}
+		result.Payment = &merchantPayment{RouteID: route.ID, Network: route.ChainID, Asset: route.AssetID, Address: chains.DisplayAddress(route.ChainID, route.Address), Memo: route.Memo, Amount: route.DisplayAmount, ExpectedAmountAtomic: route.ExpectedAmount.String(), ReceivedAmount: route.ReceivedAmount, RemainingAmount: route.RemainingAmount, ExcessAmount: route.ExcessAmount, PaymentCount: route.PaymentCount, RequiredFinality: route.RequiredFinality, TopUpAllowed: intent.Status == domain.IntentPartiallyPaid && route.RemainingAmount != "" && route.RemainingAmount != "0" && time.Now().UTC().Before(route.ExpiresAt)}
 	}
 	if checkoutToken != "" {
 		base := s.checkoutPublicBaseURL

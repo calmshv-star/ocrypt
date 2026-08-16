@@ -915,7 +915,7 @@ func (s *Server) createIntent(w http.ResponseWriter, r *http.Request) {
 	if replay {
 		w.Header().Set("Idempotency-Replayed", "true")
 	}
-	writeEnvelope(w, http.StatusCreated, requestID, intent)
+	writeEnvelope(w, http.StatusCreated, requestID, presentPaymentIntent(intent))
 }
 
 func (s *Server) getIntent(w http.ResponseWriter, r *http.Request) {
@@ -929,7 +929,7 @@ func (s *Server) getIntent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, requestID, err)
 		return
 	}
-	writeEnvelope(w, http.StatusOK, requestID, p)
+	writeEnvelope(w, http.StatusOK, requestID, presentPaymentIntent(p))
 }
 
 func (s *Server) listRoutes(w http.ResponseWriter, r *http.Request) {
@@ -943,7 +943,8 @@ func (s *Server) listRoutes(w http.ResponseWriter, r *http.Request) {
 		writeError(w, requestID, err)
 		return
 	}
-	writeEnvelope(w, http.StatusOK, requestID, map[string]any{"items": intent.Routes})
+	presented := presentPaymentIntent(intent)
+	writeEnvelope(w, http.StatusOK, requestID, map[string]any{"items": presented.Routes})
 }
 
 type createRouteRequest struct {
@@ -997,7 +998,7 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	if found {
 		w.Header().Set("Idempotency-Replayed", "true")
-		writeEnvelope(w, http.StatusCreated, requestID, recorded)
+		writeEnvelope(w, http.StatusCreated, requestID, presentPaymentRoute(recorded))
 		return
 	}
 	intent, err := s.service.GetIntent(r.Context(), principal, r.PathValue("id"))
@@ -1033,7 +1034,7 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 	if replay {
 		w.Header().Set("Idempotency-Replayed", "true")
 	}
-	writeEnvelope(w, http.StatusCreated, requestID, route)
+	writeEnvelope(w, http.StatusCreated, requestID, presentPaymentRoute(route))
 }
 
 type cancelRequest struct {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/calmshv-star/ocrypt/backend/internal/chains"
 	"github.com/calmshv-star/ocrypt/backend/internal/ids"
 	"github.com/jackc/pgx/v5"
 )
@@ -316,6 +317,7 @@ func loadPublicCheckout(ctx context.Context, tx pgx.Tx, hash [32]byte, tenantID,
 		if e = rows.Scan(&route.ID, &route.Provider, &route.ProviderID, &route.Network, &route.Asset, &route.Amount, &route.Address, &route.PaymentURL, &admittedOrigins, &route.TransactionHash, &route.ExplorerURL, &expectedAtomic, &assetDecimals, &receivedAtomic, &route.PaymentCount, &accumulatesPartials, &collectionDeadline); e != nil {
 			return result, e
 		}
+		route.Address = chains.DisplayAddress(route.Network, route.Address)
 		var amountRemaining bool
 		route.ReceivedAmount, route.RemainingAmount, amountRemaining = checkoutPaymentProgress(expectedAtomic, receivedAtomic, assetDecimals)
 		if route.ReceivedAmount != "" {

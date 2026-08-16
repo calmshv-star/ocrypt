@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/application"
+	"github.com/calmshv-star/ocrypt/backend/internal/chains"
 	"github.com/calmshv-star/ocrypt/backend/internal/checkout"
 	"github.com/calmshv-star/ocrypt/backend/internal/domain"
 	"github.com/calmshv-star/ocrypt/backend/internal/ids"
@@ -148,6 +149,7 @@ ORDER BY r.created_at,r.id`, tenantID, intentID)
 			if err := rows.Scan(&route.ID, &route.Provider, &route.ProviderID, &route.Network, &route.Asset, &route.Amount, &route.Address, &route.PaymentURL, &route.TransactionHash, &route.ExplorerURL, &matched, &version); err != nil {
 				return err
 			}
+			route.Address = chains.DisplayAddress(route.Network, route.Address)
 			// Templates are provisioned by operators and constrained to HTTPS in
 			// SQL. Do not emit a malformed or unexpanded explorer link.
 			if route.ExplorerURL != "" && (!strings.HasPrefix(route.ExplorerURL, "https://") || strings.Contains(route.ExplorerURL, "{tx}")) {
