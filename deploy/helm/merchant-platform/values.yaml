@@ -313,10 +313,9 @@ workloads:
   resolution-worker:
     <<: *coreWorker
     enabled: false
-    env: {WORKER_ROLES: resolutions, WORKER_HEALTH_ADDRESS: ":9090", VERIFIER_CHAIN_ID: "", VERIFIER_PROVIDER_URLS: "", VERIFIER_QUORUM: "2"}
+    env: {WORKER_ROLES: resolutions, WORKER_HEALTH_ADDRESS: ":9090", RESOLUTION_CHAIN_ID: ""}
     secretEnv:
       - {name: DATABASE_URL, secretRef: {name: merchant-platform-resolution-worker, key: database-url}}
-      - {name: VERIFIER_PROVIDER_TOKEN, secretRef: {name: merchant-platform-resolution-worker, key: provider-token}}
   proof-worker:
     <<: *coreWorker
     enabled: false

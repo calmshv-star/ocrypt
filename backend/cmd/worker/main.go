@@ -107,13 +107,13 @@ func main() {
 	}
 	var resolutionWorker *application.ResolutionWorker
 	if roles["resolutions"] {
-		resolutionChainID := strings.TrimSpace(os.Getenv("VERIFIER_CHAIN_ID"))
-		verifier, err := newResolutionVerifier()
-		if err != nil {
-			slog.Error("resolution verifier initialization failed", "error", err)
-			os.Exit(1)
+		resolutionChainID := strings.TrimSpace(os.Getenv("RESOLUTION_CHAIN_ID"))
+		if resolutionChainID == "" {
+			// Backward-compatible during the rolling deployment. The provider
+			// configuration formerly attached to this variable is no longer read.
+			resolutionChainID = strings.TrimSpace(os.Getenv("VERIFIER_CHAIN_ID"))
 		}
-		resolutionWorker = &application.ResolutionWorker{Verifier: verifier, Store: store, ChainID: resolutionChainID, Lease: 30 * time.Second, Limit: 20}
+		resolutionWorker = &application.ResolutionWorker{Store: store, ChainID: resolutionChainID, Lease: 30 * time.Second, Limit: 20}
 	}
 
 	var callbackWorker *webhook.Worker

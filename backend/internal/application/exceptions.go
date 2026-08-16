@@ -127,19 +127,8 @@ func BuildCandidates(event domain.TransferEvent, routes []domain.PaymentRoute, n
 	return candidates
 }
 
-type IndependentVerifier interface {
-	VerifyTransfer(context.Context, domain.EventIdentity) (domain.TransferEvent, error)
-}
-
-// ExpectedTransferVerifier can re-read the exact finalized block that already
-// contains the canonical event. Normalized gateways commonly expose range
-// reads but not a transaction lookup endpoint; the full expected event supplies
-// the immutable block height without weakening quorum verification.
-type ExpectedTransferVerifier interface {
-	VerifyExpectedTransfer(context.Context, domain.TransferEvent) (domain.TransferEvent, error)
-}
 type ResolutionStore interface {
-	ApplyVerifiedResolution(context.Context, domain.ManualResolution, domain.TransferEvent) error
+	ApplyFinalizedResolution(context.Context, domain.ManualResolution, domain.TransferEvent) error
 }
 
 type ResolutionJob struct {
@@ -154,16 +143,15 @@ type ResolutionQueueStore interface {
 }
 
 type ResolutionWorker struct {
-	Verifier IndependentVerifier
-	Store    ResolutionQueueStore
-	ChainID  string
-	Clock    func() time.Time
-	Lease    time.Duration
-	Limit    int
+	Store   ResolutionQueueStore
+	ChainID string
+	Clock   func() time.Time
+	Lease   time.Duration
+	Limit   int
 }
 
 func (w ResolutionWorker) RunBatch(ctx context.Context, workerID string, limit int) (int, error) {
-	if w.Verifier == nil || w.Store == nil || workerID == "" || w.ChainID == "" || limit < 1 || limit > 100 {
+	if w.Store == nil || workerID == "" || w.ChainID == "" || limit < 1 || limit > 100 {
 		return 0, errors.New("invalid resolution worker configuration")
 	}
 	now := time.Now().UTC()
@@ -184,7 +172,7 @@ func (w ResolutionWorker) RunBatch(ctx context.Context, workerID string, limit i
 	}
 	var failures []error
 	for _, job := range jobs {
-		err := NewResolutionService(w.Verifier, w.Store).Resolve(ctx, job.Resolution, job.Expected)
+		err := NewResolutionService(w.Store).Resolve(ctx, job.Resolution, job.Expected)
 		if err == nil {
 			continue
 		}
@@ -204,33 +192,23 @@ func (w ResolutionWorker) RunBatch(ctx context.Context, workerID string, limit i
 }
 
 type ResolutionService struct {
-	verifier IndependentVerifier
-	store    ResolutionStore
+	store ResolutionStore
 }
 
-func NewResolutionService(v IndependentVerifier, s ResolutionStore) *ResolutionService {
-	return &ResolutionService{verifier: v, store: s}
+func NewResolutionService(s ResolutionStore) *ResolutionService {
+	return &ResolutionService{store: s}
 }
 func (s *ResolutionService) Resolve(ctx context.Context, resolution domain.ManualResolution, expected domain.TransferEvent) error {
 	if resolution.Reason == "" {
 		return fmt.Errorf("%w: a valid operator reason is required", domain.ErrValidation)
 	}
-	var verified domain.TransferEvent
-	var err error
-	if verifier, ok := s.verifier.(ExpectedTransferVerifier); ok {
-		verified, err = verifier.VerifyExpectedTransfer(ctx, expected)
-	} else {
-		verified, err = s.verifier.VerifyTransfer(ctx, expected.Identity)
+	if _, err := expected.Identity.Key(); err != nil || expected.ID == "" || expected.Amount.IsZero() || expected.Status != domain.TransferFinalized {
+		return fmt.Errorf("%w: a canonical finalized scanner event is required", domain.ErrInvariantViolation)
 	}
-	if err != nil {
-		return err
-	}
-	expectedKey, _ := expected.Identity.Key()
-	verifiedKey, _ := verified.Identity.Key()
-	if expectedKey != verifiedKey || verified.Amount.Cmp(expected.Amount) != 0 || verified.Status != domain.TransferFinalized {
-		return fmt.Errorf("%w: independent verification disagrees", domain.ErrInvariantViolation)
-	}
-	return s.store.ApplyVerifiedResolution(ctx, resolution, verified)
+	// The scanner has already obtained and finalized this canonical event. The
+	// settlement boundary reloads it under a serializable transaction and checks
+	// identity, evidence, finality, route compatibility and duplicate crediting.
+	return s.store.ApplyFinalizedResolution(ctx, resolution, expected)
 }
 
 type AIRankRequest struct {

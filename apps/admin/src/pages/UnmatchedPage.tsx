@@ -134,13 +134,11 @@ export function UnmatchedPage() {
             <div className="unmatched-resolution-form">
               <label className="unmatched-resolution-form__check"><input checked={exceptionAccepted} data-testid="accept-cross-asset" disabled={resolutionRequested} onChange={(event) => setExceptionAccepted(event.target.checked)} type="checkbox" /><span>{t("unmatched.acceptException")}</span></label>
               <label><span>{t("unmatched.resolutionReason")}</span><textarea data-testid="resolution-reason" disabled={resolutionRequested} onChange={(event) => setResolutionReason(event.target.value)} placeholder={t("unmatched.resolutionPlaceholder")} rows={3} value={resolutionReason} /></label>
-              {resolutionRequested && <p aria-live="polite" className="unmatched-resolution-pending" data-testid="resolution-status" role="status"><UserRoundCheck aria-hidden="true" size={18}/><span>{t("unmatched.approvalPending")}</span></p>}
             </div>
             <div className="unmatched-review__actions">
               <Button disabled variant="quiet">{t("unmatched.ignoreReason")}</Button>
               <span />
-              <Button disabled variant="secondary">{t("unmatched.independentVerification")}</Button>
-              <Button data-testid="request-resolution" disabled={!canRequestResolution || resolutionRequested} onClick={() => setResolutionRequested(true)}>{t(resolutionRequested ? "unmatched.approvalPending" : "unmatched.requestResolution")}</Button>
+              {!resolutionRequested && <Button data-testid="request-resolution" disabled={!canRequestResolution} onClick={() => setResolutionRequested(true)}>{t("unmatched.requestResolution")}</Button>}
             </div>
           </section>
         )}
