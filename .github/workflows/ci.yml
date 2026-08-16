@@ -362,6 +362,7 @@ jobs:
           docker build --file deploy/docker/Dockerfile.migrations --tag merchant-platform-migrations:schema-ci .
           docker run --rm --entrypoint /bin/sh merchant-platform-migrations:schema-ci -c '
             test "$(id -u)" = 65532
+            test -x /deploy
             test -x /deploy/migrations
             test -r /deploy/migrations/000001_platform.up.sql
             test -r /deploy/migrations/000049_single_operator_manual_resolution.up.sql
