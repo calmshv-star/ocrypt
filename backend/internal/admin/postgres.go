@@ -1175,11 +1175,11 @@ FOR UPDATE OF u`, value.ResourceID, payload.TargetRouteID, s.TenantID, value.Obj
 		_, e = tx.Exec(ctx, `INSERT INTO manual_resolutions
 (id,tenant_id,unmatched_id,event_id,target_route_id,candidate_set_version,idempotency_key,request_hash,requested_by,
  accept_shortfall,accept_late_payment,accept_cross_asset,human_reason,status,created_at,updated_at,next_attempt_at,version)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'approval_required',$14,$14,$14,1)`, value.ID, s.TenantID, value.ResourceID, eventID, payload.TargetRouteID, candidateSetVersion, key, hash, p.UserID, payload.AcceptShortfall, payload.AcceptLate, payload.AcceptCrossAsset, value.Reason, value.CreatedAt)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'verification_requested',$14,$14,$14,1)`, value.ID, s.TenantID, value.ResourceID, eventID, payload.TargetRouteID, candidateSetVersion, key, hash, p.UserID, payload.AcceptShortfall, payload.AcceptLate, payload.AcceptCrossAsset, value.Reason, value.CreatedAt)
 		if e != nil {
 			return e
 		}
-		tag, e := tx.Exec(ctx, `UPDATE unmatched_payments SET selected_route_id=$1,status='approval_required',accepted_shortfall=$2,
+		tag, e := tx.Exec(ctx, `UPDATE unmatched_payments SET selected_route_id=$1,status='verification_requested',accepted_shortfall=$2,
 accepted_late_payment=$3,accepted_cross_asset=$4,assigned_operator_id=$5,updated_at=$6,version=version+1
 WHERE id=$7 AND tenant_id=$8 AND version=$9`, payload.TargetRouteID, payload.AcceptShortfall, payload.AcceptLate, payload.AcceptCrossAsset, p.UserID, value.CreatedAt, value.ResourceID, s.TenantID, value.ObjectVersion)
 		if e != nil {
@@ -1188,15 +1188,13 @@ WHERE id=$7 AND tenant_id=$8 AND version=$9`, payload.TargetRouteID, payload.Acc
 		if tag.RowsAffected() != 1 {
 			return ErrConflict
 		}
-		_, e = tx.Exec(ctx, `INSERT INTO admin_action_requests(id,tenant_id,merchant_id,kind,core_resolution_id,resource_type,resource_id,object_version,requested_by,request_reason,payload,payload_hash,status,requires_step_up,created_at,expires_at) VALUES($1,$2,NULLIF($3,'')::uuid,$4,$1,$5,$6,$7,$8,$9,$10,$11,'pending_approval',$12,$13,$14)`, value.ID, s.TenantID, s.MerchantID, value.Kind, value.ResourceType, value.ResourceID, value.ObjectVersion, p.UserID, value.Reason, value.Payload, payloadHash, value.RequiresStepUp, value.CreatedAt, value.ExpiresAt)
-		if e != nil {
-			return e
-		}
 		result = value
+		result.Status = "executing"
+		result.RequiresStepUp = false
 		if e := writeAdminIdempotency(ctx, tx, s.TenantID, p.UserID, "action."+value.Kind, key, hash, result); e != nil {
 			return e
 		}
-		return r.appendAuditTx(ctx, tx, AuditEntry{TenantID: s.TenantID, MerchantID: s.MerchantID, ActorUserID: p.UserID, SessionID: p.SessionID, Action: value.Kind + ".requested", ResourceType: value.ResourceType, ResourceID: value.ResourceID, RequestID: key, Reason: value.Reason, AfterDigest: payloadHash, Details: json.RawMessage(`{"approval_required":true}`), OccurredAt: value.CreatedAt})
+		return r.appendAuditTx(ctx, tx, AuditEntry{TenantID: s.TenantID, MerchantID: s.MerchantID, ActorUserID: p.UserID, SessionID: p.SessionID, Action: value.Kind + ".verification_requested", ResourceType: value.ResourceType, ResourceID: value.ResourceID, RequestID: key, Reason: value.Reason, AfterDigest: payloadHash, Details: json.RawMessage(`{"approval_required":false,"verification_requested":true}`), OccurredAt: value.CreatedAt})
 	})
 	return result, classifyAdminDB(err)
 }

@@ -91,10 +91,10 @@ paths.
 
 An unmatched case follows `new → candidates_ready → bound →
 verification_requested → verified → resolved`, with explicit
-`approval_required`, `verification_retry`, `conflict`, and `reorged` branches.
-Shortfall and cross-asset overrides require a second operator. Verification
-reloads stored evidence and the chain; an operator cannot enter a credited
-amount manually.
+`verification_retry`, `conflict`, and `reorged` branches. One authenticated
+operator selects the order and any explicit shortfall, late, or cross-asset
+exception. Verification reloads stored evidence and the chain before crediting;
+an operator cannot enter a credited amount manually.
 
 ### Transfer binding and top-ups
 

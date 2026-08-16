@@ -21,7 +21,7 @@ if (!unmatchedUrl) {
     await expect(page.locator('[data-testid="ai-resolve"]')).toHaveCount(0);
   });
 
-  test("manual cross-asset or shortfall resolution requires reason and second approval", async ({ page }) => {
+  test("manual cross-asset or shortfall resolution requires a reason then starts verification", async ({ page }) => {
     await preferReducedMotion(page);
     await page.goto(unmatchedUrl, { waitUntil: "domcontentloaded" });
     await page.locator('[data-testid="unmatched-case"]').first().click();
@@ -31,7 +31,8 @@ if (!unmatchedUrl) {
     await page.locator('[data-testid="resolution-reason"]').fill("Verified customer claim and chain evidence");
     await expect(submit).toBeEnabled();
     await submit.click();
-    await expect(page.locator('[data-testid="resolution-status"]')).toContainText(/approval/i);
+    await expect(page.locator('[data-testid="resolution-status"]')).toContainText(/verification in progress/i);
+    await expect(page.locator('[data-testid="resolution-status"]')).not.toContainText(/approval/i);
     await expect(page.locator('[data-testid="resolution-status"]')).not.toContainText(/^resolved$/i);
   });
 }

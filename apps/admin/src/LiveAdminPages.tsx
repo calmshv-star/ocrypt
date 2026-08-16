@@ -448,8 +448,8 @@ export function LiveUnmatchedPage() {
       resolutionKey.current = newIdempotencyKey();
       setNotice("success");
       await queryClient.invalidateQueries({ queryKey: ["admin", "unmatched"] });
-    } catch (error) {
-      setNotice(isStepUpError(error) ? "stepup" : "failure");
+    } catch {
+      setNotice("failure");
     } finally {
       setBusy(false);
     }
@@ -466,13 +466,13 @@ export function LiveUnmatchedPage() {
       await admin.client!.hideUnmatched(admin.scope as AdminScope, item.id, { version: item.version, reason: "Hidden by operator without order attribution", idempotency_key: idempotencyKey });
       hideKeys.current.delete(item.id);
       await queryClient.invalidateQueries({ queryKey: ["admin", "unmatched"] });
-    } catch (error) {
+    } catch {
       setHiddenIds((current) => {
         const next = new Set(current);
         next.delete(item.id);
         return next;
       });
-      setNotice(isStepUpError(error) ? "stepup" : "failure");
+      setNotice("failure");
     } finally {
       setHidingId("");
     }
@@ -492,7 +492,7 @@ export function LiveUnmatchedPage() {
           {requiresLate && <label className="admin-unmatched-confirm"><input checked={acceptLate} onChange={(event) => setAcceptLate(event.target.checked)} type="checkbox" /><span>{t("admin.acceptLate")}</span></label>}
           {requiresCrossAsset && <label className="admin-unmatched-confirm"><input checked={acceptCrossAsset} onChange={(event) => setAcceptCrossAsset(event.target.checked)} type="checkbox" /><span>{t("admin.acceptCrossAsset")}</span></label>}
           {notice === "success" ? <div aria-live="polite" className="admin-unmatched-success" role="status"><CheckCircle2 aria-hidden="true" size={18}/><span><strong>{t("admin.requestCreated")}</strong><small>{t("admin.secondOperator")}</small></span></div> : <div className="admin-live-actions">{admin.can("resolution:request") && <Button data-testid="request-resolution" disabled={busy || !selectedCandidate || !exceptionConfirmed} onClick={() => void requestResolution()}>{t("unmatched.requestResolution")}</Button>}</div>}
-          {notice && notice !== "success" && <div aria-live="polite" className={`admin-live-notice is-${notice}`} role={notice === "failure" ? "alert" : "status"}>{t(notice === "stepup" ? "admin.stepUpBody" : "admin.mutationFailed")}{notice === "stepup" && <a href={admin.client?.stepUpURL(currentReturnPath())}>{t("admin.stepUp")}</a>}</div>}
+          {notice && notice !== "success" && <div aria-live="polite" className="admin-live-notice is-failure" role="alert">{t("admin.mutationFailed")}</div>}
           <details className="admin-unmatched-technical"><summary>{t("common.details")}</summary><dl><div><dt>{t("admin.transaction")}</dt><dd><code>{short(selected.transaction_id, 18, 14)}</code></dd></div><div><dt>{t("admin.identifier")}</dt><dd><code>{short(selected.event_id)}</code></dd></div></dl></details>
         </SectionCard>}
       </div>}

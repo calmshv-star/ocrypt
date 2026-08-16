@@ -66,8 +66,8 @@
 2. 按链、合约/mint、收款方、transfer 机制、decimals、时间和 route 版本分组；
    检查地址池耗尽及 assignment 到期。
 3. 至少使用两个独立 RPC 和智能合约/交易所提现夹具验证标准化。截图不是 proof。
-4. 向前修复 parser/route，并重放到对比存储。人工 resolution 必须双人控制；
-   入账前必须证明幂等性及 transfer 唯一性。
+4. 向前修复 parser/route，并重放到对比存储。当前授权操作员可以发起人工 resolution，无需第二名操作员；
+   系统仍必须在入账前验证独立节点仲裁、finality、幂等性和唯一转账身份。
 
 ## 凭据或密钥泄露
 

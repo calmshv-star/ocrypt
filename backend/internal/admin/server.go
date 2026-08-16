@@ -929,7 +929,7 @@ func (s *Server) requestResolution(w http.ResponseWriter, request *http.Request)
 		return
 	}
 	payload, _ := json.Marshal(map[string]any{"target_route_id": input.TargetRouteID, "accept_shortfall": input.AcceptShortfall, "accept_late_payment": input.AcceptLate, "accept_cross_asset": input.AcceptCrossAsset})
-	value, err := s.service.RequestAction(request.Context(), auth.Principal, scope, PermissionResolutionRequest, "manual_resolution", "unmatched_payment", request.PathValue("id"), input.Version, input.Reason, input.IdempotencyKey, payload, true)
+	value, err := s.service.RequestAction(request.Context(), auth.Principal, scope, PermissionResolutionRequest, "manual_resolution", "unmatched_payment", request.PathValue("id"), input.Version, input.Reason, input.IdempotencyKey, payload, false)
 	if err != nil {
 		respond[ActionRequest](w, ActionRequest{}, err)
 		return
@@ -1018,7 +1018,7 @@ func (s *Server) requestProviderPause(w http.ResponseWriter, request *http.Reque
 		return
 	}
 	payload, _ := json.Marshal(map[string]any{"provider_id": request.PathValue("id"), "operation": "pause"})
-	value, err := s.service.RequestAction(request.Context(), auth.Principal, scope, PermissionInfrastructureEdit, "provider_pause", "rpc_provider", request.PathValue("id"), input.Version, input.Reason, input.IdempotencyKey, payload, true)
+	value, err := s.service.RequestAction(request.Context(), auth.Principal, scope, PermissionInfrastructureEdit, "provider_pause", "rpc_provider", request.PathValue("id"), input.Version, input.Reason, input.IdempotencyKey, payload, false)
 	if err != nil {
 		respond[ActionRequest](w, ActionRequest{}, err)
 		return

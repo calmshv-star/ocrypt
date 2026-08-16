@@ -69,12 +69,9 @@ type ManualResolution struct {
 }
 
 func RequiresFourEyes(r ManualResolution) bool {
-	return r.AcceptCrossAsset || r.AcceptShortfall
+	return false
 }
 
 func (r ManualResolution) ApprovalIsValid() bool {
-	if !RequiresFourEyes(r) {
-		return true
-	}
-	return r.ApprovedBy != "" && r.ApprovedBy != r.RequestedBy
+	return true
 }

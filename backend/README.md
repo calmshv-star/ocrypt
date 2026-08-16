@@ -22,7 +22,7 @@ their own orders after consuming an authenticated `payment.settled` event.
 - PostgreSQL 18 schema with RLS, deferred ledger checks, leaseable jobs, inbox/outbox,
   immutable event identity, and overlapping-reservation exclusion;
 - strict `net/http` API handlers and an OpenAPI 3.1 contract.
-- deterministic unmatched candidates, four-eyes manual resolutions, and
+- deterministic unmatched candidates, single-operator manual decisions, and
   independent provider-quorum verification before a manual financial mutation;
 - optional advisory-only OpenAI-compatible candidate ranking with an exact
   hostname allowlist, DNS/IP pinning, and immutable suggestion audit rows;
@@ -132,7 +132,12 @@ leases left by a process crash. Relevant role configuration is:
   `OUTBOX_PUBLISH_TOKEN_FILE`, while JetStream uses only the file/TLS/stream
   settings enumerated in `deploy/runtime-contracts.json`;
 - resolutions: `VERIFIER_CHAIN_ID`, `VERIFIER_PROVIDER_URLS`,
-  `VERIFIER_QUORUM`, and optional `VERIFIER_PROVIDER_TOKEN`;
+  `VERIFIER_QUORUM`, and optional `VERIFIER_PROVIDER_TOKEN`. A resolution
+  worker claims only transfer events for its exact `VERIFIER_CHAIN_ID`; run one
+  independently configured worker for every deposit-enabled chain. This keeps
+  a Solana, TON or Tron payment out of an Ethereum verifier while preserving
+  automatic provider-quorum verification after the current operator requests
+  the credit;
 - proofs: `PROOF_VERIFIER_CHAIN_ID`, `PROOF_VERIFIER_PROVIDER_URLS`,
   `PROOF_VERIFIER_QUORUM`, and optional `PROOF_VERIFIER_PROVIDER_TOKEN`. Set
   `PROOF_VERIFIER_DATABASE_ONLY=true` when persistent chain scanners already

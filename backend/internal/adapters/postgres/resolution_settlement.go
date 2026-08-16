@@ -29,7 +29,7 @@ type manualSettlementContext struct {
 }
 
 // ApplyVerifiedResolution is a serializable, lease-fenced financial boundary.
-// It rechecks the independently fetched transfer, exception approvals, route,
+// It rechecks the independently fetched transfer, operator exception choices, route,
 // finality and current state before posting a balanced settlement. AI ranking
 // is intentionally absent from this method and cannot authorize it.
 func (s *Store) ApplyVerifiedResolution(ctx context.Context, resolution domain.ManualResolution, verified domain.TransferEvent) error {
@@ -43,9 +43,6 @@ func (s *Store) ApplyVerifiedResolution(ctx context.Context, resolution domain.M
 		}
 		if stored.RequestedBy != resolution.RequestedBy || stored.ApprovedBy != resolution.ApprovedBy || stored.TargetRouteID != resolution.TargetRouteID || stored.TransferEventID != resolution.TransferEventID || stored.CandidateSetVersion != resolution.CandidateSetVersion || stored.AcceptShortfall != resolution.AcceptShortfall || stored.AcceptLatePayment != resolution.AcceptLatePayment || stored.AcceptCrossAsset != resolution.AcceptCrossAsset || stored.Reason != resolution.Reason {
 			return fmt.Errorf("%w: claimed resolution facts changed", domain.ErrInvariantViolation)
-		}
-		if !stored.ApprovalIsValid() {
-			return fmt.Errorf("%w: independent four-eyes approval is required", domain.ErrValidation)
 		}
 		expectedKey, _ := expected.Identity.Key()
 		verifiedKey, err := verified.Identity.Key()

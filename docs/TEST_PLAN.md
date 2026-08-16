@@ -84,7 +84,8 @@ pnpm --filter @merchant/qa test:e2e
 The Playwright suite checks all locales, document language, accessible names,
 keyboard focus, live payment status, exact copy values, copy controls,
 responsive overflow, 200% zoom, reduced-motion emulation, automated axe
-findings, and the two-person manual-resolution path for cross-asset cases.
+findings, and the single-operator manual-resolution path with independent
+on-chain verification for cross-asset cases.
 
 ## 3. Required fixtures
 
@@ -143,7 +144,8 @@ count, and consumer inbox count—not only HTTP responses.
 - SSRF callback targets: loopback, link-local, RFC1918, redirect-to-private,
   DNS rebinding, non-HTTPS, disallowed port.
 - Cross-tenant resource IDs and pagination cursors.
-- Scope/RBAC/four-eyes violations for resolution, refund, keys and asset pause.
+- Scope/RBAC/idempotency violations for resolution, plus four-eyes violations
+  for refund, keys and asset pause.
 - Log/audit redaction for secrets, auth headers, wallet material and private
   metadata.
 - Webhook event ID collision with a different digest returns conflict and emits

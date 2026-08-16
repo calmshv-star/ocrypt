@@ -14,8 +14,9 @@
    mark a payment paid, or retry callbacks with ad-hoc SQL.
 5. Take timestamped snapshots of health, readiness, deployment events, sanitized
    logs, queue age/counts, provider heads, database health, and recent releases.
-6. Require two-person review for customer-balance or entitlement changes. Maintain
-   an append-only list of affected IDs in restricted storage and reconcile it later.
+6. Require an authorized current operator, immutable audit evidence, idempotency,
+   and independent source verification for customer-balance changes. Maintain an
+   append-only list of affected IDs in restricted storage and reconcile it later.
 7. Close only after backlog recovery, invariant checks, customer remediation,
    alarm validation, evidence retention, and an assigned corrective-action owner.
 
@@ -86,9 +87,10 @@ The scanner is not release-ready today. These controls apply when it is enabled.
    version. Check address-pool exhaustion and assignment expiry.
 3. Verify node normalization against at least two independent providers and known
    fixtures for smart-contract and exchange withdrawals. Reject screenshots as proof.
-4. Repair parsers/routes forward, replay into comparison storage, and require dual
-   control for every manual resolution. Idempotency and unique transfer identity
-   must be proven before applying a credit.
+4. Repair parsers/routes forward and replay into comparison storage. A current
+   operator may request a manual resolution without a second operator; the system
+   must still prove provider quorum, finality, idempotency and unique transfer
+   identity before applying a credit.
 
 ## Credential or key exposure
 

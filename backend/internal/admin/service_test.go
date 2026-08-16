@@ -247,7 +247,7 @@ func TestInvitationSessionIsInertOutsideInvitationAuthentication(t *testing.T) {
 	}
 }
 
-func TestFourEyesDeniesSelfApprovalAndRequiresStepUp(t *testing.T) {
+func TestLegacyApprovalDeniesSelfApprovalWithoutRepeatAuthentication(t *testing.T) {
 	now := time.Now().UTC()
 	tenant := "018f22b0-4db4-7c58-8f18-4d2f9d7b6a11"
 	until := now.Add(time.Minute)
@@ -260,8 +260,22 @@ func TestFourEyesDeniesSelfApprovalAndRequiresStepUp(t *testing.T) {
 	repo.action.RequestedBy = "018f22b0-4db4-7c58-8f18-4d2f9d7b6a23"
 	expired := now.Add(-time.Second)
 	principal.StepUpUntil = &expired
-	if _, err := service.DecideAction(context.Background(), principal, Scope{TenantID: tenant}, repo.action.ID, "approved", "verified evidence"); !errors.Is(err, ErrStepUpRequired) {
-		t.Fatalf("stale MFA was accepted: %v", err)
+	if value, err := service.DecideAction(context.Background(), principal, Scope{TenantID: tenant}, repo.action.ID, "approved", "verified evidence"); err != nil || value.Status != "approved" {
+		t.Fatalf("ordinary authenticated session was rejected: value=%#v err=%v", value, err)
+	}
+}
+
+func TestManualResolutionStartsVerificationWithoutStepUpOrApprover(t *testing.T) {
+	now := time.Now().UTC()
+	tenant := "018f22b0-4db4-7c58-8f18-4d2f9d7b6a11"
+	merchant := "018f22b0-4db4-7c58-8f18-4d2f9d7b6a12"
+	expired := now.Add(-time.Hour)
+	principal := Principal{UserID: "018f22b0-4db4-7c58-8f18-4d2f9d7b6a21", StepUpUntil: &expired, grants: []authorizationGrant{{Permission: PermissionResolutionRequest, Scope: Scope{TenantID: tenant, MerchantID: merchant}}}}
+	repo := &repositoryStub{}
+	service := testService(repo, now)
+	value, err := service.RequestAction(context.Background(), principal, Scope{TenantID: tenant, MerchantID: merchant}, PermissionResolutionRequest, "manual_resolution", "unmatched_payment", "018f22b0-4db4-7c58-8f18-4d2f9d7b6a31", 1, "operator selected matching order", "resolution-001", json.RawMessage(`{"target_route_id":"018f22b0-4db4-7c58-8f18-4d2f9d7b6a32"}`), true)
+	if err != nil || value.Status != "executing" || value.RequiresStepUp || value.ApprovedBy != "" {
+		t.Fatalf("manual resolution did not start directly: value=%#v err=%v", value, err)
 	}
 }
 

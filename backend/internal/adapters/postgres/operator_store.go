@@ -113,10 +113,6 @@ FOR UPDATE OF u,c`, cmd.UnmatchedID, cmd.TargetRouteID, cmd.Principal.TenantID, 
 		now := s.now()
 		status := domain.UnmatchedVerificationRequested
 		resolution = domain.ManualResolution{ID: resolutionID, UnmatchedPaymentID: cmd.UnmatchedID, TransferEventID: eventID, TargetRouteID: cmd.TargetRouteID, CandidateSetVersion: candidateSetVersion, IdempotencyKey: cmd.IdempotencyKey, RequestedBy: cmd.Principal.ActorID, AcceptShortfall: cmd.AcceptShortfall, AcceptLatePayment: cmd.AcceptLatePayment, AcceptCrossAsset: cmd.AcceptCrossAsset, Reason: cmd.Reason, Status: status, CreatedAt: now, Version: 1}
-		if domain.RequiresFourEyes(resolution) {
-			status = domain.UnmatchedApprovalRequired
-			resolution.Status = status
-		}
 		digest, decodeErr := hex.DecodeString(requestHash)
 		if decodeErr != nil || len(digest) != 32 {
 			return fmt.Errorf("invalid manual resolution request hash")

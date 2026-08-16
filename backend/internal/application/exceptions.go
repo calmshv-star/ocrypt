@@ -149,20 +149,21 @@ type ResolutionJob struct {
 
 type ResolutionQueueStore interface {
 	ResolutionStore
-	ClaimResolutions(context.Context, string, time.Time, time.Duration, int) ([]ResolutionJob, error)
+	ClaimResolutions(context.Context, string, string, time.Time, time.Duration, int) ([]ResolutionJob, error)
 	RetryResolution(context.Context, domain.ManualResolution, time.Time, string, bool) error
 }
 
 type ResolutionWorker struct {
 	Verifier IndependentVerifier
 	Store    ResolutionQueueStore
+	ChainID  string
 	Clock    func() time.Time
 	Lease    time.Duration
 	Limit    int
 }
 
 func (w ResolutionWorker) RunBatch(ctx context.Context, workerID string, limit int) (int, error) {
-	if w.Verifier == nil || w.Store == nil || workerID == "" || limit < 1 || limit > 100 {
+	if w.Verifier == nil || w.Store == nil || workerID == "" || w.ChainID == "" || limit < 1 || limit > 100 {
 		return 0, errors.New("invalid resolution worker configuration")
 	}
 	now := time.Now().UTC()
@@ -173,7 +174,7 @@ func (w ResolutionWorker) RunBatch(ctx context.Context, workerID string, limit i
 	if lease <= 0 {
 		lease = 30 * time.Second
 	}
-	jobs, err := w.Store.ClaimResolutions(ctx, workerID, now, lease, limit)
+	jobs, err := w.Store.ClaimResolutions(ctx, workerID, w.ChainID, now, lease, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -211,8 +212,8 @@ func NewResolutionService(v IndependentVerifier, s ResolutionStore) *ResolutionS
 	return &ResolutionService{verifier: v, store: s}
 }
 func (s *ResolutionService) Resolve(ctx context.Context, resolution domain.ManualResolution, expected domain.TransferEvent) error {
-	if resolution.Reason == "" || !resolution.ApprovalIsValid() {
-		return fmt.Errorf("%w: valid reason and independent approval are required", domain.ErrValidation)
+	if resolution.Reason == "" {
+		return fmt.Errorf("%w: a valid operator reason is required", domain.ErrValidation)
 	}
 	var verified domain.TransferEvent
 	var err error

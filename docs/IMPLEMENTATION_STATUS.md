@@ -12,7 +12,7 @@ evidence from the exact environment and network set being enabled.
   reorg compensation, signed callback delivery, event history, and scanner
   cursor/lease machinery.
 - Operator unmatched-payment models, deterministic candidate evidence,
-  four-eyes resolution workflow, independent verification boundary, and
+  single-operator resolution workflow, independent verification boundary, and
   advisory-only AI ranking contracts.
 - Responsive admin, landing, and hosted checkout applications with English,
   Simplified Chinese, Spanish, French, German, and Russian catalogs.

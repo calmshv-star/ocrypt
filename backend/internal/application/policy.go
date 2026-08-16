@@ -57,7 +57,7 @@ func AssessException(event domain.TransferEvent, route domain.PaymentRoute, now 
 	}
 	if route.AssetID != event.Identity.AssetID {
 		assessment.Class = ExceptionWrongAsset
-		assessment.ReasonCodes = []string{"wrong_asset", "conversion_quote_required", "four_eyes_required"}
+		assessment.ReasonCodes = []string{"wrong_asset", "conversion_quote_required", "operator_confirmation_required"}
 		return assessment, nil
 	}
 	cmp := event.Amount.Cmp(route.ExpectedAmount)

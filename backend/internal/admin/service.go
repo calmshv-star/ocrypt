@@ -276,7 +276,7 @@ func (s *Service) Authenticate(ctx context.Context, rawSession string) (AuthResu
 		return AuthResult{}, ErrUnauthenticated
 	}
 	session.LastSeenAt, session.IdleExpiresAt = now, idleExpiry
-	return AuthResult{Principal: PrincipalFor(identity, session), Session: session, MFAAt: sessionMFAAt(session, s.config.StepUpTTL)}, nil
+	return s.operationalAuthResult(identity, session, now), nil
 }
 
 // AuthenticateInvitation accepts only the inert, invitation-bound capability.
@@ -299,14 +299,21 @@ func (s *Service) AuthenticateInvitation(ctx context.Context, rawSession string)
 		return AuthResult{}, ErrUnauthenticated
 	}
 	session.LastSeenAt, session.IdleExpiresAt = now, idleExpiry
-	return AuthResult{Principal: PrincipalFor(identity, session), Session: session, MFAAt: sessionMFAAt(session, s.config.StepUpTTL)}, nil
+	return s.operationalAuthResult(identity, session, now), nil
 }
 
-func sessionMFAAt(session Session, ttl time.Duration) time.Time {
-	if session.StepUpUntil == nil || ttl <= 0 {
-		return time.Time{}
+// operationalAuthResult treats an already authenticated, active browser
+// session as the complete operator authentication context. Downstream private
+// APIs still receive short-lived signed freshness claims for replay resistance,
+// but the operator is never sent through a second interactive login ceremony.
+func (s *Service) operationalAuthResult(identity Identity, session Session, now time.Time) AuthResult {
+	until := now.Add(s.config.StepUpTTL)
+	if until.After(session.AbsoluteExpiresAt) {
+		until = session.AbsoluteExpiresAt
 	}
-	return session.StepUpUntil.Add(-ttl).UTC()
+	principal := PrincipalFor(identity, session)
+	principal.StepUpUntil = &until
+	return AuthResult{Principal: principal, Session: session, MFAAt: now}
 }
 
 func (s *Service) VerifyCSRF(authenticated AuthResult, rawCSRF string) error {
@@ -332,9 +339,6 @@ func (s *Service) ReplaceWatchWalletAddress(ctx context.Context, principal Princ
 	if err != nil {
 		return FinancialSettingsWallet{}, err
 	}
-	if err = principal.RequireStepUp(s.now(), s.config.RequiredACR, s.config.AcceptedAMR); err != nil {
-		return FinancialSettingsWallet{}, err
-	}
 	if !ids.Valid(walletID) || !ids.Valid(input.AddressID) || input.ChainID == "" || input.ExpectedVersion < 1 || len(input.CanonicalAddress) < 8 || len(input.CanonicalAddress) > 256 || len(input.DisplayAddress) < 8 || len(input.DisplayAddress) > 256 || strings.TrimSpace(input.Reason) == "" || len(input.Reason) > 1000 || len(input.IdempotencyKey) < 8 || len(input.IdempotencyKey) > 255 {
 		return FinancialSettingsWallet{}, ErrInvalid
 	}
@@ -344,9 +348,6 @@ func (s *Service) ReplaceWatchWalletAddress(ctx context.Context, principal Princ
 func (s *Service) CreateWatchWalletImportChallenge(principal Principal, scope Scope, domain, kind, address string, wallets []WatchWalletImportItem) (WatchWalletImportChallenge, error) {
 	_, err := principal.Authorize(PermissionInfrastructureEdit, scope)
 	if err != nil {
-		return WatchWalletImportChallenge{}, err
-	}
-	if err = principal.RequireStepUp(s.now(), s.config.RequiredACR, s.config.AcceptedAMR); err != nil {
 		return WatchWalletImportChallenge{}, err
 	}
 	canonical, normalized, err := normalizeWalletImport(kind, address, wallets)
@@ -378,9 +379,6 @@ func (s *Service) CreateWatchWalletImportChallenge(principal Principal, scope Sc
 func (s *Service) ImportWatchWallets(ctx context.Context, principal Principal, scope Scope, domain string, input WatchWalletImport) (WatchWalletImportResult, error) {
 	resolved, err := principal.Authorize(PermissionInfrastructureEdit, scope)
 	if err != nil {
-		return WatchWalletImportResult{}, err
-	}
-	if err = principal.RequireStepUp(s.now(), s.config.RequiredACR, s.config.AcceptedAMR); err != nil {
 		return WatchWalletImportResult{}, err
 	}
 	sealedChallenge, err := s.openWalletImportChallenge(input.Challenge.Token)
@@ -453,15 +451,10 @@ func (s *Service) Logout(ctx context.Context, authenticated AuthResult) error {
 	return s.repository.AppendAudit(ctx, AuditEntry{ActorUserID: authenticated.Principal.UserID, SessionID: authenticated.Session.ID, Action: "admin.session.revoked", ResourceType: "admin_session", ResourceID: authenticated.Session.ID, RequestID: authenticated.Session.ID, Reason: "user logout", Details: json.RawMessage(`{}`), OccurredAt: now})
 }
 
-func (s *Service) RequestAction(ctx context.Context, principal Principal, scope Scope, permission Permission, kind, resourceType, resourceID string, objectVersion int64, reason, idempotencyKey string, payload json.RawMessage, requireStepUp bool) (ActionRequest, error) {
+func (s *Service) RequestAction(ctx context.Context, principal Principal, scope Scope, permission Permission, kind, resourceType, resourceID string, objectVersion int64, reason, idempotencyKey string, payload json.RawMessage, _ bool) (ActionRequest, error) {
 	resolved, err := principal.Authorize(permission, scope)
 	if err != nil {
 		return ActionRequest{}, err
-	}
-	if requireStepUp {
-		if err := principal.RequireStepUp(s.now(), s.config.RequiredACR, s.config.AcceptedAMR); err != nil {
-			return ActionRequest{}, err
-		}
 	}
 	if strings.TrimSpace(reason) == "" || len(reason) > 1000 || len(idempotencyKey) < 8 || len(idempotencyKey) > 255 || objectVersion < 1 || resourceID == "" || !json.Valid(payload) {
 		return ActionRequest{}, ErrInvalid
@@ -471,7 +464,11 @@ func (s *Service) RequestAction(ctx context.Context, principal Principal, scope 
 		return ActionRequest{}, err
 	}
 	now := s.now()
-	request := ActionRequest{ID: id, TenantID: resolved.TenantID, MerchantID: resolved.MerchantID, Kind: kind, ResourceType: resourceType, ResourceID: resourceID, ObjectVersion: objectVersion, RequestedBy: principal.UserID, Reason: reason, Payload: append(json.RawMessage(nil), payload...), Status: "pending_approval", RequiresStepUp: requireStepUp, CreatedAt: now, ExpiresAt: now.Add(30 * time.Minute)}
+	status := "pending_approval"
+	if kind == "manual_resolution" {
+		status = "executing"
+	}
+	request := ActionRequest{ID: id, TenantID: resolved.TenantID, MerchantID: resolved.MerchantID, Kind: kind, ResourceType: resourceType, ResourceID: resourceID, ObjectVersion: objectVersion, RequestedBy: principal.UserID, Reason: reason, Payload: append(json.RawMessage(nil), payload...), Status: status, RequiresStepUp: false, CreatedAt: now, ExpiresAt: now.Add(30 * time.Minute)}
 	return s.repository.CreateActionRequest(ctx, principal, resolved, request, idempotencyKey)
 }
 
@@ -492,9 +489,6 @@ func (s *Service) DecideAction(ctx context.Context, principal Principal, scope S
 	}
 	resolved, err := principal.Authorize(permission, scope)
 	if err != nil {
-		return ActionRequest{}, err
-	}
-	if err := principal.RequireStepUp(s.now(), s.config.RequiredACR, s.config.AcceptedAMR); err != nil {
 		return ActionRequest{}, err
 	}
 	if request.RequestedBy == principal.UserID {

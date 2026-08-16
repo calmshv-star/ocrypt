@@ -30,6 +30,35 @@ func TestAdminMigrationContainsSecurityInvariants(t *testing.T) {
 	}
 }
 
+func TestSingleOperatorManualResolutionMigrationQueuesVerification(t *testing.T) {
+	raw, err := os.ReadFile("../../migrations/000049_single_operator_manual_resolution.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	for _, fragment := range []string{
+		"DROP CONSTRAINT IF EXISTS manual_resolution_distinct_actors",
+		"status = 'verification_requested'",
+		"next_attempt_at = clock_timestamp()",
+		"Second-operator approval removed; automatic verification queued.",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("single-operator migration missing %q", fragment)
+		}
+	}
+	repository, err := os.ReadFile("postgres.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(repository)
+	if !strings.Contains(source, `'verification_requested'`) || !strings.Contains(source, `"approval_required":false`) {
+		t.Fatal("admin resolution does not queue independent verification directly")
+	}
+	if strings.Contains(source, `INSERT INTO admin_action_requests(id,tenant_id,merchant_id,kind,core_resolution_id`) {
+		t.Fatal("manual payment flow still creates a second-operator action request")
+	}
+}
+
 func TestIdempotencySerializesFirstUseAndRetriesSerialization(t *testing.T) {
 	raw, err := os.ReadFile("postgres.go")
 	if err != nil {

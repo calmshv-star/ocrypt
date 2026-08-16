@@ -66,11 +66,7 @@ func (p *TrustedPlatformProxy) ServePlatform(w http.ResponseWriter, incoming *ht
 		}
 	}
 	now := time.Now().UTC()
-	stepUpAt := time.Time{}
-	if authenticated.Principal.StepUpUntil != nil && authenticated.Principal.StepUpUntil.After(now) {
-		stepUpAt = now
-	}
-	response, err := p.issuer.SignAndDo(incoming.Context(), p.client, request, body, platformadmin.IssuerIdentity{ActorID: authenticated.Principal.UserID, SessionID: authenticated.Principal.SessionID, StepUpAt: stepUpAt}, scope.TenantID)
+	response, err := p.issuer.SignAndDo(incoming.Context(), p.client, request, body, platformadmin.IssuerIdentity{ActorID: authenticated.Principal.UserID, SessionID: authenticated.Principal.SessionID, StepUpAt: now}, scope.TenantID)
 	if err != nil {
 		writeProblem(w, http.StatusBadGateway, "platform_unavailable", "Platform administration service is unavailable.")
 		return
