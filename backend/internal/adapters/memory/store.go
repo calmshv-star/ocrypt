@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/application"
+	"github.com/calmshv-star/ocrypt/backend/internal/chains"
 	"github.com/calmshv-star/ocrypt/backend/internal/checkout"
 	"github.com/calmshv-star/ocrypt/backend/internal/domain"
 	"github.com/calmshv-star/ocrypt/backend/internal/ids"
@@ -216,7 +217,7 @@ func (s *Store) GetCheckoutSession(_ context.Context, tokenHash [32]byte) (domai
 	}
 	session := domain.CheckoutSession{IntentID: intent.ID, OrderID: intent.MerchantOrderID, Status: domain.CheckoutStatusForIntent(intent.Status, intent.ExpiresAt, s.now()), ExpiresAt: intent.ExpiresAt, Version: intent.Version, Routes: make([]domain.CheckoutRoute, 0, len(intent.Routes))}
 	for _, route := range intent.Routes {
-		session.Routes = append(session.Routes, domain.CheckoutRoute{ID: route.ID, Network: route.ChainID, Asset: route.AssetID, Amount: route.DisplayAmount, Address: route.Address})
+		session.Routes = append(session.Routes, domain.CheckoutRoute{ID: route.ID, Network: route.ChainID, Asset: route.AssetID, Amount: route.DisplayAmount, Address: chains.DisplayAddress(route.ChainID, route.Address)})
 		if route.Status == domain.RouteSettled {
 			session.SelectedRouteID = route.ID
 		}

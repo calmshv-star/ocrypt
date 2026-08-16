@@ -12,6 +12,7 @@ import (
 
 	corepostgres "github.com/calmshv-star/ocrypt/backend/internal/adapters/postgres"
 	"github.com/calmshv-star/ocrypt/backend/internal/application"
+	"github.com/calmshv-star/ocrypt/backend/internal/chains"
 	"github.com/calmshv-star/ocrypt/backend/internal/domain"
 	"github.com/calmshv-star/ocrypt/backend/internal/ids"
 	"github.com/calmshv-star/ocrypt/backend/internal/money"
@@ -170,7 +171,7 @@ func (s *PostgresRepository) RedeemPaymentLink(ctx context.Context, linkHash [32
 		if !hostedPreparing {
 			session.Status = "pending"
 			session.SelectedRouteID = route.ID
-			session.Routes = []CheckoutRoute{{ID: route.ID, Provider: route.Provider, ProviderID: route.ProviderID, Network: route.ChainID, Asset: route.AssetID, Amount: route.DisplayAmount, Address: route.Address, PaymentURL: route.PaymentURL}}
+			session.Routes = []CheckoutRoute{{ID: route.ID, Provider: route.Provider, ProviderID: route.ProviderID, Network: route.ChainID, Asset: route.AssetID, Amount: route.DisplayAmount, Address: chains.DisplayAddress(route.ChainID, route.Address), PaymentURL: route.PaymentURL}}
 			session.Version = 2
 		}
 		result = PaymentLinkRedemption{IntentID: intentID, Checkout: CheckoutIssue{Token: checkoutToken, URL: checkoutURL, ExpiresAt: expires}, Session: session, SuccessURL: successURL, CancelURL: cancelURL}
