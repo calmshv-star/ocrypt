@@ -131,13 +131,11 @@ leases left by a process crash. Relevant role configuration is:
   `OUTBOX_MAX_RETRY_DELAY`; HTTPS requires `OUTBOX_PUBLISH_URL` plus
   `OUTBOX_PUBLISH_TOKEN_FILE`, while JetStream uses only the file/TLS/stream
   settings enumerated in `deploy/runtime-contracts.json`;
-- resolutions: `VERIFIER_CHAIN_ID`, `VERIFIER_PROVIDER_URLS`,
-  `VERIFIER_QUORUM`, and optional `VERIFIER_PROVIDER_TOKEN`. A resolution
-  worker claims only transfer events for its exact `VERIFIER_CHAIN_ID`; run one
-  independently configured worker for every deposit-enabled chain. This keeps
-  a Solana, TON or Tron payment out of an Ethereum verifier while preserving
-  automatic provider-quorum verification after the current operator requests
-  the credit;
+- resolutions: `RESOLUTION_CHAIN_ID`. A resolution worker claims only canonical
+  finalized scanner events for its exact chain; run one worker for every
+  deposit-enabled chain. The settlement transaction reloads the event and
+  checks its evidence, finality, route, asset, amount, exception flags and
+  duplicate-credit fence without repeating the scanner's provider requests;
 - proofs: `PROOF_VERIFIER_CHAIN_ID`, `PROOF_VERIFIER_PROVIDER_URLS`,
   `PROOF_VERIFIER_QUORUM`, and optional `PROOF_VERIFIER_PROVIDER_TOKEN`. Set
   `PROOF_VERIFIER_DATABASE_ONLY=true` when persistent chain scanners already

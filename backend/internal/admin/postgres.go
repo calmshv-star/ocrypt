@@ -1194,7 +1194,7 @@ WHERE id=$7 AND tenant_id=$8 AND version=$9`, payload.TargetRouteID, payload.Acc
 		if e := writeAdminIdempotency(ctx, tx, s.TenantID, p.UserID, "action."+value.Kind, key, hash, result); e != nil {
 			return e
 		}
-		return r.appendAuditTx(ctx, tx, AuditEntry{TenantID: s.TenantID, MerchantID: s.MerchantID, ActorUserID: p.UserID, SessionID: p.SessionID, Action: value.Kind + ".verification_requested", ResourceType: value.ResourceType, ResourceID: value.ResourceID, RequestID: key, Reason: value.Reason, AfterDigest: payloadHash, Details: json.RawMessage(`{"approval_required":false,"verification_requested":true}`), OccurredAt: value.CreatedAt})
+		return r.appendAuditTx(ctx, tx, AuditEntry{TenantID: s.TenantID, MerchantID: s.MerchantID, ActorUserID: p.UserID, SessionID: p.SessionID, Action: value.Kind + ".settlement_requested", ResourceType: value.ResourceType, ResourceID: value.ResourceID, RequestID: key, Reason: value.Reason, AfterDigest: payloadHash, Details: json.RawMessage(`{"approval_required":false,"scanner_event_finalized":true,"settlement_requested":true}`), OccurredAt: value.CreatedAt})
 	})
 	return result, classifyAdminDB(err)
 }

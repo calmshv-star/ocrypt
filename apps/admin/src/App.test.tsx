@@ -98,7 +98,7 @@ describe("admin application", () => {
     expect(screen.queryByRole("heading", { name: "Audit log" })).not.toBeInTheDocument();
   });
 
-  it("locks a submitted preview resolution while verification is in progress", async () => {
+  it("removes the credit action immediately after a preview resolution is submitted", async () => {
     renderApp("/unmatched", { preview: true });
     const reason = await screen.findByTestId("resolution-reason");
     const accept = screen.getByTestId("accept-cross-asset");
@@ -107,10 +107,11 @@ describe("admin application", () => {
     const request = screen.getByTestId("request-resolution");
     expect(request).toBeEnabled();
     fireEvent.click(request);
-    expect(await screen.findByTestId("resolution-status")).toHaveTextContent("Verification in progress");
+    expect(screen.queryByTestId("resolution-status")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Credit payment" })).not.toBeInTheDocument();
     expect(reason).toBeDisabled();
     expect(accept).toBeDisabled();
-    expect(request).toBeDisabled();
+    expect(request).not.toBeInTheDocument();
   });
 
   it("loads the authenticated scope and renders only real overview values in production", async () => {
@@ -265,7 +266,8 @@ describe("admin application", () => {
     fireEvent.click(screen.getByRole("button", { name: "Credit payment" }));
     await waitFor(() => expect(requestResolution).toHaveBeenCalledTimes(1));
     expect(requestResolution).toHaveBeenCalledWith({ tenantId, merchantId }, caseId, expect.objectContaining({ version: 8, target_route_id: routeId, reason: "Manual review: payment matched to order ORDER-1042", accept_shortfall: true, accept_late_payment: false, accept_cross_asset: false, idempotency_key: expect.stringMatching(/.{8,}/) }));
-    expect(screen.getByText("Ocrypt will verify the transaction and credit it automatically.")).toBeInTheDocument();
+    expect(screen.queryByText(/verify the transaction/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("9.5 USDT")).not.toBeInTheDocument();
   });
 
   it("hides an unmatched payment without assigning it to an order", async () => {

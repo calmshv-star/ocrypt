@@ -352,7 +352,7 @@ services:
     <<: *worker
     profiles: [verification]
     build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: worker}}
-    environment: {DATABASE_URL: "${RESOLUTION_DATABASE_URL:-}", VERIFIER_CHAIN_ID: "${VERIFIER_CHAIN_ID:-}", VERIFIER_PROVIDER_URLS: "${VERIFIER_PROVIDER_URLS:-}", VERIFIER_PROVIDER_TOKEN: "${VERIFIER_PROVIDER_TOKEN:-}", VERIFIER_QUORUM: "${VERIFIER_QUORUM:-2}", WORKER_ID: compose-resolution-1, WORKER_ROLES: resolutions, WORKER_HEALTH_ADDRESS: ":9090"}
+    environment: {DATABASE_URL: "${RESOLUTION_DATABASE_URL:-}", RESOLUTION_CHAIN_ID: "${RESOLUTION_CHAIN_ID:-}", WORKER_ID: compose-resolution-1, WORKER_ROLES: resolutions, WORKER_HEALTH_ADDRESS: ":9090"}
     networks: [data, edge]
   proof-worker:
     <<: *worker

@@ -413,7 +413,7 @@ export function LiveUnmatchedPage() {
   const [acceptShortfall, setAcceptShortfall] = useState(false);
   const [acceptLate, setAcceptLate] = useState(false);
   const [acceptCrossAsset, setAcceptCrossAsset] = useState(false);
-  const [notice, setNotice] = useState<"success" | "failure" | "stepup" | null>(null);
+  const [notice, setNotice] = useState<"failure" | null>(null);
   const [busy, setBusy] = useState(false);
   const [hidingId, setHidingId] = useState("");
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
@@ -446,7 +446,7 @@ export function LiveUnmatchedPage() {
     try {
       await admin.client!.requestResolution(admin.scope as AdminScope, selected.id, { version: selected.version, target_route_id: candidateId, reason: `Manual review: payment matched to order ${selectedCandidate.merchant_order_id}`, idempotency_key: resolutionKey.current, accept_shortfall: acceptShortfall, accept_late_payment: acceptLate, accept_cross_asset: acceptCrossAsset });
       resolutionKey.current = newIdempotencyKey();
-      setNotice("success");
+      setHiddenIds((current) => new Set(current).add(selected.id));
       await queryClient.invalidateQueries({ queryKey: ["admin", "unmatched"] });
     } catch {
       setNotice("failure");
@@ -491,8 +491,8 @@ export function LiveUnmatchedPage() {
           {requiresShortfall && <label className="admin-unmatched-confirm"><input checked={acceptShortfall} onChange={(event) => setAcceptShortfall(event.target.checked)} type="checkbox" /><span>{t("admin.acceptShortfall")}</span></label>}
           {requiresLate && <label className="admin-unmatched-confirm"><input checked={acceptLate} onChange={(event) => setAcceptLate(event.target.checked)} type="checkbox" /><span>{t("admin.acceptLate")}</span></label>}
           {requiresCrossAsset && <label className="admin-unmatched-confirm"><input checked={acceptCrossAsset} onChange={(event) => setAcceptCrossAsset(event.target.checked)} type="checkbox" /><span>{t("admin.acceptCrossAsset")}</span></label>}
-          {notice === "success" ? <div aria-live="polite" className="admin-unmatched-success" role="status"><CheckCircle2 aria-hidden="true" size={18}/><span><strong>{t("admin.requestCreated")}</strong><small>{t("admin.secondOperator")}</small></span></div> : <div className="admin-live-actions">{admin.can("resolution:request") && <Button data-testid="request-resolution" disabled={busy || !selectedCandidate || !exceptionConfirmed} onClick={() => void requestResolution()}>{t("unmatched.requestResolution")}</Button>}</div>}
-          {notice && notice !== "success" && <div aria-live="polite" className="admin-live-notice is-failure" role="alert">{t("admin.mutationFailed")}</div>}
+          <div className="admin-live-actions">{admin.can("resolution:request") && <Button data-testid="request-resolution" disabled={busy || !selectedCandidate || !exceptionConfirmed} onClick={() => void requestResolution()}>{t("unmatched.requestResolution")}</Button>}</div>
+          {notice && <div aria-live="polite" className="admin-live-notice is-failure" role="alert">{t("admin.mutationFailed")}</div>}
           <details className="admin-unmatched-technical"><summary>{t("common.details")}</summary><dl><div><dt>{t("admin.transaction")}</dt><dd><code>{short(selected.transaction_id, 18, 14)}</code></dd></div><div><dt>{t("admin.identifier")}</dt><dd><code>{short(selected.event_id)}</code></dd></div></dl></details>
         </SectionCard>}
       </div>}

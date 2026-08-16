@@ -28,11 +28,11 @@ type manualSettlementContext struct {
 	ExpiresAt, GraceEndsAt                                             time.Time
 }
 
-// ApplyVerifiedResolution is a serializable, lease-fenced financial boundary.
-// It rechecks the independently fetched transfer, operator exception choices, route,
-// finality and current state before posting a balanced settlement. AI ranking
-// is intentionally absent from this method and cannot authorize it.
-func (s *Store) ApplyVerifiedResolution(ctx context.Context, resolution domain.ManualResolution, verified domain.TransferEvent) error {
+// ApplyFinalizedResolution is a serializable, lease-fenced financial boundary.
+// It reloads the canonical scanner event and rechecks its evidence, the operator
+// exception choices, route, finality and current state before posting a balanced
+// settlement. AI ranking is intentionally absent and cannot authorize it.
+func (s *Store) ApplyFinalizedResolution(ctx context.Context, resolution domain.ManualResolution, verified domain.TransferEvent) error {
 	if !ids.Valid(resolution.ID) || !ids.Valid(resolution.ClaimToken) {
 		return fmt.Errorf("%w: resolution lease identity is invalid", domain.ErrValidation)
 	}
@@ -47,11 +47,11 @@ func (s *Store) ApplyVerifiedResolution(ctx context.Context, resolution domain.M
 		expectedKey, _ := expected.Identity.Key()
 		verifiedKey, err := verified.Identity.Key()
 		if err != nil || expectedKey != verifiedKey || verified.ID != expected.ID || verified.Kind != expected.Kind || verified.FromAddress != expected.FromAddress || verified.Amount.Cmp(expected.Amount) != 0 || verified.AssetDecimals != expected.AssetDecimals || verified.BlockHash != expected.BlockHash || verified.BlockHeight != expected.BlockHeight || !verified.OnChainTime.Equal(expected.OnChainTime) || verified.Status != domain.TransferFinalized || verified.EvidenceHash != expected.EvidenceHash {
-			return fmt.Errorf("%w: independent verification disagrees with canonical transfer", domain.ErrInvariantViolation)
+			return fmt.Errorf("%w: supplied scanner event disagrees with canonical transfer", domain.ErrInvariantViolation)
 		}
 		evidence, err := hex.DecodeString(verified.EvidenceHash)
 		if err != nil || len(evidence) != sha256.Size || hex.EncodeToString(evidence) != verified.EvidenceHash {
-			return fmt.Errorf("%w: verifier evidence must be lowercase SHA-256 hex", domain.ErrValidation)
+			return fmt.Errorf("%w: scanner evidence must be lowercase SHA-256 hex", domain.ErrValidation)
 		}
 		if verified.Confirmations < financial.RequiredFinality {
 			return fmt.Errorf("%w: transfer has not reached required finality", domain.ErrStateConflict)
@@ -89,7 +89,7 @@ func (s *Store) ApplyVerifiedResolution(ctx context.Context, resolution domain.M
 		if stored.AcceptCrossAsset {
 			kind = "cross_asset_override"
 		}
-		matchEvidence, _ := json.Marshal(map[string]any{"manual_resolution_id": stored.ID, "candidate_set_version": stored.CandidateSetVersion, "requested_by": stored.RequestedBy, "approved_by": stored.ApprovedBy, "reason": stored.Reason, "accept_shortfall": stored.AcceptShortfall, "accept_late_payment": stored.AcceptLatePayment, "accept_cross_asset": stored.AcceptCrossAsset, "verifier_evidence_hash": verified.EvidenceHash})
+		matchEvidence, _ := json.Marshal(map[string]any{"manual_resolution_id": stored.ID, "candidate_set_version": stored.CandidateSetVersion, "requested_by": stored.RequestedBy, "approved_by": stored.ApprovedBy, "reason": stored.Reason, "accept_shortfall": stored.AcceptShortfall, "accept_late_payment": stored.AcceptLatePayment, "accept_cross_asset": stored.AcceptCrossAsset, "scanner_evidence_hash": verified.EvidenceHash})
 		_, err = tx.Exec(ctx, `INSERT INTO payment_matches (id,tenant_id,event_id,route_id,intent_id,match_kind,expected_atomic,received_atomic,credited_atomic,state,evidence,policy_version,created_at,finalized_at) VALUES ($1,$2,$3,$4,$5,$6,$7::numeric,$8::numeric,$8::numeric,'finalized',$9::jsonb,1,$10,$10)`, matchID, financial.TenantID, verified.ID, financial.RouteID, financial.IntentID, kind, financial.Expected.String(), verified.Amount.String(), matchEvidence, now)
 		if err != nil {
 			return classify(err)
@@ -113,7 +113,7 @@ func (s *Store) ApplyVerifiedResolution(ctx context.Context, resolution domain.M
 			newStatus = domain.IntentOverpaid
 			eventType = "payment.overpaid"
 		}
-		command, err := tx.Exec(ctx, `UPDATE payment_intents SET status=$1,status_reason='verified_manual_resolution',settled_at=$2,updated_at=$2,version=version+1 WHERE id=$3 AND tenant_id=$4 AND version=$5 AND status IN ('pending','observed','partially_paid','confirmed','expired','needs_review','reorg_review')`, newStatus, now, financial.IntentID, financial.TenantID, financial.IntentVersion)
+		command, err := tx.Exec(ctx, `UPDATE payment_intents SET status=$1,status_reason='manual_scanner_resolution',settled_at=$2,updated_at=$2,version=version+1 WHERE id=$3 AND tenant_id=$4 AND version=$5 AND status IN ('pending','observed','partially_paid','confirmed','expired','needs_review','reorg_review')`, newStatus, now, financial.IntentID, financial.TenantID, financial.IntentVersion)
 		if err != nil {
 			return err
 		}
