@@ -32,6 +32,22 @@ type Candidate struct {
 	Reasons     []string       `json:"reason_codes"`
 }
 
+const AutomaticCandidateScoreThreshold = 90
+
+// UniqueAutomaticCandidate returns the only candidate that is safe to send to
+// deterministic settlement without an operator. The score is intentionally a
+// strict greater-than threshold; ties and ambiguous classifications fail
+// closed even when both candidates have high scores.
+func UniqueAutomaticCandidate(candidates []Candidate) (Candidate, bool) {
+	if len(candidates) == 0 || candidates[0].Score <= AutomaticCandidateScoreThreshold || candidates[0].Class == ExceptionAmbiguous {
+		return Candidate{}, false
+	}
+	if len(candidates) > 1 && candidates[1].Score == candidates[0].Score {
+		return Candidate{}, false
+	}
+	return candidates[0], true
+}
+
 func BuildCandidates(event domain.TransferEvent, routes []domain.PaymentRoute, now time.Time) []Candidate {
 	var candidates []Candidate
 	for _, route := range routes {
@@ -55,9 +71,15 @@ func BuildCandidates(event domain.TransferEvent, routes []domain.PaymentRoute, n
 			// the on-chain payment time must outrank older, amount-adjacent routes.
 			c.Score += 40
 			c.Reasons = append(c.Reasons, "within_payment_window")
+		case late && !event.OnChainTime.After(automaticLatePaymentDeadline(route)):
+			// Exact payments inside the automatic 30-minute grace score above
+			// the auto-match threshold. The wider route grace remains useful for
+			// observation and manual recovery but never grants access by itself.
+			c.Score += 10
+			c.Reasons = append(c.Reasons, "within_automatic_30_minute_grace")
 		case late && !event.OnChainTime.After(route.GraceEndsAt):
 			c.Score += 5
-			c.Reasons = append(c.Reasons, "within_late_grace")
+			c.Reasons = append(c.Reasons, "within_manual_late_grace")
 		default:
 			c.Score -= 10
 			if event.OnChainTime.Before(route.StartsAt) {

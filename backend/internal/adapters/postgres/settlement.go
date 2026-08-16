@@ -136,14 +136,18 @@ ON CONFLICT(event_id) DO NOTHING`, unmatchedID, eventID)
 						return err
 					}
 				}
-				if len(potential) > 0 {
+				if automatic, ok := application.UniqueAutomaticCandidate(potential); ok {
 					if err := recordExceptionIntent(ctx, tx, tenantID, potential[0], event, s.now()); err != nil {
 						return err
 					}
-					// Only explicitly policy-bound routes enter deterministic
-					// aggregation. The enqueue helper is a no-op for legacy routes,
-					// so missing policy configuration remains fail closed.
-					if err := enqueueAutomatedMatchingCandidates(ctx, tx, tenantID, potential, s.now()); err != nil {
+					// A unique score above 90 enters deterministic settlement. The
+					// reducer still enforces finality, identity, five-percent
+					// underpayment tolerance and excess-payment accounting.
+					if err := enqueueAutomatedMatchingCandidates(ctx, tx, tenantID, []application.Candidate{automatic}, s.now()); err != nil {
+						return err
+					}
+				} else if len(potential) > 0 {
+					if err := recordExceptionIntent(ctx, tx, tenantID, potential[0], event, s.now()); err != nil {
 						return err
 					}
 				}

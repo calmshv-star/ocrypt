@@ -33,7 +33,19 @@ const (
 	OverpaymentManual         = "manual_review"
 	OverpaymentCreditAll      = "credit_all"
 	OverpaymentCreditExpected = "credit_expected_hold_excess"
+	// AutomaticLatePaymentGrace is a product-level promise: a payer who gets
+	// the transaction finalized shortly after checkout expiry must not lose
+	// access because of wallet or block-inclusion latency.
+	AutomaticLatePaymentGrace = 30 * time.Minute
 )
+
+func automaticLatePaymentDeadline(route domain.PaymentRoute) time.Time {
+	deadline := route.ExpiresAt.Add(AutomaticLatePaymentGrace)
+	if route.GraceEndsAt.Before(deadline) {
+		return route.GraceEndsAt
+	}
+	return deadline
+}
 
 func (p AutomatedMatchingPolicy) Validate() error {
 	if p.ID == "" || p.Version < 1 || p.UnderpaymentToleranceBPS > 10_000 {
@@ -143,6 +155,8 @@ func EvaluateAutomatedMatch(route domain.PaymentRoute, events []domain.TransferE
 	used := map[string]bool{}
 	sender := ""
 	anyLate := false
+	lateOutsideAutomaticGrace := false
+	automaticLateDeadline := automaticLatePaymentDeadline(route)
 	for _, event := range sorted {
 		if event.Kind == "gasfree_fee" || used[event.ID] {
 			continue
@@ -157,7 +171,9 @@ func EvaluateAutomatedMatch(route domain.PaymentRoute, events []domain.TransferE
 		if sender == "" {
 			sender = event.FromAddress
 		}
-		anyLate = anyLate || event.OnChainTime.After(route.ExpiresAt)
+		late := event.OnChainTime.After(route.ExpiresAt)
+		anyLate = anyLate || late
+		lateOutsideAutomaticGrace = lateOutsideAutomaticGrace || (late && event.OnChainTime.After(automaticLateDeadline))
 		allocation := MatchAllocation{EventID: event.ID, Role: "payment", MatchKind: "partial", Received: event.Amount, Effective: event.Amount, Credited: event.Amount, TransactionID: event.Identity.TransactionID, EventIndex: event.Identity.EventIndex, Sender: event.FromAddress, OnChainTime: event.OnChainTime, BlockHeight: event.BlockHeight, BlockHash: event.BlockHash, ParserVersion: event.ParserVersion, EvidenceHash: event.EvidenceHash}
 		received, err := decision.Received.Add(event.Amount)
 		if err != nil {
@@ -194,9 +210,9 @@ func EvaluateAutomatedMatch(route domain.PaymentRoute, events []domain.TransferE
 		decision.ReasonCodes = []string{"no_eligible_finalized_transfers"}
 		return sealAutomatedDecision(decision), nil
 	}
-	if anyLate && !policy.AcceptLateWithinGrace {
+	if anyLate && lateOutsideAutomaticGrace {
 		decision.Class = ExceptionLate
-		decision.ReasonCodes = []string{"late_payment_not_enabled"}
+		decision.ReasonCodes = []string{"late_payment_outside_automatic_30_minute_grace"}
 		return sealAutomatedDecision(decision), nil
 	}
 	cmp := decision.Received.Cmp(route.ExpectedAmount)
@@ -207,10 +223,7 @@ func EvaluateAutomatedMatch(route domain.PaymentRoute, events []domain.TransferE
 			decision.ReasonCodes = []string{"underpayment_within_versioned_tolerance"}
 			break
 		}
-		deadline := route.ExpiresAt
-		if policy.AcceptLateWithinGrace {
-			deadline = route.GraceEndsAt
-		}
+		deadline := automaticLateDeadline
 		if policy.AccumulatePartials && now.Before(deadline) {
 			decision.Outcome, decision.Class = AutomatedCollect, ExceptionPartial
 			decision.Credited = decision.Received
@@ -240,7 +253,7 @@ func EvaluateAutomatedMatch(route domain.PaymentRoute, events []domain.TransferE
 	allocateCredit(&decision)
 	if anyLate {
 		decision.Class = ExceptionLate
-		decision.ReasonCodes = append(decision.ReasonCodes, "late_within_versioned_grace_policy")
+		decision.ReasonCodes = append(decision.ReasonCodes, "late_within_automatic_30_minute_grace")
 	}
 	return sealAutomatedDecision(decision), nil
 }
