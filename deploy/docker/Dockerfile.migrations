@@ -11,8 +11,9 @@ COPY --chmod=0555 deploy/postgres/run-migrations.sh /usr/local/bin/merchant-migr
 COPY --chmod=0444 deploy/postgres/bootstrap-roles.sql /deploy/bootstrap-roles.sql
 COPY --chmod=0444 deploy/postgres/runtime-grants.sql /deploy/runtime-grants.sql
 COPY --chmod=0444 backend/migrations/ /deploy/migrations/
-# Docker applies COPY --chmod to the directory entry as well as its files.
-# Keep migration files read-only, but let the non-root migrator traverse it.
-RUN chmod 0555 /deploy/migrations
+# Docker versions differ in whether COPY --chmod also changes pre-existing
+# parent directories. Keep copied files read-only, but make both directory
+# levels traversable by the non-root migrator.
+RUN chmod 0555 /deploy /deploy/migrations
 USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/merchant-migrate"]
