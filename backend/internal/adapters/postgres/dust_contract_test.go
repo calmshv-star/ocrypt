@@ -76,6 +76,33 @@ func TestDustExpansionCoversEveryConfiguredAssetAndPreservesPlausiblePayments(t 
 	}
 }
 
+func TestStablecoinDustFloorHidesSubTenthTransfersButPreservesPlausiblePayments(t *testing.T) {
+	raw, err := os.ReadFile("../../../migrations/000050_raise_stablecoin_unmatched_dust_floor.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	for _, fragment := range []string{
+		"('usdc-solana','solana:mainnet',100000::numeric)",
+		"('usdt-tron','tron:mainnet',100000::numeric)",
+		"('usdt-bsc','eip155:56',100000000000000000::numeric)",
+		"e.amount_atomic<=a.dust_threshold",
+		"payment_matches pm",
+		"payment_route_policy_bindings b",
+		"underpayment_tolerance_bps",
+		"accept_late_within_grace",
+		"e.amount_atomic*10000 >= r.expected_amount_atomic",
+		"status='ignored'",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("stablecoin dust floor is missing %q", fragment)
+		}
+	}
+	if !strings.Contains(sql, "u.status NOT IN ('resolved','ignored','invalid','reorged')") {
+		t.Fatal("stablecoin dust backfill can rewrite terminal records")
+	}
+}
+
 func TestTONDustMigrationIsAssetScopedAndPreservesExactMatches(t *testing.T) {
 	raw, err := os.ReadFile("../../../migrations/000038_unmatched_asset_dust.up.sql")
 	if err != nil {

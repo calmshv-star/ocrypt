@@ -46,7 +46,7 @@ WITH desired(asset_id,chain_id,dust_threshold) AS (
     ('sol-solana','solana:mainnet',100::numeric),
     ('ton-ton','ton:mainnet',1000000::numeric),
     ('trx-tron','tron:mainnet',100::numeric),
-    ('usdt-tron','tron:mainnet',100::numeric)
+    ('usdt-tron','tron:mainnet',100000::numeric)
 )
 UPDATE assets a SET dust_threshold=GREATEST(a.dust_threshold,d.dust_threshold),updated_at=clock_timestamp(),version=version+1
 FROM desired d
