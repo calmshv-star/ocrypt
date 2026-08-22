@@ -1,0 +1,36 @@
+{
+  "expected_revision": "REPLACE_WITH_40_HEX_GIT_SHA",
+  "containers": [
+    {
+      "name": "ocrypt-admin-api",
+      "max_restarts": 0
+    }
+  ],
+  "http_checks": [
+    {
+      "url": "http://127.0.0.1:8081/readyz",
+      "status": 200,
+      "timeout_seconds": 3
+    },
+    {
+      "url": "http://127.0.0.1:8081/admin/v1/session/me",
+      "status": 401,
+      "timeout_seconds": 3
+    },
+    {
+      "url": "https://REPLACE_WITH_ADMIN_HOST/admin/",
+      "status": 200,
+      "timeout_seconds": 10
+    }
+  ],
+  "files": [
+    {
+      "path": "/opt/ocrypt/web/admin/index.html",
+      "sha256": "REPLACE_WITH_64_HEX_SHA256"
+    },
+    {
+      "path": "/opt/ocrypt/web/admin/assets/REPLACE_WITH_CRITICAL_CHUNK.js",
+      "sha256": "REPLACE_WITH_64_HEX_SHA256"
+    }
+  ]
+}
