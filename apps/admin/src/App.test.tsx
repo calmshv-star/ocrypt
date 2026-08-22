@@ -275,6 +275,24 @@ describe("admin application", () => {
     expect(screen.queryByText("9.5 USDT")).not.toBeInTheDocument();
   });
 
+  it("reconciles a lost mutation response instead of reporting a committed credit as failed", async () => {
+    const caseId = "20000000-0000-4000-8000-000000000031";
+    const routeId = "20000000-0000-4000-8000-000000000032";
+    const row = {
+      id:caseId,event_id:"20000000-0000-4000-8000-000000000033",classification:"ambiguous",status:"candidates_ready",severity:"medium",version:3,created_at:new Date().toISOString(),chain_id:"tron",transaction_id:"0123456789abcdef",asset_symbol:"USDT",asset_decimals:6,amount_atomic:"1000000",on_chain_time:new Date().toISOString(),
+      candidates:[{id:"20000000-0000-4000-8000-000000000034",route_id:routeId,rank:1,score:99,evidence:{},disqualified:false,merchant_order_id:"ORDER-COMMITTED",expected_display:"1",expected_atomic:"1000000",asset_symbol:"USDT",order_amount_minor:"8300",order_currency:"RUB",order_currency_scale:2,order_created_at:new Date().toISOString()}]
+    };
+    const unmatched = vi.fn().mockResolvedValueOnce({items:[row]}).mockResolvedValue({items:[]});
+    const requestResolution = vi.fn().mockRejectedValue(new TypeError("response connection closed"));
+    renderApp("/unmatched", { client:client({unmatched,requestResolution}), preview:false });
+    expect((await screen.findAllByText("1 USDT")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", {name:"Credit payment"}));
+    await waitFor(() => expect(requestResolution).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(unmatched).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("The operation was not applied.")).not.toBeInTheDocument();
+    expect(screen.queryAllByText("1 USDT")).toHaveLength(0);
+  });
+
   it("hides an unmatched payment without assigning it to an order", async () => {
     const caseId = "20000000-0000-4000-8000-000000000011";
     const routeId = "20000000-0000-4000-8000-000000000012";

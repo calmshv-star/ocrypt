@@ -489,9 +489,19 @@ export function LiveUnmatchedPage() {
       await admin.client!.requestResolution(admin.scope as AdminScope, selected.id, { version: selected.version, target_route_id: candidateId, reason: `Manual review: payment matched to order ${selectedCandidate.merchant_order_id}`, idempotency_key: resolutionKey.current, accept_shortfall: requiresShortfall, accept_late_payment: requiresLate, accept_cross_asset: requiresCrossAsset });
       resolutionKey.current = newIdempotencyKey();
       setHiddenIds((current) => new Set(current).add(selected.id));
-      await queryClient.invalidateQueries({ queryKey: ["admin", "unmatched"] });
+      void queryClient.invalidateQueries({ queryKey: ["admin", "unmatched"] });
     } catch {
-      setNotice("failure");
+      // The server can commit the resolution even when the browser loses the
+      // response. Reconcile the queue before calling a completed credit a
+      // failure; a resolved case is no longer returned by this endpoint.
+      const refreshed = await query.refetch();
+      const stillOpen = pageItems(refreshed.data).some((item) => item.id === selected.id);
+      if (refreshed.isSuccess && !stillOpen) {
+        resolutionKey.current = newIdempotencyKey();
+        setHiddenIds((current) => new Set(current).add(selected.id));
+      } else {
+        setNotice("failure");
+      }
     } finally {
       setBusy(false);
     }
