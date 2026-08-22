@@ -2,6 +2,9 @@ package application
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,11 +13,17 @@ import (
 )
 
 type resolutionQueueFixture struct {
-	workerID  string
-	chainID   string
-	jobs      []ResolutionJob
-	applied   domain.TransferEvent
-	applyCall int
+	workerID   string
+	chainID    string
+	jobs       []ResolutionJob
+	applied    domain.TransferEvent
+	applyCall  int
+	applyErr   error
+	retryCall  int
+	retryDead  bool
+	retryWhy   string
+	rejectCall int
+	rejectWhy  string
 }
 
 func (f *resolutionQueueFixture) ClaimResolutions(_ context.Context, workerID, chainID string, _ time.Time, _ time.Duration, _ int) ([]ResolutionJob, error) {
@@ -26,10 +35,19 @@ func (f *resolutionQueueFixture) ClaimResolutions(_ context.Context, workerID, c
 func (f *resolutionQueueFixture) ApplyFinalizedResolution(_ context.Context, _ domain.ManualResolution, event domain.TransferEvent) error {
 	f.applied = event
 	f.applyCall++
+	return f.applyErr
+}
+
+func (f *resolutionQueueFixture) RetryResolution(_ context.Context, _ domain.ManualResolution, _ time.Time, reason string, dead bool) error {
+	f.retryCall++
+	f.retryDead = dead
+	f.retryWhy = reason
 	return nil
 }
 
-func (*resolutionQueueFixture) RetryResolution(context.Context, domain.ManualResolution, time.Time, string, bool) error {
+func (f *resolutionQueueFixture) RejectResolution(_ context.Context, _ domain.ManualResolution, reason string) error {
+	f.rejectCall++
+	f.rejectWhy = reason
 	return nil
 }
 
@@ -81,5 +99,52 @@ func TestResolutionServiceRejectsNonFinalScannerEvent(t *testing.T) {
 	err := NewResolutionService(queue).Resolve(t.Context(), domain.ManualResolution{Reason: "Operator matched payment to order"}, event)
 	if err == nil || queue.applyCall != 0 {
 		t.Fatalf("non-final event crossed the settlement boundary: calls=%d err=%v", queue.applyCall, err)
+	}
+}
+
+func TestResolutionWorkerRejectsDeterministicValidationFailureWithoutRetry(t *testing.T) {
+	event := domain.TransferEvent{
+		ID:       "20000000-0000-4000-8000-000000000001",
+		Identity: domain.EventIdentity{ChainID: "tron:mainnet", TransactionID: "tx-1", EventIndex: "0", AssetID: "usdt-tron", ToAddress: "TRecipient"},
+		Amount:   money.MustParse("8460000"),
+		Status:   domain.TransferFinalized,
+	}
+	queue := &resolutionQueueFixture{
+		jobs:     []ResolutionJob{{Resolution: domain.ManualResolution{ID: "20000000-0000-4000-8000-000000000002", Reason: "Operator matched payment to order", Attempt: 18}, Expected: event}},
+		applyErr: fmt.Errorf("%w: payment shortfall was not approved", domain.ErrValidation),
+	}
+	worker := ResolutionWorker{Store: queue, ChainID: "tron:mainnet", Lease: 30 * time.Second}
+
+	count, err := worker.RunBatch(t.Context(), "resolution-tron", 10)
+	if err != nil || count != 1 {
+		t.Fatalf("run batch: count=%d err=%v", count, err)
+	}
+	if queue.rejectCall != 1 || queue.retryCall != 0 {
+		t.Fatalf("deterministic failure was not terminal: reject=%d retry=%d", queue.rejectCall, queue.retryCall)
+	}
+	if !strings.Contains(queue.rejectWhy, "shortfall was not approved") {
+		t.Fatalf("rejection reason was lost: %q", queue.rejectWhy)
+	}
+}
+
+func TestResolutionWorkerRetriesTransientFailure(t *testing.T) {
+	event := domain.TransferEvent{
+		ID:       "20000000-0000-4000-8000-000000000001",
+		Identity: domain.EventIdentity{ChainID: "tron:mainnet", TransactionID: "tx-1", EventIndex: "0", AssetID: "usdt-tron", ToAddress: "TRecipient"},
+		Amount:   money.MustParse("8460000"),
+		Status:   domain.TransferFinalized,
+	}
+	queue := &resolutionQueueFixture{
+		jobs:     []ResolutionJob{{Resolution: domain.ManualResolution{ID: "20000000-0000-4000-8000-000000000002", Reason: "Operator matched payment to order", Attempt: 2}, Expected: event}},
+		applyErr: errors.New("temporary database outage"),
+	}
+	worker := ResolutionWorker{Store: queue, ChainID: "tron:mainnet", Lease: 30 * time.Second}
+
+	count, err := worker.RunBatch(t.Context(), "resolution-tron", 10)
+	if err == nil || count != 1 {
+		t.Fatalf("transient failure must remain visible: count=%d err=%v", count, err)
+	}
+	if queue.retryCall != 1 || queue.rejectCall != 0 || queue.retryDead {
+		t.Fatalf("transient failure was not retried: retry=%d reject=%d dead=%t", queue.retryCall, queue.rejectCall, queue.retryDead)
 	}
 }

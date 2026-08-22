@@ -109,3 +109,30 @@ func (s *Store) RetryResolution(ctx context.Context, resolution domain.ManualRes
 		return err
 	})
 }
+
+// RejectResolution terminally rejects a deterministic invalid operator
+// decision while reopening the unmatched payment for a corrected submission.
+// The lease fence prevents an obsolete worker from overwriting a newer choice.
+func (s *Store) RejectResolution(ctx context.Context, resolution domain.ManualResolution, reason string) error {
+	return pgx.BeginTxFunc(ctx, s.db.pool, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
+		command, err := tx.Exec(ctx, `UPDATE manual_resolutions
+SET status='invalid',last_error=$1,completed_at=clock_timestamp(),locked_by=NULL,locked_until=NULL,lease_token=NULL,updated_at=clock_timestamp(),version=version+1
+WHERE id=$2 AND lease_token=$3 AND locked_until>clock_timestamp() AND status IN ('verification_requested','verification_retry')`, reason, resolution.ID, resolution.ClaimToken)
+		if err != nil {
+			return err
+		}
+		if command.RowsAffected() != 1 {
+			return domain.ErrVersionConflict
+		}
+		command, err = tx.Exec(ctx, `UPDATE unmatched_payments
+SET status='candidates_ready',selected_route_id=NULL,accepted_shortfall=false,accepted_late_payment=false,accepted_cross_asset=false,assigned_operator_id=NULL,updated_at=clock_timestamp(),version=version+1
+WHERE id=$1 AND status IN ('verification_requested','verification_retry') AND selected_route_id=$2`, resolution.UnmatchedPaymentID, resolution.TargetRouteID)
+		if err != nil {
+			return err
+		}
+		if command.RowsAffected() != 1 {
+			return domain.ErrVersionConflict
+		}
+		return nil
+	})
+}

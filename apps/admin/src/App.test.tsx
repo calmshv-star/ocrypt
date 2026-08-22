@@ -266,8 +266,8 @@ describe("admin application", () => {
     expect(screen.getAllByText("≈ 608.00 RUB").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/USDT/).length).toBeGreaterThan(0);
     expect(screen.queryByText("underpaid")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Credit payment" })).toBeDisabled();
-    fireEvent.click(screen.getByLabelText("The amount is lower than expected — credit it anyway"));
+    expect(screen.getByRole("button", { name: "Credit payment" })).toBeEnabled();
+    expect(screen.queryByLabelText("The amount is lower than expected — credit it anyway")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Credit payment" }));
     await waitFor(() => expect(requestResolution).toHaveBeenCalledTimes(1));
     expect(requestResolution).toHaveBeenCalledWith({ tenantId, merchantId }, caseId, expect.objectContaining({ version: 8, target_route_id: routeId, reason: "Manual review: payment matched to order ORDER-1042", accept_shortfall: true, accept_late_payment: false, accept_cross_asset: false, idempotency_key: expect.stringMatching(/.{8,}/) }));

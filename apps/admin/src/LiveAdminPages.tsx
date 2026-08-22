@@ -458,9 +458,6 @@ export function LiveUnmatchedPage() {
   const query = useAdminQuery<Page<UnmatchedRow>>("unmatched", "unmatched:read", (client, scope) => client.unmatched(scope));
   const [selectedId, setSelectedId] = useState("");
   const [candidateId, setCandidateId] = useState("");
-  const [acceptShortfall, setAcceptShortfall] = useState(false);
-  const [acceptLate, setAcceptLate] = useState(false);
-  const [acceptCrossAsset, setAcceptCrossAsset] = useState(false);
   const [notice, setNotice] = useState<"failure" | null>(null);
   const [busy, setBusy] = useState(false);
   const [hidingId, setHidingId] = useState("");
@@ -475,9 +472,6 @@ export function LiveUnmatchedPage() {
     setSelectedId(selected.id);
     setCandidateId((current) => ranked.some((candidate) => candidate.route_id === current) ? current : ranked[0]?.route_id ?? "");
     resolutionKey.current = newIdempotencyKey();
-    setAcceptShortfall(false);
-    setAcceptLate(false);
-    setAcceptCrossAsset(false);
     setNotice(null);
   }, [selected?.id]);
 
@@ -487,13 +481,12 @@ export function LiveUnmatchedPage() {
   const requiresShortfall = classification.includes("partial") || classification.includes("underpaid") || Boolean(selected && selectedCandidate && candidateIsShortfall(selected, selectedCandidate));
   const requiresLate = classification.includes("late");
   const requiresCrossAsset = classification.includes("wrong_asset") || classification.includes("cross_asset");
-  const exceptionConfirmed = (!requiresShortfall || acceptShortfall) && (!requiresLate || acceptLate) && (!requiresCrossAsset || acceptCrossAsset);
   const requestResolution = async () => {
-    if (!selected || !selectedCandidate || !admin.scope || !exceptionConfirmed || !admin.can("resolution:request")) return;
+    if (!selected || !selectedCandidate || !admin.scope || !admin.can("resolution:request")) return;
     setBusy(true);
     setNotice(null);
     try {
-      await admin.client!.requestResolution(admin.scope as AdminScope, selected.id, { version: selected.version, target_route_id: candidateId, reason: `Manual review: payment matched to order ${selectedCandidate.merchant_order_id}`, idempotency_key: resolutionKey.current, accept_shortfall: acceptShortfall, accept_late_payment: acceptLate, accept_cross_asset: acceptCrossAsset });
+      await admin.client!.requestResolution(admin.scope as AdminScope, selected.id, { version: selected.version, target_route_id: candidateId, reason: `Manual review: payment matched to order ${selectedCandidate.merchant_order_id}`, idempotency_key: resolutionKey.current, accept_shortfall: requiresShortfall, accept_late_payment: requiresLate, accept_cross_asset: requiresCrossAsset });
       resolutionKey.current = newIdempotencyKey();
       setHiddenIds((current) => new Set(current).add(selected.id));
       await queryClient.invalidateQueries({ queryKey: ["admin", "unmatched"] });
@@ -537,10 +530,7 @@ export function LiveUnmatchedPage() {
         {selected && <SectionCard title={t(unmatchedReasonKey(selected.classification))}>
           <div className="admin-unmatched-payment"><div><span>{t("common.amount")}</span><strong>{formatAtomic(selected.amount_atomic, selected.asset_decimals)} {selected.asset_symbol}</strong><small>{approximateUnmatchedMoney(selected, locale)}</small></div><div><span>{t("common.network")}</span><strong>{networkName(selected.chain_id)}</strong></div><div><span>{t("common.time")}</span><strong>{formatDate(selected.on_chain_time, locale)}</strong></div></div>
           {compatibleCandidates.length > 0 ? <fieldset className="admin-live-fieldset admin-unmatched-orders"><legend>{t("admin.selectCandidate")}</legend>{compatibleCandidates.map((candidate) => <label key={candidate.id}><input checked={candidateId === candidate.route_id} name="candidate" onChange={() => setCandidateId(candidate.route_id)} type="radio" /><span><strong>{formatOverviewMoney(candidate.order_amount_minor, candidate.order_currency_scale, candidate.order_currency, locale)}</strong><small>{short(candidate.merchant_order_id, 8, 6)} · {t("admin.exactAmount")}: {candidate.expected_display} {candidate.asset_symbol} · {formatDate(candidate.order_created_at, locale)}</small></span></label>)}</fieldset> : <div className="admin-unmatched-empty"><strong>{t("unmatched.noCandidate")}</strong><p>{t("unmatched.noCandidateBody")}</p></div>}
-          {requiresShortfall && <label className="admin-unmatched-confirm"><input checked={acceptShortfall} onChange={(event) => setAcceptShortfall(event.target.checked)} type="checkbox" /><span>{t("admin.acceptShortfall")}</span></label>}
-          {requiresLate && <label className="admin-unmatched-confirm"><input checked={acceptLate} onChange={(event) => setAcceptLate(event.target.checked)} type="checkbox" /><span>{t("admin.acceptLate")}</span></label>}
-          {requiresCrossAsset && <label className="admin-unmatched-confirm"><input checked={acceptCrossAsset} onChange={(event) => setAcceptCrossAsset(event.target.checked)} type="checkbox" /><span>{t("admin.acceptCrossAsset")}</span></label>}
-          <div className="admin-live-actions">{admin.can("resolution:request") && <Button data-testid="request-resolution" disabled={busy || !selectedCandidate || !exceptionConfirmed} onClick={() => void requestResolution()}>{t("unmatched.requestResolution")}</Button>}</div>
+          <div className="admin-live-actions">{admin.can("resolution:request") && <Button data-testid="request-resolution" disabled={busy || !selectedCandidate} onClick={() => void requestResolution()}>{t("unmatched.requestResolution")}</Button>}</div>
           {notice && <div aria-live="polite" className="admin-live-notice is-failure" role="alert">{t("admin.mutationFailed")}</div>}
           <details className="admin-unmatched-technical"><summary>{t("common.details")}</summary><dl><div><dt>{t("admin.transaction")}</dt><dd><code>{short(selected.transaction_id, 18, 14)}</code></dd></div><div><dt>{t("admin.identifier")}</dt><dd><code>{short(selected.event_id)}</code></dd></div></dl></details>
         </SectionCard>}
