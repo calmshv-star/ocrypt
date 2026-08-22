@@ -180,7 +180,7 @@ BEGIN
     GRANT SELECT ON ledger_transactions,ledger_entries,ledger_accounts TO merchant_reconciliation_worker;
     REVOKE DELETE,TRUNCATE ON reconciliation_reports FROM merchant_reconciliation_worker;
   END IF;
-  FOREACH role_name IN ARRAY ARRAY['merchant_api_runtime','merchant_management_runtime','merchant_scanner_worker','merchant_settlement_worker','merchant_matching_worker','merchant_resolution_worker','merchant_proof_worker','merchant_plan_worker'] LOOP
+  FOREACH role_name IN ARRAY ARRAY['merchant_api_runtime','merchant_management_runtime','merchant_scanner_worker','merchant_settlement_worker','merchant_matching_worker','merchant_resolution_worker'] LOOP
     IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname=role_name) THEN
       EXECUTE format('GRANT SELECT,INSERT,UPDATE ON merchant_event_sequences TO %I',role_name);
     END IF;
