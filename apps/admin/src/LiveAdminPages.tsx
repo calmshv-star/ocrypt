@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Activity, AlertTriangle, ArrowRight, CheckCircle2, CircleDollarSign, Clock3, FileClock, RadioTower, RefreshCw, Scale, Webhook, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { isStepUpError, useAdmin, useAdminQuery } from "./AdminProvider";
-import type { AdminScope, AssetRow, AuditRow, IntentRow, Overview, Page, Permission, ReconciliationRow, TransferRow, UnmatchedRow, WebhookRow } from "./api/types";
+import type { AdminScope, AssetRow, AuditRow, CandidateRow, IntentRow, Overview, Page, Permission, ReconciliationRow, TransferRow, UnmatchedRow, WebhookRow } from "./api/types";
 
 type Resource = "intents" | "transfers" | "assets" | "reconciliation" | "audit";
 type DisplayRow = { id: string; cells: ReactNode[] };
@@ -263,7 +263,7 @@ function formatOverviewMoney(value:string, scale:number, currency:string, locale
 }
 
 function approximateUnmatchedMoney(item:UnmatchedRow, locale:string) {
-  const candidate = item.candidates.find((value) => !value.disqualified);
+	const candidate = rankUnmatchedCandidates(item)[0];
   if (!candidate) return "";
   try {
     const expected = BigInt(candidate.expected_atomic);
@@ -403,6 +403,54 @@ function currentReturnPath() {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }
 
+function atomicDistance(left: string, right: string) {
+  try {
+    const difference = BigInt(left) - BigInt(right);
+    return difference < 0n ? -difference : difference;
+  } catch {
+    return 0n;
+  }
+}
+
+function candidateIsCloseAmount(payment: UnmatchedRow, candidate: CandidateRow) {
+  try {
+    const expected = BigInt(candidate.expected_atomic);
+    if (expected <= 0n) return false;
+    return atomicDistance(payment.amount_atomic, candidate.expected_atomic) * 10_000n <= expected * 500n;
+  } catch {
+    return false;
+  }
+}
+
+function candidateIsShortfall(payment: UnmatchedRow, candidate: CandidateRow) {
+  try {
+    return BigInt(payment.amount_atomic) < BigInt(candidate.expected_atomic);
+  } catch {
+    return false;
+  }
+}
+
+function rankUnmatchedCandidates(payment: UnmatchedRow) {
+  const paidAt = Date.parse(payment.on_chain_time);
+  return payment.candidates.filter((candidate) => !candidate.disqualified).sort((left, right) => {
+    const leftExact = atomicDistance(payment.amount_atomic, left.expected_atomic) === 0n;
+    const rightExact = atomicDistance(payment.amount_atomic, right.expected_atomic) === 0n;
+    if (leftExact !== rightExact) return leftExact ? -1 : 1;
+    const leftClose = candidateIsCloseAmount(payment, left);
+    const rightClose = candidateIsCloseAmount(payment, right);
+    if (leftClose !== rightClose) return leftClose ? -1 : 1;
+    if (leftClose && rightClose && Number.isFinite(paidAt)) {
+      const leftAge = Math.abs(paidAt - Date.parse(left.order_created_at));
+      const rightAge = Math.abs(paidAt - Date.parse(right.order_created_at));
+      if (leftAge !== rightAge) return leftAge - rightAge;
+    }
+    if (left.score !== right.score) return right.score - left.score;
+    const distance = atomicDistance(payment.amount_atomic, left.expected_atomic) - atomicDistance(payment.amount_atomic, right.expected_atomic);
+    if (distance !== 0n) return distance < 0n ? -1 : 1;
+    return left.rank - right.rank;
+  });
+}
+
 export function LiveUnmatchedPage() {
   const { locale, t } = useI18n();
   const admin = useAdmin();
@@ -423,8 +471,9 @@ export function LiveUnmatchedPage() {
   const selected = cases.find((item) => item.id === selectedId) ?? cases[0];
   useEffect(() => {
     if (!selected) return;
+    const ranked = rankUnmatchedCandidates(selected);
     setSelectedId(selected.id);
-    setCandidateId((current) => selected.candidates.some((candidate) => candidate.route_id === current && !candidate.disqualified) ? current : selected.candidates.find((candidate) => !candidate.disqualified)?.route_id ?? "");
+    setCandidateId((current) => ranked.some((candidate) => candidate.route_id === current) ? current : ranked[0]?.route_id ?? "");
     resolutionKey.current = newIdempotencyKey();
     setAcceptShortfall(false);
     setAcceptLate(false);
@@ -433,12 +482,12 @@ export function LiveUnmatchedPage() {
   }, [selected?.id]);
 
   const classification = selected?.classification ?? "";
-  const requiresShortfall = classification.includes("partial") || classification.includes("underpaid");
+  const compatibleCandidates = selected ? rankUnmatchedCandidates(selected) : [];
+  const selectedCandidate = compatibleCandidates.find((candidate) => candidate.route_id === candidateId);
+  const requiresShortfall = classification.includes("partial") || classification.includes("underpaid") || Boolean(selected && selectedCandidate && candidateIsShortfall(selected, selectedCandidate));
   const requiresLate = classification.includes("late");
   const requiresCrossAsset = classification.includes("wrong_asset") || classification.includes("cross_asset");
   const exceptionConfirmed = (!requiresShortfall || acceptShortfall) && (!requiresLate || acceptLate) && (!requiresCrossAsset || acceptCrossAsset);
-  const compatibleCandidates = selected?.candidates.filter((candidate) => !candidate.disqualified) ?? [];
-  const selectedCandidate = compatibleCandidates.find((candidate) => candidate.route_id === candidateId);
   const requestResolution = async () => {
     if (!selected || !selectedCandidate || !admin.scope || !exceptionConfirmed || !admin.can("resolution:request")) return;
     setBusy(true);

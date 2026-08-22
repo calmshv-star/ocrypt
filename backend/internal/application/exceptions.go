@@ -36,6 +36,8 @@ const AutomaticCandidateScoreThreshold = 80
 
 const automaticLateGraceReason = "within_automatic_30_minute_grace"
 
+const candidateCloseAmountToleranceBPS uint32 = 500
+
 // UniqueAutomaticCandidate returns the only candidate that is safe to send to
 // deterministic settlement without an operator. The score is intentionally a
 // strict greater-than threshold; ties and ambiguous classifications fail
@@ -113,17 +115,36 @@ func BuildCandidates(event domain.TransferEvent, routes []domain.PaymentRoute, n
 			}
 			c.Score += 55
 			c.Reasons = append(c.Reasons, "exact_amount")
+		case cmp < 0 && underpaymentWithinTolerance(event.Amount, route.ExpectedAmount, candidateCloseAmountToleranceBPS):
+			// A small wallet-side truncation is much stronger evidence than an
+			// arbitrary partial payment. Keep a slight preference for the route
+			// that is still open when the event is processed; this prevents a
+			// nearly identical, just-expired reservation on the shared address
+			// from tying the customer's current order.
+			if !late {
+				if now.Before(route.ExpiresAt) {
+					c.Class = ExceptionPartial
+				} else {
+					c.Class = ExceptionUnderpaid
+				}
+			}
+			c.Score += 45
+			c.Reasons = append(c.Reasons, "underpayment_within_five_percent")
+			if now.Before(route.ExpiresAt) {
+				c.Score += 5
+				c.Reasons = append(c.Reasons, "route_still_open")
+			}
 		case cmp < 0 && now.Before(route.ExpiresAt):
 			if !late {
 				c.Class = ExceptionPartial
 			}
-			c.Score += 25
+			c.Score += 10
 			c.Reasons = append(c.Reasons, "below_expected_before_expiry")
 		case cmp < 0:
 			if !late {
 				c.Class = ExceptionUnderpaid
 			}
-			c.Score += 20
+			c.Score += 5
 			c.Reasons = append(c.Reasons, "below_expected")
 		case cmp > 0:
 			if !late {

@@ -250,13 +250,18 @@ describe("admin application", () => {
         asset_decimals: 6,
         amount_atomic: "9500000",
         on_chain_time: new Date().toISOString(),
-        candidates: [{ id: "20000000-0000-4000-8000-000000000005", route_id: routeId, rank: 1, score: 96, evidence: {}, disqualified: false, merchant_order_id: "ORDER-1042", expected_display: "10", expected_atomic: "10000000", asset_symbol: "USDT", order_amount_minor: "64000", order_currency: "RUB", order_currency_scale: 2, order_created_at: new Date().toISOString() }]
+        candidates: [
+          { id: "20000000-0000-4000-8000-000000000015", route_id: "20000000-0000-4000-8000-000000000025", rank: 1, score: 95, evidence: {}, disqualified: false, merchant_order_id: "ORDER-LARGE", expected_display: "36.238911", expected_atomic: "36238911", asset_symbol: "USDT", order_amount_minor: "299400", order_currency: "RUB", order_currency_scale: 2, order_created_at: new Date(Date.now() - 24 * 60_000).toISOString() },
+          { id: "20000000-0000-4000-8000-000000000016", route_id: "20000000-0000-4000-8000-000000000026", rank: 2, score: 95, evidence: {}, disqualified: false, merchant_order_id: "ORDER-MEDIUM", expected_display: "14.51251", expected_atomic: "14512510", asset_symbol: "USDT", order_amount_minor: "119900", order_currency: "RUB", order_currency_scale: 2, order_created_at: new Date(Date.now() - 23 * 60_000).toISOString() },
+          { id: "20000000-0000-4000-8000-000000000005", route_id: routeId, rank: 3, score: 95, evidence: {}, disqualified: false, merchant_order_id: "ORDER-1042", expected_display: "10", expected_atomic: "10000000", asset_symbol: "USDT", order_amount_minor: "64000", order_currency: "RUB", order_currency_scale: 2, order_created_at: new Date().toISOString() }
+        ]
       }] }),
       requestResolution
     });
     renderApp("/unmatched", { client: liveClient, preview: false });
     expect(await screen.findByRole("heading", { name: "Payments to review" })).toBeInTheDocument();
     expect(await screen.findByRole("radio", { name:/ORDER-1042/ })).toBeInTheDocument();
+    expect(screen.getAllByRole("radio")[0]).toHaveAccessibleName(/ORDER-1042/);
     expect(screen.getByText("640.00 RUB")).toBeInTheDocument();
     expect(screen.getAllByText("≈ 608.00 RUB").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/USDT/).length).toBeGreaterThan(0);

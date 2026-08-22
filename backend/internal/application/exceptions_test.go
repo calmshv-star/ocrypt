@@ -56,6 +56,43 @@ func TestUniqueAutomaticCandidateRequiresStrictlyAboveEightyAndNoTie(t *testing.
 	}
 }
 
+func TestCandidateRankingPrefersTheCurrentCloseAmountOverUnrelatedOpenOrders(t *testing.T) {
+	paidAt := time.Date(2026, 8, 22, 7, 45, 36, 0, time.UTC)
+	processedAt := paidAt.Add(57 * time.Second)
+	route := func(id, expected string, startsAt, expiresAt time.Time) domain.PaymentRoute {
+		return domain.PaymentRoute{
+			ID: id, IntentID: "intent-" + id, ChainID: "tron:mainnet", AssetID: "usdt-tron",
+			Address: "merchant", ExpectedAmount: money.MustParse(expected), Status: domain.RouteActive,
+			StartsAt: startsAt, ExpiresAt: expiresAt, GraceEndsAt: expiresAt.Add(24 * time.Hour),
+		}
+	}
+	routes := []domain.PaymentRoute{
+		route("large", "36238911", paidAt.Add(-24*time.Minute), paidAt.Add(6*time.Minute)),
+		route("medium", "14512510", paidAt.Add(-23*time.Minute), paidAt.Add(7*time.Minute)),
+		route("current", "8460589", paidAt.Add(-4*time.Minute), paidAt.Add(26*time.Minute)),
+		route("just-expired", "8460588", paidAt.Add(-29*time.Minute), paidAt.Add(24*time.Second)),
+	}
+	event := domain.TransferEvent{
+		Identity: domain.EventIdentity{ChainID: "tron:mainnet", AssetID: "usdt-tron", ToAddress: "merchant"},
+		Amount:   money.MustParse("8460000"), OnChainTime: paidAt,
+	}
+
+	candidates := BuildCandidates(event, routes, processedAt)
+	if len(candidates) != 4 || candidates[0].RouteID != "current" {
+		t.Fatalf("current 699 RUB order was not ranked first: %#v", candidates)
+	}
+	if candidates[0].Score <= AutomaticCandidateScoreThreshold || candidates[0].Class == ExceptionAmbiguous {
+		t.Fatalf("close current order did not cross the automatic threshold: %#v", candidates[0])
+	}
+	if candidates[2].RouteID != "large" || candidates[2].Score > AutomaticCandidateScoreThreshold || candidates[3].RouteID != "medium" || candidates[3].Score > AutomaticCandidateScoreThreshold {
+		t.Fatalf("unrelated partial orders remained high-confidence candidates: %#v", candidates)
+	}
+	selected, ok := UniqueAutomaticCandidate(candidates)
+	if !ok || selected.RouteID != "current" {
+		t.Fatalf("current close payment was not selected automatically: %#v %v", selected, ok)
+	}
+}
+
 func TestLateCandidateCrossesAutoThresholdOnlyInsideThirtyMinutes(t *testing.T) {
 	expires := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	route := domain.PaymentRoute{ID: "route", IntentID: "intent", ChainID: "eip155:1", AssetID: "eth-ethereum", Address: "merchant", ExpectedAmount: money.MustParse("100"), StartsAt: expires.Add(-30 * time.Minute), ExpiresAt: expires, GraceEndsAt: expires.Add(24 * time.Hour)}
