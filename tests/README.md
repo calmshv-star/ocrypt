@@ -48,6 +48,13 @@ Release CI should additionally set `REQUIRE_CONTRACT_TARGET=1` and
 `REQUIRE_SANDBOX_CONTRACT=1`; this converts either missing target into a failing
 configuration gate.
 
+The repository workflow exposes one final `release-gate` status. It succeeds
+only after builds, migrations, black-box API tests, the PostgreSQL-backed
+payment sandbox, frontend tests and browser flows all succeed. The sandbox
+asserts the required final state for exact, partial, underpaid, overpaid, late,
+wrong-asset, duplicate-callback, dead-letter and reorg flows, and proves that a
+retried exact payment cannot create a second credit or webhook.
+
 ## Browser checks
 
 Install the workspace dependencies and Chromium, then provide one or more URLs:

@@ -468,7 +468,8 @@ jobs:
           docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck-alpine:v0.10.0 \
             shellcheck \
             /mnt/deploy/validate.sh /mnt/deploy/postgres/run-migrations.sh \
-            /mnt/scripts/release-check.sh /mnt/scripts/verify-release-manifest.sh
+            /mnt/scripts/release-check.sh /mnt/scripts/verify-release-manifest.sh \
+            /mnt/scripts/verify-live-release.sh
           docker run --rm -i hadolint/hadolint:v2.14.0-alpine hadolint --ignore DL3006 - < deploy/docker/Dockerfile.backend
           docker run --rm -i hadolint/hadolint:v2.14.0-alpine hadolint --ignore DL3006 - < deploy/docker/Dockerfile.migrations
           docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint:1.7.7
@@ -784,6 +785,55 @@ jobs:
             echo "draft release manifest was unexpectedly admitted" >&2
             exit 1
           fi
+          if ./scripts/verify-live-release.sh deploy/release/live-manifest.example.json; then
+            echo "draft live release manifest was unexpectedly admitted" >&2
+            exit 1
+          fi
+
+  release-regressions:
+    runs-on: ubuntu-latest
+    env:
+      GOFLAGS: -mod=readonly
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: pnpm/action-setup@v6.0.10
+        with:
+          version: 11.16.0
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
+      - run: pnpm install --frozen-lockfile
+      - run: python -m pip install --no-deps -r tests/requirements.txt
+      - name: Verify immutable live release evidence
+        run: python -m pytest -q tests/release
+      - name: Verify manual-credit backend invariants
+        working-directory: backend
+        run: go test ./internal/admin ./internal/application ./internal/adapters/postgres -run 'Manual|Resolution'
+      - name: Verify automatic matching across payment variants
+        working-directory: backend
+        run: >-
+          go test ./internal/application
+          -run 'AutomatedMatching|CandidateRanking|ExactMatcher'
+      - name: Verify payment lifecycle and delivery invariants
+        working-directory: backend
+        run: >-
+          go test ./internal/httpapi ./internal/sandbox ./internal/webhook ./internal/outbox
+          -run 'PaymentIntentHTTPContract|MerchantOrderFacade|Finalize|Reorg|Underpayment|Duplicate|Callback|Lost'
+      - name: Verify lost-response admin reconciliation
+        run: >-
+          pnpm --filter @merchant/admin exec vitest run src/App.test.tsx
+          -t "reconciles a lost mutation response"
 
   qa:
     runs-on: ubuntu-latest
@@ -856,3 +906,29 @@ jobs:
           done
           cat "$RUNNER_TEMP/landing.log" "$RUNNER_TEMP/admin-preview.log" "$RUNNER_TEMP/admin-management.log" "$RUNNER_TEMP/checkout.log"
           exit 1
+
+  release-gate:
+    if: always()
+    needs:
+      - backend
+      - schema
+      - deployment
+      - container-images
+      - api-contract
+      - sandbox-contract
+      - web
+      - sdk
+      - sdk-java
+      - sdk-dotnet
+      - supply-chain
+      - release-regressions
+      - qa
+      - browser-e2e
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every build and functional check
+        env:
+          RELEASE_RESULTS: ${{ toJson(needs) }}
+        run: |
+          jq -e 'all(.[]; .result == "success")' <<<"$RELEASE_RESULTS"
+          echo "All required release checks passed"
