@@ -6,7 +6,7 @@ CREATE TABLE migration_runs (
   id uuid PRIMARY KEY,
   tenant_id uuid NOT NULL REFERENCES tenants(id),
   source_system_id text NOT NULL CHECK(source_system_id ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$'),
-  profile text NOT NULL CHECK(profile IN ('generic','wallet_ledger','json_md5','form_md5')),
+  profile text NOT NULL CHECK(profile IN ('generic','epusdt','gmpay','epay')),
   state text NOT NULL CHECK(state IN ('inventory','validated','two_person_approved','importing','shadow','canary','cutover_ready','cutover','rollback_window','rollback_pending','rolled_back','decommissioned')),
   create_traffic_owner text NOT NULL CHECK(create_traffic_owner IN ('legacy','shadow','canary','platform')),
   callback_owner text NOT NULL CHECK(callback_owner IN ('legacy','shadow','canary','platform')),
@@ -372,7 +372,7 @@ RETURNS SETOF migration_runs LANGUAGE plpgsql SECURITY DEFINER SET search_path=p
 DECLARE authoritative_at timestamptz:=clock_timestamp(); selected_id uuid; run public.migration_runs%ROWTYPE; prior record;
 BEGIN
   IF NOT public.migration_admin_allowed(requested_actor,requested_tenant,'migration:request',requested_session,requested_step_up) THEN RAISE EXCEPTION 'migration request denied' USING ERRCODE='MP003'; END IF;
-  IF requested_source !~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$' OR requested_profile NOT IN ('generic','wallet_ledger','json_md5','form_md5') OR length(btrim(requested_reason)) NOT BETWEEN 12 AND 1000 OR octet_length(requested_hash)<>32 THEN RAISE EXCEPTION 'invalid migration run' USING ERRCODE='MP001'; END IF;
+  IF requested_source !~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$' OR requested_profile NOT IN ('generic','epusdt','gmpay','epay') OR length(btrim(requested_reason)) NOT BETWEEN 12 AND 1000 OR octet_length(requested_hash)<>32 THEN RAISE EXCEPTION 'invalid migration run' USING ERRCODE='MP001'; END IF;
   SELECT * INTO prior FROM public.migration_control_idempotency WHERE tenant_id=requested_tenant AND actor_id=requested_actor AND operation='create' AND idempotency_key=requested_idempotency;
   IF FOUND THEN
     IF prior.request_hash<>requested_hash THEN RAISE EXCEPTION 'idempotency conflict' USING ERRCODE='MP004'; END IF;
