@@ -15,7 +15,7 @@ Repository = "https://github.com/calmshv-star/ocrypt"
 Issues = "https://github.com/calmshv-star/ocrypt/issues"
 
 [project.optional-dependencies]
-reports = ["cryptography>=44,<46"]
+reports = ["cryptography>=44,<51"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
