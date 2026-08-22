@@ -4,7 +4,7 @@ CREATE TABLE legacy_compat_configs (
     id uuid PRIMARY KEY,
     tenant_id uuid NOT NULL,
     merchant_id uuid NOT NULL,
-    protocol text NOT NULL CHECK (protocol IN ('json_md5','form_md5')),
+    protocol text NOT NULL CHECK (protocol IN ('gmpay','epay')),
     pid text NOT NULL CHECK (length(pid) BETWEEN 1 AND 128),
     currency char(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
     currency_scale smallint NOT NULL CHECK (currency_scale BETWEEN 0 AND 9),
@@ -12,7 +12,7 @@ CREATE TABLE legacy_compat_configs (
     asset_id text NOT NULL REFERENCES assets(id),
     legacy_token text NOT NULL CHECK (legacy_token ~ '^[A-Z0-9][A-Z0-9._-]{0,63}$'),
     legacy_network text NOT NULL CHECK (legacy_network ~ '^[a-z0-9][a-z0-9._:-]{0,127}$'),
-    legacy_payment_type text NOT NULL CHECK (length(legacy_payment_type) BETWEEN 1 AND 128),
+    legacy_epay_type text NOT NULL CHECK (length(legacy_epay_type) BETWEEN 1 AND 128),
     ip_allowlist cidr[] NOT NULL CHECK (cardinality(ip_allowlist) BETWEEN 1 AND 64),
     current_credential_version_id uuid,
     status text NOT NULL CHECK (status IN ('enabled','disabled')),
@@ -28,7 +28,7 @@ CREATE TABLE legacy_compat_configs (
     UNIQUE (id,tenant_id,merchant_id),
     UNIQUE (protocol,pid),
     CHECK (sunset_at>approved_at),
-    CHECK (protocol='form_md5' OR legacy_payment_type='json_md5')
+    CHECK (protocol='epay' OR legacy_epay_type='gmpay')
 );
 
 CREATE TABLE legacy_compat_credential_versions (
@@ -67,7 +67,7 @@ CREATE TABLE legacy_compat_admission_requests (
     asset_id text NOT NULL,
     legacy_token text NOT NULL,
     legacy_network text NOT NULL,
-    legacy_payment_type text NOT NULL,
+    legacy_epay_type text NOT NULL,
     ip_allowlist cidr[] NOT NULL,
     legacy_secret_ref text NOT NULL,
     callback_key_id text NOT NULL,
@@ -93,7 +93,7 @@ CREATE TABLE legacy_compat_mappings (
     trade_id text PRIMARY KEY CHECK (trade_id ~ '^[A-Za-z0-9_-]{22}$'),
     config_id uuid NOT NULL REFERENCES legacy_compat_configs(id) ON DELETE RESTRICT,
     credential_version_id uuid NOT NULL,
-    protocol text NOT NULL CHECK (protocol IN ('json_md5','form_md5')),
+    protocol text NOT NULL CHECK (protocol IN ('gmpay','epay')),
     legacy_order_id text NOT NULL CHECK (length(legacy_order_id) BETWEEN 1 AND 128),
     request_hash bytea NOT NULL CHECK (octet_length(request_hash)=32),
     intent_id uuid NOT NULL,
@@ -101,7 +101,7 @@ CREATE TABLE legacy_compat_mappings (
     notify_url text NOT NULL CHECK (notify_url ~ '^https://' AND length(notify_url)<=2048),
     return_url text NOT NULL CHECK (return_url='' OR return_url ~ '^https://' AND length(return_url)<=2048),
     order_name text NOT NULL CHECK (length(order_name)<=2048),
-    form_md5_type text NOT NULL CHECK (length(form_md5_type)<=128),
+    epay_type text NOT NULL CHECK (length(epay_type)<=128),
     fiat_amount text NOT NULL CHECK (fiat_amount ~ '^[0-9]+([.][0-9]+)?$' AND length(fiat_amount)<=80),
     currency char(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
     legacy_token text NOT NULL,
@@ -185,12 +185,12 @@ CREATE FUNCTION legacy_admission_request_guard() RETURNS trigger LANGUAGE plpgsq
 BEGIN
  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'legacy admission request evidence is immutable' USING ERRCODE='55000'; END IF;
  IF ROW(NEW.id,NEW.config_id,NEW.credential_id,NEW.tenant_id,NEW.merchant_id,NEW.protocol,NEW.pid,NEW.currency,
-   NEW.currency_scale,NEW.chain_id,NEW.asset_id,NEW.legacy_token,NEW.legacy_network,NEW.legacy_payment_type,NEW.ip_allowlist,
+   NEW.currency_scale,NEW.chain_id,NEW.asset_id,NEW.legacy_token,NEW.legacy_network,NEW.legacy_epay_type,NEW.ip_allowlist,
    NEW.legacy_secret_ref,NEW.callback_key_id,NEW.core_key_id,NEW.core_secret_ref,NEW.valid_from,NEW.valid_until,NEW.sunset_at,
    NEW.manifest,NEW.manifest_sha256,NEW.requested_by,NEW.requested_at,NEW.expires_at)
    IS DISTINCT FROM
    ROW(OLD.id,OLD.config_id,OLD.credential_id,OLD.tenant_id,OLD.merchant_id,OLD.protocol,OLD.pid,OLD.currency,
-   OLD.currency_scale,OLD.chain_id,OLD.asset_id,OLD.legacy_token,OLD.legacy_network,OLD.legacy_payment_type,OLD.ip_allowlist,
+   OLD.currency_scale,OLD.chain_id,OLD.asset_id,OLD.legacy_token,OLD.legacy_network,OLD.legacy_epay_type,OLD.ip_allowlist,
    OLD.legacy_secret_ref,OLD.callback_key_id,OLD.core_key_id,OLD.core_secret_ref,OLD.valid_from,OLD.valid_until,OLD.sunset_at,
    OLD.manifest,OLD.manifest_sha256,OLD.requested_by,OLD.requested_at,OLD.expires_at) OR
    OLD.status<>'pending' OR NEW.status NOT IN ('approved','expired') OR
@@ -204,7 +204,7 @@ CREATE TRIGGER legacy_admission_request_guard_trigger BEFORE UPDATE OR DELETE ON
 CREATE FUNCTION request_legacy_compat_config_admission(
   requested_request_id uuid,requested_config_id uuid,requested_credential_id uuid,requested_tenant uuid,requested_merchant uuid,
   requested_protocol text,requested_pid text,requested_currency text,requested_scale smallint,
-  requested_chain text,requested_asset text,requested_token text,requested_network text,requested_payment_type text,
+  requested_chain text,requested_asset text,requested_token text,requested_network text,requested_epay_type text,
   requested_ip_allowlist cidr[],requested_legacy_secret_ref text,requested_callback_key_id text,
   requested_core_key_id text,requested_core_secret_ref text,requested_valid_from timestamptz,
   requested_valid_until timestamptz,requested_sunset timestamptz,requested_manifest jsonb,
@@ -215,23 +215,23 @@ BEGIN
   canonical_manifest:=jsonb_build_object('asset_id',requested_asset,'chain_id',requested_chain,
     'config_id',requested_config_id,'core_key_id',requested_core_key_id,'core_secret_ref',requested_core_secret_ref,
     'credential_id',requested_credential_id,'currency',requested_currency,'currency_scale',requested_scale,
-    'ip_allowlist',to_jsonb(requested_ip_allowlist),'legacy_payment_type',requested_payment_type,
+    'ip_allowlist',to_jsonb(requested_ip_allowlist),'legacy_epay_type',requested_epay_type,
     'legacy_network',requested_network,'legacy_secret_ref',requested_legacy_secret_ref,'legacy_token',requested_token,
     'merchant_id',requested_merchant,'pid',requested_pid,'protocol',requested_protocol,'sunset_at',requested_sunset,
     'tenant_id',requested_tenant,'valid_from',requested_valid_from,'valid_until',requested_valid_until);
   IF NOT pg_has_role(session_user,'legacy_compat_admission_requester','member') OR
      requested_manifest<>canonical_manifest OR digest(convert_to(requested_manifest::text,'UTF8'),'sha256')<>requested_manifest_sha256 OR
-     requested_protocol NOT IN ('json_md5','form_md5') OR cardinality(requested_ip_allowlist) NOT BETWEEN 1 AND 64 OR
+     requested_protocol NOT IN ('gmpay','epay') OR cardinality(requested_ip_allowlist) NOT BETWEEN 1 AND 64 OR
 	 requested_pid<>btrim(requested_pid) OR requested_currency<>upper(requested_currency) OR
 	 requested_token<>upper(requested_token) OR requested_network<>lower(requested_network) OR
-	 (requested_protocol='json_md5' AND requested_payment_type<>'json_md5') OR
+	 (requested_protocol='gmpay' AND requested_epay_type<>'gmpay') OR
      requested_sunset<=authoritative_at OR requested_valid_from>authoritative_at OR requested_valid_until<=authoritative_at OR requested_valid_until>requested_sunset THEN RETURN false; END IF;
   INSERT INTO public.legacy_compat_admission_requests(id,config_id,credential_id,tenant_id,merchant_id,protocol,pid,currency,
-    currency_scale,chain_id,asset_id,legacy_token,legacy_network,legacy_payment_type,ip_allowlist,legacy_secret_ref,callback_key_id,
+    currency_scale,chain_id,asset_id,legacy_token,legacy_network,legacy_epay_type,ip_allowlist,legacy_secret_ref,callback_key_id,
     core_key_id,core_secret_ref,valid_from,valid_until,sunset_at,manifest,manifest_sha256,requested_by,requested_at,expires_at,status)
   VALUES(requested_request_id,requested_config_id,requested_credential_id,requested_tenant,requested_merchant,requested_protocol,
     requested_pid,requested_currency,requested_scale,requested_chain,requested_asset,requested_token,
-    requested_network,requested_payment_type,requested_ip_allowlist,requested_legacy_secret_ref,requested_callback_key_id,
+    requested_network,requested_epay_type,requested_ip_allowlist,requested_legacy_secret_ref,requested_callback_key_id,
     requested_core_key_id,requested_core_secret_ref,requested_valid_from,requested_valid_until,requested_sunset,requested_manifest,
     requested_manifest_sha256,session_user,authoritative_at,authoritative_at+interval '30 minutes','pending');
   RETURN true;
@@ -249,7 +249,7 @@ BEGIN
 		(requested_manifest->>'tenant_id')::uuid,(requested_manifest->>'merchant_id')::uuid,
 		requested_manifest->>'protocol',requested_manifest->>'pid',requested_manifest->>'currency',
 		(requested_manifest->>'currency_scale')::smallint,requested_manifest->>'chain_id',requested_manifest->>'asset_id',
-		requested_manifest->>'legacy_token',requested_manifest->>'legacy_network',requested_manifest->>'legacy_payment_type',
+		requested_manifest->>'legacy_token',requested_manifest->>'legacy_network',requested_manifest->>'legacy_epay_type',
 		ARRAY(SELECT value::cidr FROM jsonb_array_elements_text(requested_manifest->'ip_allowlist') AS value),
 		requested_manifest->>'legacy_secret_ref',requested_manifest->>'callback_key_id',requested_manifest->>'core_key_id',
 		requested_manifest->>'core_secret_ref',(requested_manifest->>'valid_from')::timestamptz,
@@ -284,11 +284,11 @@ BEGIN
 	   AND ARRAY['payments:read','payments:write','events:read']::text[] @> k.scopes)
   THEN RETURN false; END IF;
   INSERT INTO public.legacy_compat_configs(id,tenant_id,merchant_id,protocol,pid,currency,currency_scale,chain_id,asset_id,
-    legacy_token,legacy_network,legacy_payment_type,ip_allowlist,current_credential_version_id,status,sunset_at,
+    legacy_token,legacy_network,legacy_epay_type,ip_allowlist,current_credential_version_id,status,sunset_at,
     requested_by,approved_by,manifest_sha256,approved_at,created_at,updated_at)
   VALUES(request_row.config_id,request_row.tenant_id,request_row.merchant_id,request_row.protocol,request_row.pid,request_row.currency,
     request_row.currency_scale,request_row.chain_id,request_row.asset_id,request_row.legacy_token,request_row.legacy_network,
-    request_row.legacy_payment_type,request_row.ip_allowlist,request_row.credential_id,'enabled',request_row.sunset_at,
+    request_row.legacy_epay_type,request_row.ip_allowlist,request_row.credential_id,'enabled',request_row.sunset_at,
     request_row.requested_by,session_user,request_row.manifest_sha256,authoritative_at,authoritative_at,authoritative_at);
   INSERT INTO public.legacy_compat_credential_versions(id,config_id,version,legacy_secret_ref,callback_key_id,core_key_id,
     core_secret_ref,valid_from,valid_until,created_at)
@@ -312,10 +312,10 @@ END $$;
 CREATE FUNCTION legacy_lookup_credential(requested_protocol text,requested_pid text,checked_at timestamptz)
 RETURNS TABLE(config_id uuid,credential_version_id uuid,credential_version bigint,protocol text,pid text,tenant_id uuid,merchant_id uuid,
  legacy_secret_ref text,callback_key_id text,core_key_id text,core_secret_ref text,currency text,currency_scale smallint,
- chain_id text,asset_id text,legacy_token text,legacy_network text,legacy_payment_type text,ip_allowlist cidr[],approved boolean,enabled boolean,sunset_at timestamptz)
+ chain_id text,asset_id text,legacy_token text,legacy_network text,legacy_epay_type text,ip_allowlist cidr[],approved boolean,enabled boolean,sunset_at timestamptz)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public SET row_security=off AS $$
  SELECT c.id,v.id,v.version,c.protocol,c.pid,c.tenant_id,c.merchant_id,v.legacy_secret_ref,v.callback_key_id,v.core_key_id,v.core_secret_ref,
-   c.currency::text,c.currency_scale,c.chain_id,c.asset_id,c.legacy_token,c.legacy_network,c.legacy_payment_type,c.ip_allowlist,true,
+   c.currency::text,c.currency_scale,c.chain_id,c.asset_id,c.legacy_token,c.legacy_network,c.legacy_epay_type,c.ip_allowlist,true,
    c.status='enabled' AND checked_at<c.sunset_at AND checked_at BETWEEN v.valid_from AND v.valid_until,c.sunset_at
  FROM public.legacy_compat_configs c JOIN public.legacy_compat_credential_versions v ON v.id=c.current_credential_version_id AND v.config_id=c.id
  WHERE c.protocol=requested_protocol AND c.pid=requested_pid
@@ -324,22 +324,22 @@ $$;
 CREATE FUNCTION legacy_lookup_credential_version(requested_id uuid)
 RETURNS TABLE(config_id uuid,credential_version_id uuid,credential_version bigint,protocol text,pid text,tenant_id uuid,merchant_id uuid,
  legacy_secret_ref text,callback_key_id text,core_key_id text,core_secret_ref text,currency text,currency_scale smallint,
- chain_id text,asset_id text,legacy_token text,legacy_network text,legacy_payment_type text,ip_allowlist cidr[],approved boolean,enabled boolean,sunset_at timestamptz)
+ chain_id text,asset_id text,legacy_token text,legacy_network text,legacy_epay_type text,ip_allowlist cidr[],approved boolean,enabled boolean,sunset_at timestamptz)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public SET row_security=off AS $$
  SELECT c.id,v.id,v.version,c.protocol,c.pid,c.tenant_id,c.merchant_id,v.legacy_secret_ref,v.callback_key_id,v.core_key_id,v.core_secret_ref,
-   c.currency::text,c.currency_scale,c.chain_id,c.asset_id,c.legacy_token,c.legacy_network,c.legacy_payment_type,c.ip_allowlist,true,c.status='enabled',c.sunset_at
+   c.currency::text,c.currency_scale,c.chain_id,c.asset_id,c.legacy_token,c.legacy_network,c.legacy_epay_type,c.ip_allowlist,true,c.status='enabled',c.sunset_at
  FROM public.legacy_compat_credential_versions v JOIN public.legacy_compat_configs c ON c.id=v.config_id WHERE v.id=requested_id
 $$;
 
 CREATE FUNCTION legacy_record_mapping(requested_trade text,requested_config uuid,requested_credential uuid,requested_protocol text,
  requested_order text,requested_hash bytea,requested_intent uuid,requested_route uuid,requested_notify text,requested_return text,
- requested_name text,requested_payment_type text,requested_amount text,requested_currency text,requested_token text,requested_network text,requested_at timestamptz)
+ requested_name text,requested_epay_type text,requested_amount text,requested_currency text,requested_token text,requested_network text,requested_at timestamptz)
 RETURNS SETOF legacy_compat_mappings LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public SET row_security=off AS $$
 BEGIN
   INSERT INTO public.legacy_compat_mappings(trade_id,config_id,credential_version_id,protocol,legacy_order_id,request_hash,intent_id,route_id,
-    notify_url,return_url,order_name,form_md5_type,fiat_amount,currency,legacy_token,legacy_network,created_at)
+    notify_url,return_url,order_name,epay_type,fiat_amount,currency,legacy_token,legacy_network,created_at)
   VALUES(requested_trade,requested_config,requested_credential,requested_protocol,requested_order,requested_hash,requested_intent,requested_route,
-    requested_notify,requested_return,requested_name,requested_payment_type,requested_amount,requested_currency,requested_token,requested_network,requested_at)
+    requested_notify,requested_return,requested_name,requested_epay_type,requested_amount,requested_currency,requested_token,requested_network,requested_at)
   ON CONFLICT(config_id,legacy_order_id) DO NOTHING;
   RETURN QUERY SELECT * FROM public.legacy_compat_mappings WHERE config_id=requested_config AND legacy_order_id=requested_order;
 END $$;
@@ -388,8 +388,8 @@ BEGIN
 		JOIN public.legacy_compat_configs c ON c.id=m.config_id
 		WHERE m.trade_id=requested_trade AND m.config_id=requested_config AND m.credential_version_id=requested_credential
 		AND m.notify_url=requested_target AND v.callback_key_id=requested_key_id
-		AND ((c.protocol='json_md5' AND requested_method='POST' AND requested_content_type='application/json') OR
-		     (c.protocol='form_md5' AND requested_method='GET' AND requested_content_type='application/x-www-form-urlencoded')))
+		AND ((c.protocol='gmpay' AND requested_method='POST' AND requested_content_type='application/json') OR
+		     (c.protocol='epay' AND requested_method='GET' AND requested_content_type='application/x-www-form-urlencoded')))
 	THEN RETURN false; END IF;
  IF requested_sequence<=current_sequence THEN
    RETURN EXISTS(SELECT 1 FROM public.legacy_compat_callback_deliveries WHERE config_id=requested_config
