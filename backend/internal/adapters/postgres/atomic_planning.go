@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/application"
@@ -115,8 +116,9 @@ func (s *Store) AllocateRouteInTx(ctx context.Context, tx pgx.Tx, p application.
 // selectUnreservedAmount serializes on the already locked address row and
 // chooses the smallest user-visible suffix that does not collide with either a
 // leased quote or an active exact-amount reservation in the requested window.
-// Assets with more than eight decimals are rounded up and stepped at the
-// eighth decimal so common wallets can enter the amount exactly.
+// Amounts are rounded up to a payer-facing precision supported by common
+// custodial wallets. The same quantum is used for collision suffixes, keeping
+// a shared receiving address unambiguous without showing unusable decimals.
 func selectUnreservedAmount(ctx context.Context, tx pgx.Tx, tenantID, addressID, chainID, assetID, address string, base money.Amount, decimals uint8, startsAt, graceEndsAt time.Time) (money.Amount, error) {
 	rows, err := tx.Query(ctx, `SELECT q.crypto_amount_atomic::text
 FROM address_assignments aa JOIN rate_quotes q ON q.id=aa.quote_id AND q.tenant_id=aa.tenant_id
@@ -140,7 +142,7 @@ WHERE ar.tenant_id=$1 AND ar.chain_id=$5 AND ar.receiving_address=$6 AND ar.asse
 	if err = rows.Err(); err != nil {
 		return money.Amount{}, err
 	}
-	base, step, err := roundPayableAmount(base, decimals)
+	base, step, err := roundPayableAmount(base, decimals, assetID)
 	if err != nil {
 		return money.Amount{}, err
 	}
@@ -160,13 +162,32 @@ WHERE ar.tenant_id=$1 AND ar.chain_id=$5 AND ar.receiving_address=$6 AND ar.asse
 	return money.Amount{}, fmt.Errorf("%w: exact-amount reservation space exhausted", domain.ErrStateConflict)
 }
 
-const maximumPayerFractionalDigits uint8 = 8
+func payerFractionalDigits(assetID string, decimals uint8) uint8 {
+	var preferred uint8
+	switch {
+	case assetID == "trx-tron" || assetID == "ton-ton" || assetID == "pol-polygon":
+		preferred = 3
+	case assetID == "sol-solana" || assetID == "avax-avalanche":
+		preferred = 4
+	case assetID == "eth-ethereum" || assetID == "eth-base" || assetID == "eth-arbitrum" || assetID == "eth-optimism" || assetID == "bnb-bsc":
+		preferred = 6
+	case strings.HasPrefix(assetID, "usdt-") || strings.HasPrefix(assetID, "usdc-") || strings.HasPrefix(assetID, "usdce-"):
+		preferred = 2
+	default:
+		preferred = 8
+	}
+	if decimals < preferred {
+		return decimals
+	}
+	return preferred
+}
 
-func roundPayableAmount(base money.Amount, decimals uint8) (money.Amount, money.Amount, error) {
+func roundPayableAmount(base money.Amount, decimals uint8, assetID string) (money.Amount, money.Amount, error) {
 	step := money.MustParse("1")
-	if decimals > maximumPayerFractionalDigits {
+	payerDigits := payerFractionalDigits(assetID, decimals)
+	if decimals > payerDigits {
 		var err error
-		step, err = step.MulPow10(decimals - maximumPayerFractionalDigits)
+		step, err = step.MulPow10(decimals - payerDigits)
 		if err != nil {
 			return money.Amount{}, money.Amount{}, err
 		}
