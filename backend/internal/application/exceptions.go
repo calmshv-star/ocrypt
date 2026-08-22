@@ -197,6 +197,7 @@ type ResolutionQueueStore interface {
 	ResolutionStore
 	ClaimResolutions(context.Context, string, string, time.Time, time.Duration, int) ([]ResolutionJob, error)
 	RetryResolution(context.Context, domain.ManualResolution, time.Time, string, bool) error
+	RejectResolution(context.Context, domain.ManualResolution, string) error
 }
 
 type ResolutionWorker struct {
@@ -236,6 +237,17 @@ func (w ResolutionWorker) RunBatch(ctx context.Context, workerID string, limit i
 		reason := err.Error()
 		if len(reason) > 512 {
 			reason = reason[:512]
+		}
+		// Validation failures are deterministic facts of the submitted operator
+		// decision (for example, an unapproved shortfall). Retrying the same
+		// immutable resolution can never change the result. Reject it once and
+		// reopen the unmatched payment so the operator can submit a corrected
+		// decision.
+		if errors.Is(err, domain.ErrValidation) {
+			if rejectErr := w.Store.RejectResolution(ctx, job.Resolution, reason); rejectErr != nil {
+				failures = append(failures, fmt.Errorf("resolution %s: %v; reject: %w", job.Resolution.ID, err, rejectErr))
+			}
+			continue
 		}
 		dead := job.Resolution.Attempt >= maxAttempts
 		next := now.Add(time.Duration(job.Resolution.Attempt*job.Resolution.Attempt) * time.Second)
