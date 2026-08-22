@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Activity, AlertTriangle, ArrowRight, CheckCircle2, CircleDollarSign, Clock3, FileClock, RadioTower, RefreshCw, Scale, Webhook, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { isStepUpError, useAdmin, useAdminQuery } from "./AdminProvider";
-import type { AdminScope, AssetRow, AuditRow, IntentRow, Overview, Page, Permission, ReconciliationRow, TransferRow, UnmatchedRow, WebhookRow } from "./api/types";
+import type { AdminScope, AssetRow, AuditRow, CandidateRow, IntentRow, Overview, Page, Permission, ReconciliationRow, TransferRow, UnmatchedRow, WebhookRow } from "./api/types";
 
 type Resource = "intents" | "transfers" | "assets" | "reconciliation" | "audit";
 type DisplayRow = { id: string; cells: ReactNode[] };
