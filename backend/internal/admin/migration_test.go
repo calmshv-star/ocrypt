@@ -289,9 +289,28 @@ func TestManualResolutionBridgePersistsAndRechecksCandidateVersion(t *testing.T)
 		t.Fatal(err)
 	}
 	source := string(raw)
-	for _, fragment := range []string{"candidate_set_version,idempotency_key", "Scan(&eventID, &candidateSetVersion)", "c.candidate_set_version=mr.candidate_set_version", "pr.merchant_id=$3 AND cardinality(c.disqualifiers)=0", "FOR UPDATE OF mr,u"} {
+	for _, fragment := range []string{"candidate_set_version,idempotency_key", "Scan(&eventID, &candidateSetVersion,", "c.candidate_set_version=mr.candidate_set_version", "pr.merchant_id=$3 AND cardinality(c.disqualifiers)=0", "FOR UPDATE OF mr,u"} {
 		if !strings.Contains(source, fragment) {
 			t.Errorf("manual-resolution fence missing %q", fragment)
+		}
+	}
+}
+
+func TestManualResolutionDerivesAcknowledgementsFromSelectedCanonicalPayment(t *testing.T) {
+	raw, err := os.ReadFile("postgres.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	for _, fragment := range []string{
+		"te.amount_atomic<pr.expected_amount_atomic",
+		"te.on_chain_time>pr.expires_at",
+		"te.asset_id<>pr.asset_id",
+		"&payload.AcceptShortfall, &payload.AcceptLate, &payload.AcceptCrossAsset",
+		"value.Payload = normalizedPayload",
+	} {
+		if !strings.Contains(source, fragment) {
+			t.Errorf("manual confirmation does not derive canonical exception %q", fragment)
 		}
 	}
 }

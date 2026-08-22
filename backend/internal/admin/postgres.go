@@ -1159,19 +1159,34 @@ func (r *PostgresRepository) CreateActionRequest(ctx context.Context, p Principa
 		payloadHash := requestDigest(json.RawMessage(value.Payload))
 		var eventID string
 		var candidateSetVersion int64
-		e = tx.QueryRow(ctx, `SELECT u.event_id::text,c.candidate_set_version FROM unmatched_payments u
+		// Selecting a candidate and pressing "credit payment" is the operator's
+		// final decision. Derive the required exception acknowledgements from the
+		// canonical transfer and selected route instead of trusting hidden client
+		// flags or asking the operator to confirm the same decision twice.
+		e = tx.QueryRow(ctx, `SELECT u.event_id::text,c.candidate_set_version,
+       te.amount_atomic<pr.expected_amount_atomic,
+       te.on_chain_time>pr.expires_at,
+       te.asset_id<>pr.asset_id
+FROM unmatched_payments u
 JOIN match_candidates c ON c.unmatched_id=u.id AND c.tenant_id=u.tenant_id AND c.route_id=$2 AND cardinality(c.disqualifiers)=0
 JOIN payment_routes pr ON pr.id=c.route_id AND pr.tenant_id=c.tenant_id
+JOIN transfer_events te ON te.id=u.event_id
 WHERE u.id=$1 AND u.tenant_id=$3 AND u.version=$4 AND pr.merchant_id=$5
 AND u.status IN ('new','candidates_ready','approval_required','verification_retry')
 AND c.candidate_set_version=(SELECT max(latest.candidate_set_version) FROM match_candidates latest WHERE latest.unmatched_id=u.id AND latest.tenant_id=u.tenant_id)
-FOR UPDATE OF u`, value.ResourceID, payload.TargetRouteID, s.TenantID, value.ObjectVersion, s.MerchantID).Scan(&eventID, &candidateSetVersion)
+FOR UPDATE OF u`, value.ResourceID, payload.TargetRouteID, s.TenantID, value.ObjectVersion, s.MerchantID).Scan(&eventID, &candidateSetVersion, &payload.AcceptShortfall, &payload.AcceptLate, &payload.AcceptCrossAsset)
 		if errors.Is(e, pgx.ErrNoRows) {
 			return ErrConflict
 		}
 		if e != nil {
 			return e
 		}
+		normalizedPayload, e := json.Marshal(payload)
+		if e != nil {
+			return e
+		}
+		value.Payload = normalizedPayload
+		payloadHash = requestDigest(json.RawMessage(normalizedPayload))
 		_, e = tx.Exec(ctx, `INSERT INTO manual_resolutions
 (id,tenant_id,unmatched_id,event_id,target_route_id,candidate_set_version,idempotency_key,request_hash,requested_by,
  accept_shortfall,accept_late_payment,accept_cross_asset,human_reason,status,created_at,updated_at,next_attempt_at,version)
