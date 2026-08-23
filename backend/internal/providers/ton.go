@@ -247,6 +247,60 @@ func (s *TONSource) ScanRange(ctx context.Context, from, to uint64) (scanner.Ran
 	return batch, nil
 }
 
+func (s *TONSource) LookupTransaction(ctx context.Context, chainID, transactionID string) ([]domain.TransferEvent, error) {
+	if chainID != s.chainID {
+		return nil, &ProviderError{Kind: ErrorPermanent, Operation: "ton transaction lookup", Cause: errors.New("chain ID mismatch")}
+	}
+	txHash, err := canonicalTONHash(transactionID)
+	if err != nil {
+		return nil, &ProviderError{Kind: ErrorPermanent, Operation: "ton transaction lookup", Cause: err}
+	}
+	// Toncenter accepts the common base64 form as well as hex on different
+	// installations. Preserve the merchant-supplied representation for the
+	// query, then canonicalize every returned action before trusting it.
+	actions, err := s.tonActionPages(ctx, url.Values{"transaction_hash": {strings.TrimSpace(transactionID)}})
+	if err != nil {
+		return nil, err
+	}
+	filtered := actions[:0]
+	seqnos := make(map[uint64]struct{})
+	for _, action := range actions {
+		canonical, hashErr := canonicalTONHash(tonActionTransactionHash(action))
+		if hashErr != nil || canonical != txHash {
+			continue
+		}
+		if action.TraceMCSeqnoEnd == 0 {
+			return nil, malformed("ton transaction lookup", errors.New("missing masterchain binding"))
+		}
+		filtered = append(filtered, action)
+		seqnos[action.TraceMCSeqnoEnd] = struct{}{}
+	}
+	if len(filtered) == 0 {
+		return nil, nil
+	}
+	heads, err := s.Heads(ctx)
+	if err != nil {
+		return nil, err
+	}
+	safe := heads[0].SafeHeight
+	blocks := make(map[uint64]tonBlockEvidence, len(seqnos))
+	for seqno := range seqnos {
+		if seqno > safe {
+			return nil, &ProviderError{Kind: ErrorTransient, Operation: "ton transaction lookup", Cause: errors.New("transaction is not finalized")}
+		}
+		block, err := s.tonBlock(ctx, url.Values{"workchain": {"-1"}, "shard": {"-9223372036854775808"}, "seqno": {strconv.FormatUint(seqno, 10)}})
+		if err != nil {
+			return nil, err
+		}
+		hash, err := canonicalTONHash(block.RootHash)
+		if err != nil || block.Seqno != seqno || block.GenUtime <= 0 {
+			return nil, malformed("ton transaction block", errors.New("invalid masterchain binding"))
+		}
+		blocks[seqno] = tonBlockEvidence{Hash: hash, Time: time.Unix(int64(block.GenUtime), 0).UTC()}
+	}
+	return s.normalizeTONActions(filtered, blocks, 0, safe)
+}
+
 type tonBlockEvidence struct {
 	Hash string
 	Time time.Time
@@ -601,3 +655,4 @@ func crc16XMODEM(data []byte) uint16 {
 }
 
 var _ scanner.Source = (*TONSource)(nil)
+var _ scanner.TransactionSource = (*TONSource)(nil)

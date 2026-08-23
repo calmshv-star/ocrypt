@@ -49,6 +49,16 @@ type Source interface {
 	Heads(context.Context) ([]ProviderHead, error)
 	ScanRange(context.Context, uint64, uint64) (RangeBatch, error)
 }
+
+// TransactionSource is the fast recovery lane used when a customer supplies a
+// transaction hash before the sequential scanner has reached its block. The
+// returned events must be derived from finalized chain data and pass through
+// the same normalization and settlement pipeline as range-scanned events.
+// Implementations are read-only and must never advance the canonical cursor.
+type TransactionSource interface {
+	Source
+	LookupTransaction(context.Context, string, string) ([]domain.TransferEvent, error)
+}
 type Lease struct {
 	ChainID, Shard, Owner string
 	Height                uint64

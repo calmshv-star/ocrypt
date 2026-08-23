@@ -176,6 +176,41 @@ func (s *AptosSource) ScanRange(ctx context.Context, from, to uint64) (scanner.R
 	return s.scanIndexedRange(ctx, from, to, safe)
 }
 
+func (s *AptosSource) LookupTransaction(ctx context.Context, chainID, transactionID string) ([]domain.TransferEvent, error) {
+	if chainID != s.chainID {
+		return nil, &ProviderError{Kind: ErrorPermanent, Operation: "aptos transaction lookup", Cause: errors.New("chain ID mismatch")}
+	}
+	txHash, err := canonicalAptosHash(transactionID)
+	if err != nil {
+		return nil, &ProviderError{Kind: ErrorPermanent, Operation: "aptos transaction lookup", Cause: err}
+	}
+	var transaction aptosTransaction
+	if err := s.http.request(ctx, "aptos transaction lookup", http.MethodGet, []string{"v1", "transactions", "by_hash", txHash}, nil, nil, &transaction); err != nil {
+		return nil, err
+	}
+	canonical, err := canonicalAptosHash(transaction.Hash)
+	if err != nil || canonical != txHash {
+		return nil, malformed("aptos transaction lookup", errors.New("transaction hash mismatch"))
+	}
+	height, err := parseUintNumber(transaction.Version)
+	if err != nil {
+		return nil, malformed("aptos transaction lookup", errors.New("missing ledger version"))
+	}
+	micros, err := parseUintNumber(transaction.Timestamp)
+	if err != nil || micros == 0 || micros > uint64(^uint64(0)>>1) {
+		return nil, malformed("aptos transaction lookup", errors.New("invalid transaction timestamp"))
+	}
+	heads, err := s.Heads(ctx)
+	if err != nil {
+		return nil, err
+	}
+	safe := heads[0].SafeHeight
+	if height > safe {
+		return nil, &ProviderError{Kind: ErrorTransient, Operation: "aptos transaction lookup", Cause: errors.New("transaction is not committed")}
+	}
+	return s.normalizeAptosTransaction(transaction, height, txHash, time.UnixMicro(int64(micros)).UTC(), safe)
+}
+
 const aptosDepositCandidatesQuery = `query OcryptAptosDeposits($where_condition: fungible_asset_activities_bool_exp!, $offset: Int!, $limit: Int!) {
   fungible_asset_activities(where: $where_condition, order_by: [{transaction_version: asc}, {event_index: asc}], offset: $offset, limit: $limit) {
     amount asset_type event_index is_transaction_success owner_address transaction_version type
@@ -635,3 +670,4 @@ func canonicalAptosAssetKey(value string) (string, error) {
 }
 
 var _ scanner.Source = (*AptosSource)(nil)
+var _ scanner.TransactionSource = (*AptosSource)(nil)

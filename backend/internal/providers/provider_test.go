@@ -47,15 +47,37 @@ func readFixture(t *testing.T, name string, target any) {
 
 func rpcResult(t *testing.T, request *http.Request, selectResult func(string, []json.RawMessage) json.RawMessage) json.RawMessage {
 	t.Helper()
-	var call struct {
+	type rpcCall struct {
+		ID     json.RawMessage   `json:"id"`
 		Method string            `json:"method"`
 		Params []json.RawMessage `json:"params"`
 	}
-	if err := json.NewDecoder(request.Body).Decode(&call); err != nil {
+	raw, err := io.ReadAll(request.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bytes.TrimSpace(raw)) > 0 && bytes.TrimSpace(raw)[0] == '[' {
+		var calls []rpcCall
+		if err := json.Unmarshal(raw, &calls); err != nil {
+			t.Fatal(err)
+		}
+		envelopes := make([]map[string]any, len(calls))
+		for index, call := range calls {
+			envelopes[index] = map[string]any{"jsonrpc": "2.0", "id": call.ID, "result": selectResult(call.Method, call.Params)}
+		}
+		envelope, _ := json.Marshal(envelopes)
+		return envelope
+	}
+	var call rpcCall
+	if err := json.Unmarshal(raw, &call); err != nil {
 		t.Fatal(err)
 	}
 	result := selectResult(call.Method, call.Params)
-	envelope, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "result": result})
+	id := call.ID
+	if len(id) == 0 {
+		id = json.RawMessage(`1`)
+	}
+	envelope, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
 	return envelope
 }
 
@@ -458,6 +480,50 @@ func TestSolanaWatchedAddressUsesLightBlocksAndFetchesOnlyMatchingTransaction(t 
 	batch, err := source.ScanRange(context.Background(), 1, 1)
 	if err != nil || len(batch.Blocks) != 1 || len(batch.Events) != 1 || batch.Events[0].Identity.ToAddress != "So11111111111111111111111111111111111111112" {
 		t.Fatalf("watched-address scan failed: batch=%+v err=%v", batch, err)
+	}
+}
+
+func TestSolanaTransactionLookupBypassesRangeCursorAndKeepsFinalityEvidence(t *testing.T) {
+	var fixture map[string]json.RawMessage
+	readFixture(t, "solana.json", &fixture)
+	var block map[string]json.RawMessage
+	if err := json.Unmarshal(fixture["block"], &block); err != nil {
+		t.Fatal(err)
+	}
+	var transactions []json.RawMessage
+	if err := json.Unmarshal(block["transactions"], &transactions); err != nil || len(transactions) != 1 {
+		t.Fatal("invalid Solana fixture")
+	}
+	var transaction map[string]json.RawMessage
+	if err := json.Unmarshal(transactions[0], &transaction); err != nil {
+		t.Fatal(err)
+	}
+	transaction["slot"] = json.RawMessage(`1`)
+	transaction["blockTime"] = json.RawMessage(`100`)
+	transactionResult, _ := json.Marshal(transaction)
+	header := json.RawMessage(`{"blockhash":"So11111111111111111111111111111111111111112","previousBlockhash":"11111111111111111111111111111111","parentSlot":0,"blockTime":100,"transactions":[]}`)
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		return 200, rpcResult(t, request, func(method string, _ []json.RawMessage) json.RawMessage {
+			switch method {
+			case "getTransaction":
+				return transactionResult
+			case "getSlot":
+				return fixture["slot"]
+			case "getBlock":
+				return header
+			default:
+				t.Fatalf("unexpected Solana method %s", method)
+				return nil
+			}
+		})
+	})
+	source, err := NewSolanaSource(SolanaConfig{HTTP: HTTPConfig{Endpoint: "https://solana.example", Client: client}, ProviderID: "sol-fast", ChainID: "solana:mainnet", NativeAssetID: "sol", NativeDecimals: 9, Assets: map[string]SolanaAsset{"So11111111111111111111111111111111111111112": {AssetID: "token-2022", Decimals: 9}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := source.LookupTransaction(context.Background(), "solana:mainnet", "1111111111111111111111111111111111111111111111111111111111111111")
+	if err != nil || len(events) != 2 || events[0].BlockHeight != 1 || events[0].Confirmations == 0 {
+		t.Fatalf("direct lookup failed: events=%+v err=%v", events, err)
 	}
 }
 

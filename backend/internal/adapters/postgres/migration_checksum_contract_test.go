@@ -50,4 +50,18 @@ func TestWorkerEventSequencePermissionsUseForwardMigration(t *testing.T) {
 	if !strings.Contains(string(up), "REVOKE DELETE,TRUNCATE") {
 		t.Fatal("worker event sequence migration must keep destructive privileges revoked")
 	}
+	permissionRaw, err := os.ReadFile("../../../migrations/000053_proof_worker_settlement_permissions.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	permissionMigration := string(permissionRaw)
+	for _, fragment := range []string{
+		"GRANT SELECT ON assets TO merchant_proof_worker",
+		"GRANT SELECT,INSERT,UPDATE ON payment_observations TO merchant_proof_worker",
+		"GRANT SELECT,INSERT ON payment_observation_events TO merchant_proof_worker",
+	} {
+		if !strings.Contains(permissionMigration, fragment) {
+			t.Fatalf("proof-worker settlement permission is missing: %s", fragment)
+		}
+	}
 }

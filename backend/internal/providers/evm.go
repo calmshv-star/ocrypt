@@ -269,6 +269,62 @@ func (s *EVMSource) ScanRange(ctx context.Context, from, to uint64) (scanner.Ran
 	return batch, nil
 }
 
+// LookupTransaction verifies one finalized transaction without waiting for the
+// sequential range cursor. It uses the same normalizer as ScanRange, so the
+// later canonical scan is an idempotent replay rather than a second payment.
+func (s *EVMSource) LookupTransaction(ctx context.Context, chainID, transactionID string) ([]domain.TransferEvent, error) {
+	if chainID != s.chainID {
+		return nil, &ProviderError{Kind: ErrorPermanent, Operation: "evm transaction lookup", Cause: errors.New("chain ID mismatch")}
+	}
+	txHash, err := canonicalEVMHash(transactionID)
+	if err != nil {
+		return nil, &ProviderError{Kind: ErrorPermanent, Operation: "evm transaction lookup", Cause: err}
+	}
+	var transaction evmTransaction
+	if err := s.http.rpc(ctx, "evm transaction lookup", "eth_getTransactionByHash", []any{txHash}, &transaction); err != nil {
+		return nil, err
+	}
+	if canonical, err := canonicalEVMHash(transaction.Hash); err != nil || canonical != txHash {
+		return nil, malformed("evm transaction lookup", errors.New("transaction hash mismatch"))
+	}
+	var receipt evmReceipt
+	if err := s.http.rpc(ctx, "evm transaction receipt", "eth_getTransactionReceipt", []any{txHash}, &receipt); err != nil {
+		return nil, err
+	}
+	height, err := parseHexUint64(receipt.BlockNumber)
+	if err != nil {
+		return nil, malformed("evm transaction receipt", err)
+	}
+	head, err := s.taggedBlock(ctx, s.headTag, false)
+	if err != nil {
+		return nil, err
+	}
+	safeHeight, err := parseHexUint64(head.Number)
+	if err != nil || height > safeHeight {
+		return nil, &ProviderError{Kind: ErrorTransient, Operation: "evm transaction lookup", Cause: errors.New("transaction is not finalized")}
+	}
+	block, err := s.block(ctx, height, false)
+	if err != nil {
+		return nil, err
+	}
+	_, blockTime, err := validateEVMBlock(block, height)
+	if err != nil {
+		return nil, malformed("evm transaction block", err)
+	}
+	blockHash, _ := canonicalEVMHash(block.Hash)
+	receipts := map[string]evmReceipt{txHash: receipt}
+	traces := make(map[string]evmTraceCall)
+	if s.includeInternal {
+		tracer := map[string]any{"tracer": "callTracer", "timeout": "10s"}
+		var trace evmTraceCall
+		if err := s.http.rpc(ctx, "evm transaction trace", "debug_traceTransaction", []any{txHash, tracer}, &trace); err != nil {
+			return nil, err
+		}
+		traces[txHash] = trace
+	}
+	return s.normalizeEVMTransaction(transaction, receipts, traces, height, blockHash, blockTime, safeHeight)
+}
+
 // scanWatchedRange keeps the canonical block/reorg evidence while avoiding a
 // receipt download for every public-chain transaction. Native candidates are
 // selected from block transaction envelopes and verified with one receipt;
@@ -771,3 +827,4 @@ func malformed(operation string, cause error) error {
 }
 
 var _ scanner.Source = (*EVMSource)(nil)
+var _ scanner.TransactionSource = (*EVMSource)(nil)

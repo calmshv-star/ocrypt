@@ -17,7 +17,6 @@ import (
 	"github.com/calmshv-star/ocrypt/backend/internal/adapters/postgres"
 	"github.com/calmshv-star/ocrypt/backend/internal/application"
 	"github.com/calmshv-star/ocrypt/backend/internal/outbox"
-	"github.com/calmshv-star/ocrypt/backend/internal/scanner"
 	"github.com/calmshv-star/ocrypt/backend/internal/telemetry"
 	"github.com/calmshv-star/ocrypt/backend/internal/webhook"
 )
@@ -74,17 +73,13 @@ func main() {
 		if strings.EqualFold(strings.TrimSpace(os.Getenv("PROOF_VERIFIER_DATABASE_ONLY")), "true") {
 			verifier = store
 		} else {
-			providers := splitNonempty(os.Getenv("PROOF_VERIFIER_PROVIDER_URLS"))
-			quorum, err := positiveInt("PROOF_VERIFIER_QUORUM", 2)
-			if err != nil {
-				slog.Error("invalid PROOF_VERIFIER_QUORUM", "error", err)
-				os.Exit(1)
-			}
-			verifier, err = scanner.NewQuorumHTTPSource(proofChainID, providers, quorum, os.Getenv("PROOF_VERIFIER_PROVIDER_TOKEN"), nil)
+			var direct application.TransactionVerifier
+			direct, err = directProofVerifier(proofChainID)
 			if err != nil {
 				slog.Error("proof verifier initialization failed", "error", err)
 				os.Exit(1)
 			}
+			verifier = databaseThenDirectVerifier{database: store, direct: direct}
 		}
 		proofWorker = &application.ProofWorker{Verifier: verifier, Queue: store, Process: processor, Lease: 30 * time.Second, Limit: 20}
 	}

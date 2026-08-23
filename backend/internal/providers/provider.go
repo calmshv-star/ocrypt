@@ -143,9 +143,6 @@ func newEndpointClient(config HTTPConfig) (*endpointClient, error) {
 }
 
 func (c *endpointClient) waitForRateLimit(ctx context.Context) error {
-	if c.minWait == 0 {
-		return nil
-	}
 	c.rateMu.Lock()
 	defer c.rateMu.Unlock()
 	if wait := time.Until(c.nextRPC); wait > 0 {
@@ -159,6 +156,18 @@ func (c *endpointClient) waitForRateLimit(ctx context.Context) error {
 	}
 	c.nextRPC = time.Now().Add(c.minWait)
 	return nil
+}
+
+func (c *endpointClient) postpone(delay time.Duration) {
+	if delay <= 0 {
+		return
+	}
+	deadline := time.Now().Add(delay)
+	c.rateMu.Lock()
+	if deadline.After(c.nextRPC) {
+		c.nextRPC = deadline
+	}
+	c.rateMu.Unlock()
 }
 
 func (c *endpointClient) request(ctx context.Context, operation, method string, path []string, query url.Values, payload any, target any) error {
@@ -196,12 +205,19 @@ func (c *endpointClient) request(ctx context.Context, operation, method string, 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4<<10))
 		kind := ErrorPermanent
+		retryAfter := time.Duration(0)
 		if response.StatusCode == http.StatusTooManyRequests {
 			kind = ErrorRateLimited
+			retryAfter = parseRetryAfter(response.Header.Get("Retry-After"), c.now())
+			if retryAfter <= 0 {
+				retryAfter = time.Second
+			}
+			c.postpone(retryAfter)
 		} else if response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500 {
 			kind = ErrorTransient
+			c.postpone(250 * time.Millisecond)
 		}
-		return &ProviderError{Kind: kind, Operation: operation, StatusCode: response.StatusCode, RetryAfter: parseRetryAfter(response.Header.Get("Retry-After"), c.now())}
+		return &ProviderError{Kind: kind, Operation: operation, StatusCode: response.StatusCode, RetryAfter: retryAfter}
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
@@ -241,6 +257,72 @@ type rpcEnvelope struct {
 	} `json:"error"`
 }
 
+type rpcBatchCall struct {
+	Operation string
+	Method    string
+	Params    any
+	Target    any
+}
+
+// rpcBatch keeps public-node request counts bounded for chains where one
+// canonical cursor range otherwise needs dozens of small independent reads.
+// Every response is still bound to a unique numeric request ID and decoded
+// with the same defensive rules as a single RPC call.
+func (c *endpointClient) rpcBatch(ctx context.Context, operation string, calls []rpcBatchCall) error {
+	if len(calls) == 0 || len(calls) > 100 {
+		return &ProviderError{Kind: ErrorPermanent, Operation: operation, Cause: errors.New("JSON-RPC batch must contain 1..100 calls")}
+	}
+	payload := make([]map[string]any, len(calls))
+	for index, call := range calls {
+		payload[index] = map[string]any{"jsonrpc": "2.0", "id": index + 1, "method": call.Method, "params": call.Params}
+	}
+	var envelopes []rpcEnvelope
+	if err := c.request(ctx, operation, http.MethodPost, nil, nil, payload, &envelopes); err != nil {
+		return err
+	}
+	if len(envelopes) != len(calls) {
+		return &ProviderError{Kind: ErrorMalformed, Operation: operation, Cause: errors.New("incomplete JSON-RPC batch")}
+	}
+	seen := make(map[int]bool, len(calls))
+	for _, envelope := range envelopes {
+		if envelope.JSONRPC != "2.0" {
+			return &ProviderError{Kind: ErrorMalformed, Operation: operation, Cause: errors.New("invalid JSON-RPC batch envelope")}
+		}
+		id, err := strconv.Atoi(strings.TrimSpace(string(envelope.ID)))
+		if err != nil || id < 1 || id > len(calls) || seen[id] {
+			return &ProviderError{Kind: ErrorMalformed, Operation: operation, Cause: errors.New("invalid JSON-RPC batch response ID")}
+		}
+		seen[id] = true
+		call := calls[id-1]
+		callOperation := strings.TrimSpace(call.Operation)
+		if callOperation == "" {
+			callOperation = operation
+		}
+		if envelope.Error != nil {
+			kind := ErrorPermanent
+			if envelope.Error.Code == -32005 {
+				kind = ErrorRateLimited
+				c.postpone(time.Second)
+			} else if envelope.Error.Code == -32016 || envelope.Error.Code == -32603 {
+				kind = ErrorTransient
+			}
+			return &ProviderError{Kind: kind, Operation: callOperation, Cause: fmt.Errorf("JSON-RPC error %d", envelope.Error.Code)}
+		}
+		if len(envelope.Result) == 0 || bytes.Equal(envelope.Result, []byte("null")) {
+			return &ProviderError{Kind: ErrorMalformed, Operation: callOperation, Cause: errors.New("missing JSON-RPC result")}
+		}
+		decoder := json.NewDecoder(bytes.NewReader(envelope.Result))
+		decoder.UseNumber()
+		if err := decoder.Decode(call.Target); err != nil {
+			return &ProviderError{Kind: ErrorMalformed, Operation: callOperation, Cause: err}
+		}
+		if decoder.Decode(&struct{}{}) != io.EOF {
+			return &ProviderError{Kind: ErrorMalformed, Operation: callOperation, Cause: errors.New("multiple JSON-RPC result values")}
+		}
+	}
+	return nil
+}
+
 func (c *endpointClient) rpc(ctx context.Context, operation, method string, params any, target any) error {
 	payload := map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
 	var envelope rpcEnvelope
@@ -254,6 +336,7 @@ func (c *endpointClient) rpc(ctx context.Context, operation, method string, para
 		kind := ErrorPermanent
 		if envelope.Error.Code == -32005 {
 			kind = ErrorRateLimited
+			c.postpone(time.Second)
 		} else if envelope.Error.Code == -32016 || envelope.Error.Code == -32603 {
 			kind = ErrorTransient
 		}
@@ -396,7 +479,77 @@ func (q *QuorumSource) ScanRange(ctx context.Context, from, to uint64) (scanner.
 	return scanner.RangeBatch{}, &ProviderError{Kind: ErrorDisagreement, Operation: "range quorum", Cause: cause}
 }
 
+func (q *QuorumSource) LookupTransaction(ctx context.Context, chainID, transactionID string) ([]domain.TransferEvent, error) {
+	type result struct {
+		events []domain.TransferEvent
+		err    error
+	}
+	results := make(chan result, len(q.sources))
+	for _, source := range q.sources {
+		lookup, ok := source.(interface {
+			LookupTransaction(context.Context, string, string) ([]domain.TransferEvent, error)
+		})
+		if !ok {
+			return nil, &ProviderError{Kind: ErrorPermanent, Operation: "transaction quorum", Cause: errors.New("direct source does not support transaction lookup")}
+		}
+		go func(lookup interface {
+			LookupTransaction(context.Context, string, string) ([]domain.TransferEvent, error)
+		}) {
+			events, err := lookup.LookupTransaction(ctx, chainID, transactionID)
+			results <- result{events: events, err: err}
+		}(lookup)
+	}
+	agreements := make(map[string]struct {
+		count  int
+		events []domain.TransferEvent
+	})
+	var firstErr error
+	for range q.sources {
+		result := <-results
+		if result.err != nil {
+			if firstErr == nil {
+				firstErr = result.err
+			}
+			continue
+		}
+		canonicalEvents := append([]domain.TransferEvent(nil), result.events...)
+		for index := range canonicalEvents {
+			canonicalEvents[index].Confirmations = 0
+		}
+		canonical, err := json.Marshal(canonicalEvents)
+		if err != nil {
+			continue
+		}
+		digest := sha256.Sum256(canonical)
+		key := hex.EncodeToString(digest[:])
+		agreement := agreements[key]
+		if agreement.count == 0 {
+			agreement.events = result.events
+		} else if len(agreement.events) == len(result.events) {
+			for index := range agreement.events {
+				if result.events[index].Confirmations < agreement.events[index].Confirmations {
+					agreement.events[index].Confirmations = result.events[index].Confirmations
+				}
+			}
+		}
+		agreement.count++
+		agreements[key] = agreement
+		if agreement.count >= q.quorum {
+			return agreement.events, nil
+		}
+	}
+	if q.quorum == 1 && firstErr != nil {
+		return nil, firstErr
+	}
+	cause := error(errors.New("providers returned different canonical transactions"))
+	if firstErr != nil {
+		cause = fmt.Errorf("providers did not reach transaction quorum: %w", firstErr)
+	}
+	return nil, &ProviderError{Kind: ErrorDisagreement, Operation: "transaction quorum", Cause: cause}
+}
+
 var _ scanner.Source = (*QuorumSource)(nil)
+var _ scanner.TransactionSource = (*QuorumSource)(nil)
 
 // FailoverSource keeps one direct RPC provider active and switches to the next
 // configured provider only when the active provider fails. Successful fallback
@@ -470,7 +623,32 @@ func (f *FailoverSource) ScanRange(ctx context.Context, from, to uint64) (scanne
 	return scanner.RangeBatch{}, firstErr
 }
 
+func (f *FailoverSource) LookupTransaction(ctx context.Context, chainID, transactionID string) ([]domain.TransferEvent, error) {
+	var firstErr error
+	for _, index := range f.order() {
+		lookup, ok := f.sources[index].(interface {
+			LookupTransaction(context.Context, string, string) ([]domain.TransferEvent, error)
+		})
+		if !ok {
+			if firstErr == nil {
+				firstErr = &ProviderError{Kind: ErrorPermanent, Operation: "transaction failover", Cause: errors.New("direct source does not support transaction lookup")}
+			}
+			continue
+		}
+		events, err := lookup.LookupTransaction(ctx, chainID, transactionID)
+		if err == nil {
+			f.selectProvider(index)
+			return events, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	return nil, firstErr
+}
+
 var _ scanner.Source = (*FailoverSource)(nil)
+var _ scanner.TransactionSource = (*FailoverSource)(nil)
 
 // DestinationFilterSource preserves canonical block continuity while dropping
 // transfers that cannot match one of the service's receiving addresses. This
@@ -514,4 +692,25 @@ func (f *DestinationFilterSource) ScanRange(ctx context.Context, from, to uint64
 	return batch, nil
 }
 
+func (f *DestinationFilterSource) LookupTransaction(ctx context.Context, chainID, transactionID string) ([]domain.TransferEvent, error) {
+	lookup, ok := f.source.(interface {
+		LookupTransaction(context.Context, string, string) ([]domain.TransferEvent, error)
+	})
+	if !ok {
+		return nil, &ProviderError{Kind: ErrorPermanent, Operation: "filtered transaction lookup", Cause: errors.New("direct source does not support transaction lookup")}
+	}
+	events, err := lookup.LookupTransaction(ctx, chainID, transactionID)
+	if err != nil {
+		return nil, err
+	}
+	filtered := events[:0]
+	for _, event := range events {
+		if _, watched := f.watched[event.Identity.ToAddress]; watched {
+			filtered = append(filtered, event)
+		}
+	}
+	return filtered, nil
+}
+
 var _ scanner.Source = (*DestinationFilterSource)(nil)
+var _ scanner.TransactionSource = (*DestinationFilterSource)(nil)

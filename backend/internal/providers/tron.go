@@ -200,6 +200,62 @@ func (s *TRONSource) ScanRange(ctx context.Context, from, to uint64) (scanner.Ra
 	return batch, nil
 }
 
+func (s *TRONSource) LookupTransaction(ctx context.Context, chainID, transactionID string) ([]domain.TransferEvent, error) {
+	if chainID != s.chainID {
+		return nil, &ProviderError{Kind: ErrorPermanent, Operation: "tron transaction lookup", Cause: errors.New("chain ID mismatch")}
+	}
+	txHash, err := canonicalTRONHash(transactionID)
+	if err != nil {
+		return nil, &ProviderError{Kind: ErrorPermanent, Operation: "tron transaction lookup", Cause: err}
+	}
+	var transaction tronTransaction
+	if err := s.http.request(ctx, "tron transaction lookup", http.MethodPost, []string{"walletsolidity", "gettransactionbyid"}, nil, map[string]any{"value": txHash}, &transaction); err != nil {
+		return nil, err
+	}
+	canonical, err := canonicalTRONHash(transaction.TxID)
+	if err != nil || canonical != txHash {
+		return nil, malformed("tron transaction lookup", errors.New("transaction ID mismatch"))
+	}
+	var info tronTransactionInfo
+	if err := s.http.request(ctx, "tron transaction info", http.MethodPost, []string{"walletsolidity", "gettransactioninfobyid"}, nil, map[string]any{"value": txHash}, &info); err != nil {
+		return nil, err
+	}
+	height, err := numberUint64(info.BlockNumber)
+	if err != nil {
+		return nil, malformed("tron transaction info", errors.New("missing block binding"))
+	}
+	head, err := s.getTRONBlock(ctx, "tron finalized head", []string{"walletsolidity", "getnowblock"}, map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+	safe, _, err := validateTRONBlock(head)
+	if err != nil || height > safe {
+		return nil, &ProviderError{Kind: ErrorTransient, Operation: "tron transaction lookup", Cause: errors.New("transaction is not finalized")}
+	}
+	block, err := s.getTRONBlock(ctx, "tron transaction block", []string{"walletsolidity", "getblockbynum"}, map[string]any{"num": height})
+	if err != nil {
+		return nil, err
+	}
+	blockHeight, blockTime, err := validateTRONBlock(block)
+	if err != nil || blockHeight != height {
+		return nil, malformed("tron transaction block", errors.New("block height mismatch"))
+	}
+	blockHash, _ := canonicalTRONHash(block.BlockID)
+	found := false
+	for _, candidate := range block.Transactions {
+		candidateHash, hashErr := canonicalTRONHash(candidate.TxID)
+		if hashErr == nil && candidateHash == txHash {
+			transaction = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, malformed("tron transaction block", errors.New("transaction is not included in finalized block"))
+	}
+	return s.normalizeTRONTransaction(ctx, transaction, height, blockHash, blockTime, safe)
+}
+
 func (s *TRONSource) normalizeTRONTransaction(ctx context.Context, transaction tronTransaction, height uint64, blockHash string, blockTime time.Time, safe uint64) ([]domain.TransferEvent, error) {
 	txHash, err := canonicalTRONHash(transaction.TxID)
 	if err != nil {
@@ -620,3 +676,4 @@ func equalBytes(a, b []byte) bool {
 }
 
 var _ scanner.Source = (*TRONSource)(nil)
+var _ scanner.TransactionSource = (*TRONSource)(nil)

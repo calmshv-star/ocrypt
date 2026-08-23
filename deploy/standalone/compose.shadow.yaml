@@ -281,87 +281,99 @@ services:
 
   proof-worker-tron:
     <<: *runtime
-    image: ocrypt-worker:20260812-chainfix3
+    image: ocrypt-worker:20260823-fastproof-v2
     container_name: ocrypt-proof-worker-tron
-    env_file: [/opt/ocrypt/config/proof-tron.env]
+    env_file: [/opt/ocrypt/config/scanner-tron.env, /opt/ocrypt/config/proof-tron.env]
+    environment: {PROOF_VERIFIER_DATABASE_ONLY: "false", PROOF_VERIFIER_USE_SCANNER_CONFIG: "true"}
     networks: [data]
 
   proof-worker-ethereum:
     <<: *runtime
-    image: ocrypt-worker:20260812-chainfix3
+    image: ocrypt-worker:20260823-fastproof-v2
     container_name: ocrypt-proof-worker-ethereum
-    env_file: [/opt/ocrypt/config/proof-ethereum.env]
+    env_file: [/opt/ocrypt/config/scanner-ethereum.env, /opt/ocrypt/config/proof-ethereum.env]
+    environment: {PROOF_VERIFIER_DATABASE_ONLY: "false", PROOF_VERIFIER_USE_SCANNER_CONFIG: "true"}
     networks: [data]
 
   proof-worker-solana:
     <<: *runtime
-    image: ocrypt-worker:20260812-chainfix3
+    image: ocrypt-worker:20260823-fastproof-v2
     container_name: ocrypt-proof-worker-solana
-    env_file: [/opt/ocrypt/config/proof-solana.env]
+    env_file: [/opt/ocrypt/config/scanner-solana.env, /opt/ocrypt/config/proof-solana.env]
+    environment: {PROOF_VERIFIER_DATABASE_ONLY: "false", PROOF_VERIFIER_USE_SCANNER_CONFIG: "true"}
     networks: [data]
 
   proof-worker-ton:
     <<: *runtime
-    image: ocrypt-worker:20260812-chainfix3
+    image: ocrypt-worker:20260823-fastproof-v2
     container_name: ocrypt-proof-worker-ton
-    env_file: [/opt/ocrypt/config/proof-ton.env]
+    env_file: [/opt/ocrypt/config/scanner-ton.env, /opt/ocrypt/config/proof-ton.env]
+    environment: {PROOF_VERIFIER_DATABASE_ONLY: "false", PROOF_VERIFIER_USE_SCANNER_CONFIG: "true"}
     networks: [data]
 
   proof-worker-base:
     <<: *runtime
-    image: ocrypt-worker:20260812-chainfix3
+    image: ocrypt-worker:20260823-fastproof-v2
     container_name: ocrypt-proof-worker-base
-    env_file: [/opt/ocrypt/config/proof-base.env]
+    env_file: [/opt/ocrypt/config/scanner-base.env, /opt/ocrypt/config/proof-base.env]
+    environment: {PROOF_VERIFIER_DATABASE_ONLY: "false", PROOF_VERIFIER_USE_SCANNER_CONFIG: "true"}
     networks: [data]
 
   proof-worker-arbitrum:
     <<: *runtime
-    image: ocrypt-worker:20260812-chainfix3
+    image: ocrypt-worker:20260823-fastproof-v2
     container_name: ocrypt-proof-worker-arbitrum
-    env_file: [/opt/ocrypt/config/proof-arbitrum.env]
+    env_file: [/opt/ocrypt/config/scanner-arbitrum.env, /opt/ocrypt/config/proof-arbitrum.env]
+    environment: {PROOF_VERIFIER_DATABASE_ONLY: "false", PROOF_VERIFIER_USE_SCANNER_CONFIG: "true"}
     networks: [data]
 
   proof-worker-optimism:
     <<: *runtime
-    image: ocrypt-worker:20260812-chainfix3
+    image: ocrypt-worker:20260823-fastproof-v2
     container_name: ocrypt-proof-worker-optimism
-    env_file: [/opt/ocrypt/config/proof-optimism.env]
+    env_file: [/opt/ocrypt/config/scanner-optimism.env, /opt/ocrypt/config/proof-optimism.env]
+    environment: {PROOF_VERIFIER_DATABASE_ONLY: "false", PROOF_VERIFIER_USE_SCANNER_CONFIG: "true"}
     networks: [data]
 
   proof-worker-avalanche:
     <<: *runtime
-    image: ocrypt-worker:20260812-chainfix3
+    image: ocrypt-worker:20260823-fastproof-v2
     container_name: ocrypt-proof-worker-avalanche
-    env_file: [/opt/ocrypt/config/proof-avalanche.env]
+    env_file: [/opt/ocrypt/config/scanner-avalanche.env, /opt/ocrypt/config/proof-avalanche.env]
+    environment: {PROOF_VERIFIER_DATABASE_ONLY: "false", PROOF_VERIFIER_USE_SCANNER_CONFIG: "true"}
     networks: [data]
 
   proof-worker-polygon:
     <<: *runtime
-    image: ocrypt-worker:20260812-chainfix3
+    image: ocrypt-worker:20260823-fastproof-v2
     container_name: ocrypt-proof-worker-polygon
-    env_file: [/opt/ocrypt/config/proof-polygon.env]
+    env_file: [/opt/ocrypt/config/scanner-polygon.env, /opt/ocrypt/config/proof-polygon.env]
+    environment: {PROOF_VERIFIER_DATABASE_ONLY: "false", PROOF_VERIFIER_USE_SCANNER_CONFIG: "true"}
     networks: [data]
 
   proof-worker-bsc:
     <<: *runtime
-    image: ocrypt-worker:20260812-chainfix3
+    image: ocrypt-worker:20260823-fastproof-v2
     container_name: ocrypt-proof-worker-bsc
-    env_file: [/opt/ocrypt/config/proof-bsc.env]
+    env_file: [/opt/ocrypt/config/scanner-bsc.env, /opt/ocrypt/config/proof-bsc.env]
+    environment: {PROOF_VERIFIER_DATABASE_ONLY: "false", PROOF_VERIFIER_USE_SCANNER_CONFIG: "true"}
     networks: [data]
 
   proof-worker-plasma:
     <<: *runtime
-    image: ocrypt-worker:20260812-chainfix3
+    image: ocrypt-worker:20260823-fastproof-v2
     container_name: ocrypt-proof-worker-plasma
-    env_file: [/opt/ocrypt/config/proof-plasma.env]
+    env_file: [/opt/ocrypt/config/scanner-plasma.env, /opt/ocrypt/config/proof-plasma.env]
+    environment: {PROOF_VERIFIER_DATABASE_ONLY: "false", PROOF_VERIFIER_USE_SCANNER_CONFIG: "true"}
     networks: [data]
 
   proof-worker-aptos:
     <<: *runtime
     profiles: [aptos-disabled]
-    image: ocrypt-worker:20260812-chainfix3
+    image: ocrypt-worker:20260823-fastproof-v2
     container_name: ocrypt-proof-worker-aptos
-    env_file: [/opt/ocrypt/config/proof-aptos.env]
+    env_file: [/opt/ocrypt/config/scanner-aptos.env, /opt/ocrypt/config/proof-aptos.env]
+    environment: {PROOF_VERIFIER_DATABASE_ONLY: "false", PROOF_VERIFIER_USE_SCANNER_CONFIG: "true"}
     networks: [data]
 
   matching-worker:

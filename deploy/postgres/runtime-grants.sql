@@ -444,9 +444,11 @@ GRANT SELECT,UPDATE ON webhook_endpoints TO merchant_resolution_worker;
 -- direct settlement store. Its role therefore needs that exact composite
 -- transaction plus the proof lease, not merely the proof queue tables.
 GRANT SELECT,UPDATE ON payment_proofs,payment_intents,payment_routes,webhook_endpoints,amount_reservations,provider_orders TO merchant_proof_worker;
-GRANT SELECT ON merchants TO merchant_proof_worker;
+GRANT SELECT ON merchants,assets TO merchant_proof_worker;
 GRANT INSERT ON payment_intent_versions TO merchant_proof_worker;
 GRANT SELECT,INSERT,UPDATE ON transfer_events,unmatched_payments,automated_matching_jobs TO merchant_proof_worker;
+GRANT SELECT,INSERT,UPDATE ON payment_observations TO merchant_proof_worker;
+GRANT SELECT,INSERT ON payment_observation_events TO merchant_proof_worker;
 GRANT SELECT,INSERT ON payment_matches,ledger_accounts,ledger_entries,callback_events TO merchant_proof_worker;
 GRANT INSERT ON match_candidates,ledger_transactions,callback_deliveries,outbox_events TO merchant_proof_worker;
 GRANT SELECT ON payment_route_policy_bindings TO merchant_proof_worker;
