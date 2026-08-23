@@ -32,6 +32,11 @@ type RangeBatch struct {
 	// SparseBlocks is used by chains such as Solana whose consensus can skip
 	// numbered slots. Blocks must still be strictly ordered and parent-linked.
 	SparseBlocks bool `json:"-"`
+	// IndexedCheckpoint is a finalized, address-indexed sparse range. Its
+	// source proves candidate completeness through the chain's address index,
+	// then binds the overlap cursor, every event slot, and the final cursor to
+	// canonical block evidence. Gaps intentionally omit irrelevant blocks.
+	IndexedCheckpoint bool `json:"-"`
 	// IdleCheckpoint permits a quorum-backed source with no payable addresses
 	// to bind only the overlap cursor and finalized destination. It must never
 	// contain events; full canonical ranges resume before a payable route exists.
@@ -231,6 +236,9 @@ func validateRange(batch RangeBatch, from, to uint64, lease Lease, overlap uint6
 	if batch.IdleCheckpoint && (!batch.SparseBlocks || len(batch.Events) != 0 || len(batch.Blocks) > 3) {
 		return fmt.Errorf("invalid idle checkpoint range")
 	}
+	if batch.IndexedCheckpoint && (!batch.SparseBlocks || batch.IdleCheckpoint) {
+		return fmt.Errorf("invalid indexed checkpoint range")
+	}
 	if batch.From != from || batch.To > to || batch.To < from || len(batch.Blocks) == 0 {
 		return fmt.Errorf("range coverage mismatch")
 	}
@@ -249,7 +257,8 @@ func validateRange(batch RangeBatch, from, to uint64, lease Lease, overlap uint6
 			if block.Height <= batch.Blocks[i-1].Height {
 				return fmt.Errorf("block order mismatch at %d", block.Height)
 			}
-			if block.ParentHash != batch.Blocks[i-1].Hash && (!batch.IdleCheckpoint || block.Height == batch.Blocks[i-1].Height+1) {
+			gapAllowed := (batch.IdleCheckpoint || batch.IndexedCheckpoint) && block.Height > batch.Blocks[i-1].Height+1
+			if block.ParentHash != batch.Blocks[i-1].Hash && !gapAllowed {
 				return fmt.Errorf("parent hash mismatch at %d", block.Height)
 			}
 		}

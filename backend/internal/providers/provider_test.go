@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -451,6 +452,13 @@ func TestSolanaWatchedAddressUsesLightBlocksAndFetchesOnlyMatchingTransaction(t 
 	if err := json.Unmarshal(fixture["block"], &fullBlock); err != nil || len(fullBlock.Transactions) != 1 {
 		t.Fatal("invalid Solana fixture")
 	}
+	var indexedTransaction map[string]json.RawMessage
+	if err := json.Unmarshal(fullBlock.Transactions[0], &indexedTransaction); err != nil {
+		t.Fatal(err)
+	}
+	indexedTransaction["slot"] = json.RawMessage(`1`)
+	indexedTransaction["blockTime"] = json.RawMessage(`100`)
+	indexedResult, _ := json.Marshal(indexedTransaction)
 	header := json.RawMessage(`{"blockhash":"So11111111111111111111111111111111111111112","previousBlockhash":"11111111111111111111111111111111","parentSlot":0,"blockTime":100,"transactions":[]}`)
 	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
 		return 200, rpcResult(t, request, func(method string, _ []json.RawMessage) json.RawMessage {
@@ -466,7 +474,7 @@ func TestSolanaWatchedAddressUsesLightBlocksAndFetchesOnlyMatchingTransaction(t 
 			case "getSignaturesForAddress":
 				return json.RawMessage(`[{"signature":"1111111111111111111111111111111111111111111111111111111111111111","slot":1,"err":null,"blockTime":100}]`)
 			case "getTransaction":
-				return fullBlock.Transactions[0]
+				return indexedResult
 			default:
 				t.Fatalf("unexpected Solana method %s", method)
 				return nil
@@ -478,8 +486,46 @@ func TestSolanaWatchedAddressUsesLightBlocksAndFetchesOnlyMatchingTransaction(t 
 		t.Fatal(err)
 	}
 	batch, err := source.ScanRange(context.Background(), 1, 1)
-	if err != nil || len(batch.Blocks) != 1 || len(batch.Events) != 1 || batch.Events[0].Identity.ToAddress != "So11111111111111111111111111111111111111112" {
+	if err != nil || !batch.IndexedCheckpoint || len(batch.Blocks) != 1 || len(batch.Events) != 1 || batch.Events[0].Identity.ToAddress != "So11111111111111111111111111111111111111112" {
 		t.Fatalf("watched-address scan failed: batch=%+v err=%v", batch, err)
+	}
+}
+
+func TestSolanaIndexedRangeBindsOnlyBoundaryBlocksWhenWalletIsIdle(t *testing.T) {
+	methods := make(map[string]int)
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		return 200, rpcResult(t, request, func(method string, params []json.RawMessage) json.RawMessage {
+			methods[method]++
+			switch method {
+			case "getSlot":
+				return json.RawMessage(`100`)
+			case "getBlocks":
+				values := make([]string, 100)
+				for index := range values {
+					values[index] = strconv.Itoa(index + 1)
+				}
+				return json.RawMessage(`[` + strings.Join(values, ",") + `]`)
+			case "getSignaturesForAddress":
+				return json.RawMessage(`[]`)
+			case "getBlock":
+				var slot uint64
+				if err := json.Unmarshal(params[0], &slot); err != nil {
+					t.Fatal(err)
+				}
+				return json.RawMessage(fmt.Sprintf(`{"blockhash":"So11111111111111111111111111111111111111112","previousBlockhash":"11111111111111111111111111111111","parentSlot":%d,"blockTime":100,"transactions":[]}`, slot-1))
+			default:
+				t.Fatalf("unexpected Solana method %s", method)
+				return nil
+			}
+		})
+	})
+	source, err := NewSolanaSource(SolanaConfig{HTTP: HTTPConfig{Endpoint: "https://solana.example", Client: client}, ProviderID: "sol-indexed", ChainID: "solana:mainnet", NativeAssetID: "sol-solana", NativeDecimals: 9, WatchedAddresses: []string{"So11111111111111111111111111111111111111112"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := source.ScanRange(context.Background(), 1, 100)
+	if err != nil || !batch.IndexedCheckpoint || len(batch.Blocks) != 2 || batch.Blocks[0].Height != 1 || batch.Blocks[1].Height != 100 || len(batch.Events) != 0 || methods["getBlock"] != 2 {
+		t.Fatalf("indexed range fetched irrelevant blocks: methods=%+v batch=%+v err=%v", methods, batch, err)
 	}
 }
 

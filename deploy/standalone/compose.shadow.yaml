@@ -184,7 +184,7 @@ services:
 
   scanner-solana:
     <<: *runtime
-    image: ocrypt-scanner:20260812-watch6
+    image: ocrypt-scanner:20260823-solana-indexed
     container_name: ocrypt-scanner-solana
     env_file: [/opt/ocrypt/config/scanner-solana.env]
     networks: [data]

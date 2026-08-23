@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/calmshv-star/ocrypt/backend/internal/domain"
 )
 
 type sourceFixture struct {
@@ -124,6 +126,23 @@ func TestScannerAcceptsExplicitParentLinkedSparseSlots(t *testing.T) {
 	batch.Blocks[1].ParentHash = "wrong"
 	if err := validateRange(batch, 10, 14, Lease{Height: 10, Hash: "h10"}, 1); err == nil {
 		t.Fatal("sparse range without canonical parent linkage passed")
+	}
+}
+
+func TestScannerAcceptsFinalizedIndexedCheckpointWithEventEvidence(t *testing.T) {
+	now := time.Now().UTC()
+	event := domain.TransferEvent{ID: "event-1", BlockHeight: 12, BlockHash: "h12"}
+	batch := RangeBatch{From: 10, To: 20, SparseBlocks: true, IndexedCheckpoint: true, Events: []domain.TransferEvent{event}, Blocks: []Block{
+		{Height: 10, Hash: "h10", ParentHash: "h9", Time: now},
+		{Height: 12, Hash: "h12", ParentHash: "h11", Time: now},
+		{Height: 20, Hash: "h20", ParentHash: "h19", Time: now},
+	}}
+	if err := validateRange(batch, 10, 20, Lease{Height: 10, Hash: "h10"}, 1); err != nil {
+		t.Fatalf("valid indexed checkpoint rejected: %v", err)
+	}
+	batch.Events[0].BlockHash = "wrong"
+	if err := validateRange(batch, 10, 20, Lease{Height: 10, Hash: "h10"}, 1); err == nil {
+		t.Fatal("indexed checkpoint accepted an event without block evidence")
 	}
 }
 

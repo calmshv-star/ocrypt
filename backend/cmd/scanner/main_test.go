@@ -57,6 +57,14 @@ func TestStaticScannerCanRefreshAddressFilterFromActiveRoutes(t *testing.T) {
 	}
 }
 
+func TestWatchAddressSetKeyIgnoresRepositoryOrdering(t *testing.T) {
+	first := watchAddressSetKey([]string{"wallet-c", "wallet-a", "wallet-b"})
+	second := watchAddressSetKey([]string{"wallet-b", "wallet-c", "wallet-a"})
+	if first != second || first == "" {
+		t.Fatalf("watch address key is not stable: first=%q second=%q", first, second)
+	}
+}
+
 func TestFailoverScannerConfigurationRequiresSingleHeadQuorum(t *testing.T) {
 	values := map[string]string{
 		"SCANNER_UNSAFE_DEVELOPMENT_STATIC_CONFIG": "true", "ENVIRONMENT": "test",

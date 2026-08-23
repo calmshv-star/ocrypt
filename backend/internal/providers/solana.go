@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/chains"
@@ -44,6 +45,8 @@ type SolanaSource struct {
 	nativeDecimals uint8
 	assets         map[string]SolanaAsset
 	watched        map[string]struct{}
+	indexMu        sync.Mutex
+	indexed        map[string]struct{}
 }
 
 func NewSolanaSource(config SolanaConfig) (*SolanaSource, error) {
@@ -68,7 +71,11 @@ func NewSolanaSource(config SolanaConfig) (*SolanaSource, error) {
 		}
 		watched[address] = struct{}{}
 	}
-	return &SolanaSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, assets: assets, watched: watched}, nil
+	indexed := make(map[string]struct{}, len(watched))
+	for address := range watched {
+		indexed[address] = struct{}{}
+	}
+	return &SolanaSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, assets: assets, watched: watched, indexed: indexed}, nil
 }
 
 type solanaBlock struct {
@@ -122,6 +129,15 @@ type solanaSignatureInfo struct {
 	BlockTime *int64          `json:"blockTime"`
 }
 
+type solanaTokenAccountsResponse struct {
+	Context struct {
+		Slot uint64 `json:"slot"`
+	} `json:"context"`
+	Value []struct {
+		Pubkey string `json:"pubkey"`
+	} `json:"value"`
+}
+
 func (s *SolanaSource) Heads(ctx context.Context) ([]scanner.ProviderHead, error) {
 	var genesis string
 	if err := s.http.rpc(ctx, "solana genesis", "getGenesisHash", []any{}, &genesis); err != nil {
@@ -160,25 +176,15 @@ func (s *SolanaSource) ScanRange(ctx context.Context, from, to uint64) (scanner.
 			return scanner.RangeBatch{}, malformed("solana produced slots", errors.New("provider returned unordered or out-of-range slot"))
 		}
 	}
-	batch := scanner.RangeBatch{From: from, To: slots[len(slots)-1], SparseBlocks: true}
-	blocks := make([]solanaBlock, len(slots))
 	if len(s.watched) > 0 {
-		calls := make([]rpcBatchCall, len(slots))
-		for index, slot := range slots {
-			options := map[string]any{"commitment": "finalized", "transactionDetails": "none", "rewards": false, "encoding": "json", "maxSupportedTransactionVersion": 0}
-			calls[index] = rpcBatchCall{Operation: "solana block", Method: "getBlock", Params: []any{slot, options}, Target: &blocks[index]}
-		}
-		if err := s.http.rpcBatch(ctx, "solana block batch", calls); err != nil {
-			return scanner.RangeBatch{}, err
-		}
+		return s.scanIndexedRange(ctx, from, slots[len(slots)-1], safe)
 	}
-	for index, slot := range slots {
-		block := blocks[index]
-		if len(s.watched) == 0 {
-			options := map[string]any{"commitment": "finalized", "transactionDetails": "full", "rewards": false, "encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}
-			if err := s.http.rpc(ctx, "solana block", "getBlock", []any{slot, options}, &block); err != nil {
-				return scanner.RangeBatch{}, err
-			}
+	batch := scanner.RangeBatch{From: from, To: slots[len(slots)-1], SparseBlocks: true}
+	for _, slot := range slots {
+		var block solanaBlock
+		options := map[string]any{"commitment": "finalized", "transactionDetails": "full", "rewards": false, "encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}
+		if err := s.http.rpc(ctx, "solana block", "getBlock", []any{slot, options}, &block); err != nil {
+			return scanner.RangeBatch{}, err
 		}
 		if !validBase58Length(block.Blockhash, 32) || !validBase58Length(block.PreviousBlockhash, 32) || block.BlockTime == nil || *block.BlockTime < 0 {
 			return scanner.RangeBatch{}, malformed("solana block", errors.New("incomplete block finality evidence"))
@@ -195,13 +201,6 @@ func (s *SolanaSource) ScanRange(ctx context.Context, from, to uint64) (scanner.
 			}
 			batch.Events = append(batch.Events, events...)
 		}
-	}
-	if len(s.watched) > 0 {
-		events, err := s.scanWatchedTransactions(ctx, from, batch.To, batch.Blocks, safe)
-		if err != nil {
-			return scanner.RangeBatch{}, err
-		}
-		batch.Events = append(batch.Events, events...)
 	}
 	return batch, nil
 }
@@ -237,41 +236,34 @@ func (s *SolanaSource) LookupTransaction(ctx context.Context, chainID, transacti
 	return s.normalizeSolanaTransaction(transaction, transaction.Slot, block.Blockhash, time.Unix(*block.BlockTime, 0).UTC(), safe)
 }
 
-func (s *SolanaSource) scanWatchedTransactions(ctx context.Context, from, to uint64, blocks []scanner.Block, safe uint64) ([]domain.TransferEvent, error) {
+func (s *SolanaSource) scanIndexedRange(ctx context.Context, from, to, safe uint64) (scanner.RangeBatch, error) {
+	if from > to {
+		return scanner.RangeBatch{}, malformed("solana indexed range", errors.New("invalid indexed range"))
+	}
+	addresses, err := s.solanaIndexAddresses(ctx)
+	if err != nil {
+		return scanner.RangeBatch{}, err
+	}
+	signatures, err := s.solanaAddressSignatures(ctx, addresses, from, to)
+	if err != nil {
+		return scanner.RangeBatch{}, err
+	}
+	evidenceSlots := map[uint64]struct{}{from: {}, to: {}}
+	for _, slot := range signatures {
+		evidenceSlots[slot] = struct{}{}
+	}
+	slots := make([]uint64, 0, len(evidenceSlots))
+	for slot := range evidenceSlots {
+		slots = append(slots, slot)
+	}
+	sort.Slice(slots, func(i, j int) bool { return slots[i] < slots[j] })
+	blocks, err := s.solanaBlockEvidence(ctx, slots)
+	if err != nil {
+		return scanner.RangeBatch{}, err
+	}
 	blocksBySlot := make(map[uint64]scanner.Block, len(blocks))
 	for _, block := range blocks {
 		blocksBySlot[block.Height] = block
-	}
-	signatures := make(map[string]uint64)
-	for address := range s.watched {
-		before := ""
-		for pageNumber := 0; pageNumber < 100; pageNumber++ {
-			options := map[string]any{"commitment": "finalized", "limit": 1000}
-			if before != "" {
-				options["before"] = before
-			}
-			var page []solanaSignatureInfo
-			if err := s.http.rpc(ctx, "solana address signatures", "getSignaturesForAddress", []any{address, options}, &page); err != nil {
-				return nil, err
-			}
-			if len(page) == 0 {
-				break
-			}
-			oldest := page[len(page)-1].Slot
-			for _, item := range page {
-				if item.Slot < from || item.Slot > to {
-					continue
-				}
-				if _, produced := blocksBySlot[item.Slot]; !produced || !validBase58Length(item.Signature, 64) {
-					return nil, malformed("solana address signatures", errors.New("signature is not bound to a produced slot"))
-				}
-				signatures[item.Signature] = item.Slot
-			}
-			if oldest <= from || len(page) < 1000 {
-				break
-			}
-			before = page[len(page)-1].Signature
-		}
 	}
 	ordered := make([]string, 0, len(signatures))
 	for signature := range signatures {
@@ -283,24 +275,129 @@ func (s *SolanaSource) scanWatchedTransactions(ctx context.Context, from, to uin
 		}
 		return ordered[i] < ordered[j]
 	})
-	var events []domain.TransferEvent
+	batch := scanner.RangeBatch{From: from, To: to, Blocks: blocks, SparseBlocks: true, IndexedCheckpoint: true}
 	for _, signature := range ordered {
 		var transaction solanaTransaction
 		options := map[string]any{"commitment": "finalized", "encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}
-		if err := s.http.rpc(ctx, "solana watched transaction", "getTransaction", []any{signature, options}, &transaction); err != nil {
-			return nil, err
+		if err := s.http.rpc(ctx, "solana indexed transaction", "getTransaction", []any{signature, options}, &transaction); err != nil {
+			return scanner.RangeBatch{}, err
 		}
-		if len(transaction.Transaction.Signatures) == 0 || transaction.Transaction.Signatures[0] != signature {
-			return nil, malformed("solana watched transaction", errors.New("signature binding mismatch"))
+		slot := signatures[signature]
+		block := blocksBySlot[slot]
+		if len(transaction.Transaction.Signatures) == 0 || transaction.Transaction.Signatures[0] != signature || transaction.Slot != slot || transaction.BlockTime == nil || *transaction.BlockTime != block.Time.Unix() {
+			return scanner.RangeBatch{}, malformed("solana indexed transaction", errors.New("transaction evidence binding mismatch"))
 		}
-		block := blocksBySlot[signatures[signature]]
-		normalized, err := s.normalizeSolanaTransaction(transaction, block.Height, block.Hash, block.Time, safe)
+		normalized, err := s.normalizeSolanaTransaction(transaction, slot, block.Hash, block.Time, safe)
 		if err != nil {
+			return scanner.RangeBatch{}, err
+		}
+		batch.Events = append(batch.Events, normalized...)
+	}
+	return batch, nil
+}
+
+func (s *SolanaSource) solanaIndexAddresses(ctx context.Context) ([]string, error) {
+	if len(s.assets) > 0 {
+		programs := []string{solanaTokenProgram, solanaToken2022Program}
+		for owner := range s.watched {
+			for _, program := range programs {
+				var response solanaTokenAccountsResponse
+				filter := map[string]any{"programId": program}
+				options := map[string]any{"commitment": "finalized", "encoding": "jsonParsed"}
+				if err := s.http.rpc(ctx, "solana token accounts", "getTokenAccountsByOwner", []any{owner, filter, options}, &response); err != nil {
+					return nil, err
+				}
+				s.indexMu.Lock()
+				for _, account := range response.Value {
+					if !validBase58Length(account.Pubkey, 32) {
+						s.indexMu.Unlock()
+						return nil, malformed("solana token accounts", errors.New("invalid token account address"))
+					}
+					s.indexed[account.Pubkey] = struct{}{}
+				}
+				s.indexMu.Unlock()
+			}
+		}
+	}
+	s.indexMu.Lock()
+	addresses := make([]string, 0, len(s.indexed))
+	for address := range s.indexed {
+		addresses = append(addresses, address)
+	}
+	s.indexMu.Unlock()
+	sort.Strings(addresses)
+	return addresses, nil
+}
+
+func (s *SolanaSource) solanaAddressSignatures(ctx context.Context, addresses []string, from, to uint64) (map[string]uint64, error) {
+	signatures := make(map[string]uint64)
+	for _, address := range addresses {
+		before := ""
+		reachedBoundary := false
+		for pageNumber := 0; pageNumber < 100; pageNumber++ {
+			options := map[string]any{"commitment": "finalized", "limit": 1000}
+			if before != "" {
+				options["before"] = before
+			}
+			var page []solanaSignatureInfo
+			if err := s.http.rpc(ctx, "solana address signatures", "getSignaturesForAddress", []any{address, options}, &page); err != nil {
+				return nil, err
+			}
+			if len(page) == 0 {
+				reachedBoundary = true
+				break
+			}
+			oldest := page[len(page)-1].Slot
+			for _, item := range page {
+				if item.Slot < from || item.Slot > to {
+					continue
+				}
+				if !validBase58Length(item.Signature, 64) {
+					return nil, malformed("solana address signatures", errors.New("invalid indexed signature"))
+				}
+				if previous, exists := signatures[item.Signature]; exists && previous != item.Slot {
+					return nil, malformed("solana address signatures", errors.New("signature slot disagreement"))
+				}
+				signatures[item.Signature] = item.Slot
+			}
+			if oldest <= from || len(page) < 1000 {
+				reachedBoundary = true
+				break
+			}
+			before = page[len(page)-1].Signature
+		}
+		if !reachedBoundary {
+			return nil, &ProviderError{Kind: ErrorTransient, Operation: "solana address signatures", Cause: errors.New("signature pagination limit reached before range boundary")}
+		}
+	}
+	return signatures, nil
+}
+
+func (s *SolanaSource) solanaBlockEvidence(ctx context.Context, slots []uint64) ([]scanner.Block, error) {
+	blocks := make([]solanaBlock, len(slots))
+	for start := 0; start < len(slots); start += 100 {
+		end := start + 100
+		if end > len(slots) {
+			end = len(slots)
+		}
+		calls := make([]rpcBatchCall, end-start)
+		for index := start; index < end; index++ {
+			options := map[string]any{"commitment": "finalized", "transactionDetails": "none", "rewards": false, "encoding": "json", "maxSupportedTransactionVersion": 0}
+			calls[index-start] = rpcBatchCall{Operation: "solana block evidence", Method: "getBlock", Params: []any{slots[index], options}, Target: &blocks[index]}
+		}
+		if err := s.http.rpcBatch(ctx, "solana block evidence batch", calls); err != nil {
 			return nil, err
 		}
-		events = append(events, normalized...)
 	}
-	return events, nil
+	evidence := make([]scanner.Block, len(slots))
+	for index, slot := range slots {
+		block := blocks[index]
+		if !validBase58Length(block.Blockhash, 32) || !validBase58Length(block.PreviousBlockhash, 32) || block.BlockTime == nil || *block.BlockTime < 0 || (slot > 0 && block.ParentSlot >= slot) {
+			return nil, malformed("solana block evidence", errors.New("incomplete finalized block evidence"))
+		}
+		evidence[index] = scanner.Block{Height: slot, Hash: block.Blockhash, ParentHash: block.PreviousBlockhash, Time: time.Unix(*block.BlockTime, 0).UTC()}
+	}
+	return evidence, nil
 }
 
 func (s *SolanaSource) normalizeSolanaTransaction(transaction solanaTransaction, slot uint64, blockHash string, blockTime time.Time, safe uint64) ([]domain.TransferEvent, error) {

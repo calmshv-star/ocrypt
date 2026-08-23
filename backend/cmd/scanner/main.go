@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -102,6 +103,8 @@ func main() {
 
 	ticker := time.NewTicker(config.pollInterval)
 	defer ticker.Stop()
+	staticWatchKey := ""
+	staticWatchSourceReady := false
 	run := func() {
 		started := time.Now()
 		if staticWatchAddresses != nil {
@@ -111,16 +114,21 @@ func main() {
 				slog.Error("scanner route watch refresh failed", "chain_id", config.chainID, "error", loadErr)
 				return
 			}
-			cycleConfig := config
-			cycleConfig.watchedAddresses = addresses
-			cycleConfig.addressFiltered = true
-			cycleSource, createErr := scannerSource(cycleConfig)
-			if createErr != nil {
-				metrics.ObserveCycle("scanner", "failure", 0, time.Since(started))
-				slog.Error("scanner route watch source refresh failed", "chain_id", config.chainID, "error", createErr)
-				return
+			addressKey := watchAddressSetKey(addresses)
+			if !staticWatchSourceReady || addressKey != staticWatchKey {
+				cycleConfig := config
+				cycleConfig.watchedAddresses = addresses
+				cycleConfig.addressFiltered = true
+				cycleSource, createErr := scannerSource(cycleConfig)
+				if createErr != nil {
+					metrics.ObserveCycle("scanner", "failure", 0, time.Since(started))
+					slog.Error("scanner route watch source refresh failed", "chain_id", config.chainID, "error", createErr)
+					return
+				}
+				worker.Source = cycleSource
+				staticWatchKey = addressKey
+				staticWatchSourceReady = true
 			}
-			worker.Source = cycleSource
 		}
 		if runtimeLoader != nil {
 			runtime, loadErr := runtimeLoader.Load(ctx, config.platformKeys, time.Now().UTC())
@@ -173,6 +181,12 @@ func main() {
 			run()
 		}
 	}
+}
+
+func watchAddressSetKey(addresses []string) string {
+	ordered := append([]string(nil), addresses...)
+	sort.Strings(ordered)
+	return strings.Join(ordered, "\x00")
 }
 
 type scannerConfig struct {
