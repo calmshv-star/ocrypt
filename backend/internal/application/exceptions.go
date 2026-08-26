@@ -158,11 +158,10 @@ func BuildCandidates(event domain.TransferEvent, routes []domain.PaymentRoute, n
 			if !late {
 				c.Class = ExceptionOverpaid
 			}
-			// A large overpayment can still be valid when the address and payment
-			// window identify one route. Keep it just above the automatic threshold,
-			// but well below an exact or close amount so it cannot tie an unrelated
-			// small invoice on a shared receiving address.
-			c.Score += 15
+			// A large overpayment is weak amount evidence on a shared address. It
+			// remains below the automatic threshold unless this is the only route
+			// candidate for the transfer.
+			c.Score += 5
 			c.Reasons = append(c.Reasons, "above_expected")
 		}
 		if c.Class == "" {
@@ -176,6 +175,10 @@ func BuildCandidates(event domain.TransferEvent, routes []domain.PaymentRoute, n
 			c.AmountDelta = "-" + delta.String()
 		}
 		candidates = append(candidates, c)
+	}
+	if len(candidates) == 1 && candidates[0].Class == ExceptionOverpaid && candidateHasReason(candidates[0], "above_expected") {
+		candidates[0].Score += 10
+		candidates[0].Reasons = append(candidates[0].Reasons, "unique_route_candidate")
 	}
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].Score == candidates[j].Score {

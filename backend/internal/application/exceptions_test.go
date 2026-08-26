@@ -117,7 +117,7 @@ func TestCandidateRankingDoesNotGiveUnrelatedSmallInvoiceFullOverpaymentScore(t 
 	if candidates[0].Score != 100 || candidates[0].Class != ExceptionOverpaid {
 		t.Fatalf("near-exact overpayment should score 100 without ambiguity: %#v", candidates[0])
 	}
-	if candidates[1].Score != 85 || candidates[1].Class != ExceptionOverpaid {
+	if candidates[1].Score != 75 || candidates[1].Class != ExceptionOverpaid {
 		t.Fatalf("unrelated 499 RUB order received a full-confidence score: %#v", candidates[1])
 	}
 	selected, ok := UniqueAutomaticCandidate(candidates)
