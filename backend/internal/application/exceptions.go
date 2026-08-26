@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/calmshv-star/ocrypt/backend/internal/domain"
+	"github.com/calmshv-star/ocrypt/backend/internal/money"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -146,11 +148,20 @@ func BuildCandidates(event domain.TransferEvent, routes []domain.PaymentRoute, n
 			}
 			c.Score += 5
 			c.Reasons = append(c.Reasons, "below_expected")
-		case cmp > 0:
+		case cmp > 0 && overpaymentWithinTolerance(event.Amount, route.ExpectedAmount, candidateCloseAmountToleranceBPS):
 			if !late {
 				c.Class = ExceptionOverpaid
 			}
 			c.Score += 30
+			c.Reasons = append(c.Reasons, "overpayment_within_five_percent")
+		case cmp > 0:
+			if !late {
+				c.Class = ExceptionOverpaid
+			}
+			// A large overpayment is weak amount evidence on a shared address. It
+			// remains below the automatic threshold unless this is the only route
+			// candidate for the transfer.
+			c.Score += 5
 			c.Reasons = append(c.Reasons, "above_expected")
 		}
 		if c.Class == "" {
@@ -165,16 +176,24 @@ func BuildCandidates(event domain.TransferEvent, routes []domain.PaymentRoute, n
 		}
 		candidates = append(candidates, c)
 	}
+	if len(candidates) == 1 && candidates[0].Class == ExceptionOverpaid && candidateHasReason(candidates[0], "above_expected") {
+		candidates[0].Score += 10
+		candidates[0].Reasons = append(candidates[0].Reasons, "unique_route_candidate")
+	}
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].Score == candidates[j].Score {
+			if distance := compareCandidateAmountDistance(candidates[i], candidates[j]); distance != 0 {
+				return distance < 0
+			}
 			return candidates[i].RouteID < candidates[j].RouteID
 		}
 		return candidates[i].Score > candidates[j].Score
 	})
-	if len(candidates) > 1 && candidates[0].Score == candidates[1].Score {
+	if len(candidates) > 1 && candidates[0].Score == candidates[1].Score && compareCandidateAmountDistance(candidates[0], candidates[1]) == 0 {
 		topScore := candidates[0].Score
+		topDelta := candidates[0]
 		for index := range candidates {
-			if candidates[index].Score != topScore {
+			if candidates[index].Score != topScore || compareCandidateAmountDistance(candidates[index], topDelta) != 0 {
 				break
 			}
 			candidates[index].Class = ExceptionAmbiguous
@@ -182,6 +201,41 @@ func BuildCandidates(event domain.TransferEvent, routes []domain.PaymentRoute, n
 		}
 	}
 	return candidates
+}
+
+func overpaymentWithinTolerance(received, expected money.Amount, toleranceBPS uint32) bool {
+	if toleranceBPS == 0 || received.Cmp(expected) <= 0 {
+		return false
+	}
+	excess, err := received.Sub(expected)
+	if err != nil {
+		return false
+	}
+	maximum, err := expected.MulDivFloor(money.MustParse(fmt.Sprintf("%d", toleranceBPS)), money.MustParse("10000"))
+	return err == nil && excess.Cmp(maximum) <= 0
+}
+
+func compareCandidateAmountDistance(left, right Candidate) int {
+	parse := func(value string) (money.Amount, bool) {
+		value = strings.TrimPrefix(value, "-")
+		if value == "" {
+			return money.Zero(), false
+		}
+		amount, err := money.Parse(value)
+		return amount, err == nil
+	}
+	leftDistance, leftOK := parse(left.AmountDelta)
+	rightDistance, rightOK := parse(right.AmountDelta)
+	switch {
+	case leftOK && rightOK:
+		return leftDistance.Cmp(rightDistance)
+	case leftOK:
+		return -1
+	case rightOK:
+		return 1
+	default:
+		return 0
+	}
 }
 
 type ResolutionStore interface {

@@ -272,6 +272,9 @@ contracts.each do |name, contract|
   command_source = Dir["backend/cmd/#{contract.fetch('command')}/**/*.go"].map { |path| File.read(path) }.join("\n")
   absent_source_keys = contract.fetch("requiredEnv").reject do |key|
     declared = command_source.include?(%Q{"#{key}"}) || backend_internal_source.include?(%Q{"#{key}"})
+    if !declared && name == "proof-worker" && (match = key.match(/\APROOF_VERIFIER_([A-Z0-9_]+)\z/))
+      declared = command_source.include?(%Q{proofProviderEnv("#{match[1]}")})
+    end
     if !declared && name == "financial-worker" && (match = key.match(/\AFINANCIAL_(BUILDER|SIGNER|BROADCASTER|FINALITY|EVENT_SINK)_(URL|TOKEN_FILE)\z/))
       declared = (command_source + backend_internal_source).include?(%Q{remoteConfig("#{match[1]}")})
     end
