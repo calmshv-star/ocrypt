@@ -172,6 +172,13 @@ func (s *ScannerStore) RecordGap(ctx context.Context, chainID string, from, to u
 	if chainID == "" || reason == "" || to < from {
 		return errors.New("invalid scanner gap")
 	}
+	command, err := s.pool.Exec(ctx, `UPDATE scanner_gaps SET to_height=GREATEST(to_height,$3::numeric),occurrence_count=occurrence_count+1,last_seen_at=clock_timestamp() WHERE chain_id=$1 AND from_height=$2::numeric AND reason=$4 AND status='open'`, chainID, strconv.FormatUint(from, 10), strconv.FormatUint(to, 10), reason)
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() > 0 {
+		return nil
+	}
 	id, err := ids.New()
 	if err != nil {
 		return err

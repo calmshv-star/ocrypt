@@ -910,6 +910,98 @@ func TestFailoverSourceSwitchesAndKeepsSuccessfulBackupActive(t *testing.T) {
 	}
 }
 
+func TestFailoverSourcePeriodicallyRetriesPreferredProvider(t *testing.T) {
+	now := time.Unix(100, 0)
+	primary := &trackingSource{
+		rangeErr: errors.New("primary range unavailable"),
+		heads:    []scanner.ProviderHead{{Provider: "primary", SafeHeight: 2}},
+	}
+	backup := &trackingSource{
+		batch: scanner.RangeBatch{From: 1, To: 1, Blocks: []scanner.Block{{Height: 1, Hash: "backup"}}},
+		heads: []scanner.ProviderHead{{Provider: "backup", SafeHeight: 1}},
+	}
+	source, err := NewFailoverSource([]scanner.Source{primary, backup})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source.now = func() time.Time { return now }
+	if _, err = source.ScanRange(context.Background(), 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = source.Heads(context.Background()); err != nil || primary.headCalls != 0 || backup.headCalls != 1 {
+		t.Fatalf("backup was not kept active before retry window: primary=%+v backup=%+v err=%v", primary, backup, err)
+	}
+	now = now.Add(failoverPreferredProbeInterval)
+	heads, err := source.Heads(context.Background())
+	if err != nil || len(heads) != 1 || heads[0].Provider != "primary" || primary.headCalls != 1 {
+		t.Fatalf("preferred provider was not retried: heads=%+v primary=%+v err=%v", heads, primary, err)
+	}
+}
+
+func TestJSONRPC429UsesRateLimitedTaxonomyAndCooldown(t *testing.T) {
+	now := time.Unix(100, 0)
+	client := fixtureClient(t, func(*http.Request) (int, json.RawMessage) {
+		return http.StatusOK, json.RawMessage(`{"jsonrpc":"2.0","id":1,"error":{"code":429,"message":"limited"}}`)
+	})
+	endpoint, err := newEndpointClient(HTTPConfig{Endpoint: "https://solana.example", Client: client, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var target any
+	err = endpoint.rpc(context.Background(), "solana block", "getBlock", []any{1}, &target)
+	if ErrorKindOf(err) != ErrorRateLimited || endpoint.nextRPC.Before(time.Now().Add(29*time.Second)) {
+		t.Fatalf("JSON-RPC 429 did not activate rate-limit cooldown: err=%v next=%v", err, endpoint.nextRPC)
+	}
+}
+
+func TestSolanaFailoverProvidersShareTokenAccountIndex(t *testing.T) {
+	const watched = "So11111111111111111111111111111111111111112"
+	const tokenAccount = "11111111111111111111111111111111"
+	index, err := NewSolanaAddressIndex([]string{watched})
+	if err != nil {
+		t.Fatal(err)
+	}
+	primaryCalls := 0
+	primaryClient := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		primaryCalls++
+		return http.StatusOK, rpcResult(t, request, func(method string, _ []json.RawMessage) json.RawMessage {
+			if method != "getTokenAccountsByOwner" {
+				t.Fatalf("unexpected method %s", method)
+			}
+			return json.RawMessage(`{"context":{"slot":1},"value":[{"pubkey":"` + tokenAccount + `"}]}`)
+		})
+	})
+	backupCalls := 0
+	backupClient := fixtureClient(t, func(*http.Request) (int, json.RawMessage) {
+		backupCalls++
+		return http.StatusForbidden, json.RawMessage(`{"error":"unsupported"}`)
+	})
+	assets := map[string]SolanaAsset{watched: {AssetID: "usdc-solana", Decimals: 6}}
+	primary, err := NewSolanaSource(SolanaConfig{HTTP: HTTPConfig{Endpoint: "https://primary.example", Client: primaryClient}, ProviderID: "primary", ChainID: "solana:mainnet", NativeAssetID: "sol-solana", NativeDecimals: 9, Assets: assets, WatchedAddresses: []string{watched}, AddressIndex: index})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup, err := NewSolanaSource(SolanaConfig{HTTP: HTTPConfig{Endpoint: "https://backup.example", Client: backupClient}, ProviderID: "backup", ChainID: "solana:mainnet", NativeAssetID: "sol-solana", NativeDecimals: 9, Assets: assets, WatchedAddresses: []string{watched}, AddressIndex: index})
+	if err != nil {
+		t.Fatal(err)
+	}
+	addresses, err := primary.solanaIndexAddresses(context.Background())
+	if err != nil || primaryCalls != 2 || !reflect.DeepEqual(addresses, []string{tokenAccount, watched}) {
+		t.Fatalf("primary index refresh failed: addresses=%v calls=%d err=%v", addresses, primaryCalls, err)
+	}
+	addresses, err = backup.solanaIndexAddresses(context.Background())
+	if err != nil || backupCalls != 0 || !reflect.DeepEqual(addresses, []string{tokenAccount, watched}) {
+		t.Fatalf("backup did not reuse shared index: addresses=%v calls=%d err=%v", addresses, backupCalls, err)
+	}
+	index.mu.Lock()
+	index.refreshAfter = time.Now().Add(-time.Second)
+	index.mu.Unlock()
+	addresses, err = backup.solanaIndexAddresses(context.Background())
+	if err != nil || backupCalls != 1 || !reflect.DeepEqual(addresses, []string{tokenAccount, watched}) {
+		t.Fatalf("backup did not retain the safe stale index: addresses=%v calls=%d err=%v", addresses, backupCalls, err)
+	}
+}
+
 func TestDestinationFilterPreservesBlocksAndKeepsOnlyWatchedTransfers(t *testing.T) {
 	batch := scanner.RangeBatch{From: 1, To: 1, Blocks: []scanner.Block{{Height: 1, Hash: "block"}}, Events: []domain.TransferEvent{
 		{Identity: domain.EventIdentity{ToAddress: "merchant"}},

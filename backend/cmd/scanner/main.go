@@ -101,18 +101,16 @@ func main() {
 		}
 	}()
 
-	ticker := time.NewTicker(config.pollInterval)
-	defer ticker.Stop()
 	staticWatchKey := ""
 	staticWatchSourceReady := false
-	run := func() {
+	run := func() bool {
 		started := time.Now()
 		if staticWatchAddresses != nil {
 			addresses, loadErr := staticWatchAddresses.ScannerWatchAddresses(ctx, config.chainID, time.Now().UTC())
 			if loadErr != nil {
 				metrics.ObserveCycle("scanner", "failure", 0, time.Since(started))
 				slog.Error("scanner route watch refresh failed", "chain_id", config.chainID, "error", loadErr)
-				return
+				return false
 			}
 			addressKey := watchAddressSetKey(addresses)
 			if !staticWatchSourceReady || addressKey != staticWatchKey {
@@ -123,7 +121,7 @@ func main() {
 				if createErr != nil {
 					metrics.ObserveCycle("scanner", "failure", 0, time.Since(started))
 					slog.Error("scanner route watch source refresh failed", "chain_id", config.chainID, "error", createErr)
-					return
+					return false
 				}
 				worker.Source = cycleSource
 				staticWatchKey = addressKey
@@ -135,12 +133,12 @@ func main() {
 			if loadErr != nil {
 				metrics.ObserveCycle("scanner", "failure", 0, time.Since(started))
 				slog.Error("scanner platform runtime admission failed", "chain_id", config.platformKeys.Chain, "error", loadErr)
-				return
+				return false
 			}
 			if runtime.Paused {
 				health.lastSuccess.Store(time.Now().UTC().Unix())
 				metrics.ObserveCycle("scanner", "idle", 0, time.Since(started))
-				return
+				return true
 			}
 			worker.ChainID, worker.GenesisHash, worker.Source = runtime.ChainID, runtime.GenesisHash, runtime.Source
 			worker.Quorum, worker.Overlap, worker.RangeSize = runtime.Quorum, runtime.Overlap, runtime.RangeSize
@@ -153,11 +151,11 @@ func main() {
 				health.lastSuccess.Store(time.Now().UTC().Unix())
 				metrics.ObserveCycle("scanner", "partial", len(batch.Blocks)+len(batch.Events), time.Since(started))
 				slog.Warn("canonical reorg compensated and cursor rewound", "chain_id", config.chainID, "height", reorg.Height, "old_hash", reorg.CommittedHash, "new_hash", reorg.NewHash)
-				return
+				return true
 			}
 			metrics.ObserveCycle("scanner", "failure", 0, time.Since(started))
 			slog.Error("scanner iteration failed", "chain_id", config.chainID, "error", err)
-			return
+			return false
 		}
 		health.lastSuccess.Store(time.Now().UTC().Unix())
 		outcome := "success"
@@ -168,19 +166,42 @@ func main() {
 		if len(batch.Blocks) > 0 {
 			slog.Info("scanner range committed", "chain_id", config.chainID, "from", batch.From, "to", batch.To, "events", len(batch.Events))
 		}
+		return true
 	}
-	run()
+	failureStreak := 0
 	for {
+		succeeded := run()
+		if succeeded {
+			failureStreak = 0
+		} else {
+			failureStreak++
+		}
+		delay := scannerRetryDelay(config.pollInterval, failureStreak)
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_ = healthServer.Shutdown(shutdownContext)
 			cancel()
 			return
-		case <-ticker.C:
-			run()
+		case <-timer.C:
 		}
 	}
+}
+
+func scannerRetryDelay(pollInterval time.Duration, failureStreak int) time.Duration {
+	if failureStreak <= 0 {
+		return pollInterval
+	}
+	delay := pollInterval
+	for attempt := 1; attempt < failureStreak && delay < 2*time.Minute; attempt++ {
+		delay *= 2
+	}
+	if delay > 2*time.Minute {
+		return 2 * time.Minute
+	}
+	return delay
 }
 
 func watchAddressSetKey(addresses []string) string {
@@ -323,6 +344,14 @@ func scannerSource(config scannerConfig) (scanner.Source, error) {
 		return scanner.NewQuorumHTTPSource(config.chainID, config.providerURLs, config.quorum, config.providerToken, nil)
 	}
 	sources := make([]scanner.Source, 0, len(config.providerURLs))
+	var solanaAddressIndex *providers.SolanaAddressIndex
+	if providers.Kind(config.providerKind) == providers.KindSolanaJSONRPC {
+		var indexErr error
+		solanaAddressIndex, indexErr = providers.NewSolanaAddressIndex(config.watchedAddresses)
+		if indexErr != nil {
+			return nil, indexErr
+		}
+	}
 	for index, endpoint := range config.providerURLs {
 		providerID := fmt.Sprintf("provider-%d", index+1)
 		if len(config.providerIDs) > 0 {
@@ -341,6 +370,7 @@ func scannerSource(config scannerConfig) (scanner.Source, error) {
 			ProviderID: providerID, ChainID: config.chainID, HeadTag: headTag, GenesisHash: config.genesisHash, NativeAssetID: config.nativeAssetID, NativeDecimals: config.nativeDecimals,
 			Assets: config.assets, IncludeInternal: config.includeInternal, GasFreeContracts: config.gasFreeContracts,
 			GasFreeFeeCollectors: config.gasFreeFeeCollectors, WatchedAddresses: config.watchedAddresses, AddressFiltered: config.addressFiltered, Overlap: config.overlap, PageSize: config.pageSize,
+			SolanaAddressIndex: solanaAddressIndex,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("initialize %s: %w", providerID, err)

@@ -264,6 +264,25 @@ type rpcBatchCall struct {
 	Target    any
 }
 
+func (c *endpointClient) rpcEnvelopeError(operation string, code int) error {
+	kind := ErrorPermanent
+	switch code {
+	case 429:
+		// Some Solana-compatible JSON-RPC gateways return their HTTP rate
+		// limit as an RPC error code inside an otherwise successful HTTP 200
+		// response. Treating that as permanent bypasses the endpoint cooldown
+		// and makes callers retry continuously.
+		kind = ErrorRateLimited
+		c.postpone(30 * time.Second)
+	case -32005:
+		kind = ErrorRateLimited
+		c.postpone(time.Second)
+	case -32016, -32603:
+		kind = ErrorTransient
+	}
+	return &ProviderError{Kind: kind, Operation: operation, Cause: fmt.Errorf("JSON-RPC error %d", code)}
+}
+
 // rpcBatch keeps public-node request counts bounded for chains where one
 // canonical cursor range otherwise needs dozens of small independent reads.
 // Every response is still bound to a unique numeric request ID and decoded
@@ -299,14 +318,7 @@ func (c *endpointClient) rpcBatch(ctx context.Context, operation string, calls [
 			callOperation = operation
 		}
 		if envelope.Error != nil {
-			kind := ErrorPermanent
-			if envelope.Error.Code == -32005 {
-				kind = ErrorRateLimited
-				c.postpone(time.Second)
-			} else if envelope.Error.Code == -32016 || envelope.Error.Code == -32603 {
-				kind = ErrorTransient
-			}
-			return &ProviderError{Kind: kind, Operation: callOperation, Cause: fmt.Errorf("JSON-RPC error %d", envelope.Error.Code)}
+			return c.rpcEnvelopeError(callOperation, envelope.Error.Code)
 		}
 		if len(envelope.Result) == 0 || bytes.Equal(envelope.Result, []byte("null")) {
 			return &ProviderError{Kind: ErrorMalformed, Operation: callOperation, Cause: errors.New("missing JSON-RPC result")}
@@ -333,14 +345,7 @@ func (c *endpointClient) rpc(ctx context.Context, operation, method string, para
 		return &ProviderError{Kind: ErrorMalformed, Operation: operation, Cause: errors.New("invalid JSON-RPC envelope")}
 	}
 	if envelope.Error != nil {
-		kind := ErrorPermanent
-		if envelope.Error.Code == -32005 {
-			kind = ErrorRateLimited
-			c.postpone(time.Second)
-		} else if envelope.Error.Code == -32016 || envelope.Error.Code == -32603 {
-			kind = ErrorTransient
-		}
-		return &ProviderError{Kind: kind, Operation: operation, Cause: fmt.Errorf("JSON-RPC error %d", envelope.Error.Code)}
+		return c.rpcEnvelopeError(operation, envelope.Error.Code)
 	}
 	if len(envelope.Result) == 0 || bytes.Equal(envelope.Result, []byte("null")) {
 		return &ProviderError{Kind: ErrorMalformed, Operation: operation, Cause: errors.New("missing JSON-RPC result")}
@@ -556,10 +561,14 @@ var _ scanner.TransactionSource = (*QuorumSource)(nil)
 // providers remain active for subsequent calls, matching the active-node model
 // used by the legacy payment monitor without requiring duplicate RPC traffic.
 type FailoverSource struct {
-	sources []scanner.Source
-	mu      sync.Mutex
-	active  int
+	sources          []scanner.Source
+	mu               sync.Mutex
+	active           int
+	retryPreferredAt time.Time
+	now              func() time.Time
 }
+
+const failoverPreferredProbeInterval = 5 * time.Minute
 
 func NewFailoverSource(sources []scanner.Source) (*FailoverSource, error) {
 	if len(sources) == 0 {
@@ -570,12 +579,19 @@ func NewFailoverSource(sources []scanner.Source) (*FailoverSource, error) {
 			return nil, errors.New("direct source failover contains nil source")
 		}
 	}
-	return &FailoverSource{sources: append([]scanner.Source(nil), sources...)}, nil
+	return &FailoverSource{sources: append([]scanner.Source(nil), sources...), now: time.Now}, nil
 }
 
 func (f *FailoverSource) order() []int {
 	f.mu.Lock()
 	start := f.active
+	now := time.Now()
+	if f.now != nil {
+		now = f.now()
+	}
+	if start != 0 && !now.Before(f.retryPreferredAt) {
+		start = 0
+	}
 	f.mu.Unlock()
 	order := make([]int, 0, len(f.sources))
 	for offset := range f.sources {
@@ -587,6 +603,15 @@ func (f *FailoverSource) order() []int {
 func (f *FailoverSource) selectProvider(index int) {
 	f.mu.Lock()
 	f.active = index
+	if index == 0 {
+		f.retryPreferredAt = time.Time{}
+	} else {
+		now := time.Now()
+		if f.now != nil {
+			now = f.now()
+		}
+		f.retryPreferredAt = now.Add(failoverPreferredProbeInterval)
+	}
 	f.mu.Unlock()
 }
 

@@ -43,6 +43,7 @@ type Config struct {
 	AddressFiltered      bool
 	Overlap              uint64
 	PageSize             uint32
+	SolanaAddressIndex   *SolanaAddressIndex
 }
 
 func NewSource(config Config) (scanner.Source, error) {
@@ -66,7 +67,7 @@ func NewSource(config Config) (scanner.Source, error) {
 		for key, value := range config.Assets {
 			assets[key] = SolanaAsset{AssetID: value.ID, Decimals: value.Decimals}
 		}
-		return NewSolanaSource(SolanaConfig{HTTP: config.HTTP, ProviderID: config.ProviderID, ChainID: config.ChainID, NativeAssetID: config.NativeAssetID, NativeDecimals: config.NativeDecimals, Assets: assets, WatchedAddresses: config.WatchedAddresses})
+		return NewSolanaSource(SolanaConfig{HTTP: config.HTTP, ProviderID: config.ProviderID, ChainID: config.ChainID, NativeAssetID: config.NativeAssetID, NativeDecimals: config.NativeDecimals, Assets: assets, WatchedAddresses: config.WatchedAddresses, AddressIndex: config.SolanaAddressIndex})
 	case KindTONCenterV3:
 		assets := make(map[string]TONAsset, len(config.Assets))
 		for key, value := range config.Assets {

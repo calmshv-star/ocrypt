@@ -22,6 +22,8 @@ const (
 	solanaToken2022Program = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
 )
 
+const solanaAddressIndexRefreshInterval = 15 * time.Minute
+
 type SolanaAsset struct {
 	AssetID  string
 	Decimals uint8
@@ -35,6 +37,56 @@ type SolanaConfig struct {
 	NativeDecimals   uint8
 	Assets           map[string]SolanaAsset
 	WatchedAddresses []string
+	AddressIndex     *SolanaAddressIndex
+}
+
+// SolanaAddressIndex is shared by all failover providers of one scanner. A
+// provider that can enumerate token accounts can populate it once, while a
+// different provider can still scan signatures and block evidence even when
+// it does not expose getTokenAccountsByOwner.
+type SolanaAddressIndex struct {
+	mu           sync.Mutex
+	addresses    map[string]struct{}
+	ready        bool
+	refreshAfter time.Time
+}
+
+func NewSolanaAddressIndex(watched []string) (*SolanaAddressIndex, error) {
+	index := &SolanaAddressIndex{addresses: make(map[string]struct{}, len(watched))}
+	for _, address := range watched {
+		if !validBase58Length(address, 32) {
+			return nil, errors.New("invalid Solana watched address")
+		}
+		index.addresses[address] = struct{}{}
+	}
+	return index, nil
+}
+
+func (i *SolanaAddressIndex) snapshot() ([]string, bool, time.Time) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	addresses := make([]string, 0, len(i.addresses))
+	for address := range i.addresses {
+		addresses = append(addresses, address)
+	}
+	sort.Strings(addresses)
+	return addresses, i.ready, i.refreshAfter
+}
+
+func (i *SolanaAddressIndex) store(discovered []string, refreshedAt time.Time) []string {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	for _, address := range discovered {
+		i.addresses[address] = struct{}{}
+	}
+	i.ready = true
+	i.refreshAfter = refreshedAt.Add(solanaAddressIndexRefreshInterval)
+	addresses := make([]string, 0, len(i.addresses))
+	for address := range i.addresses {
+		addresses = append(addresses, address)
+	}
+	sort.Strings(addresses)
+	return addresses
 }
 
 type SolanaSource struct {
@@ -45,8 +97,7 @@ type SolanaSource struct {
 	nativeDecimals uint8
 	assets         map[string]SolanaAsset
 	watched        map[string]struct{}
-	indexMu        sync.Mutex
-	indexed        map[string]struct{}
+	addressIndex   *SolanaAddressIndex
 }
 
 func NewSolanaSource(config SolanaConfig) (*SolanaSource, error) {
@@ -71,11 +122,20 @@ func NewSolanaSource(config SolanaConfig) (*SolanaSource, error) {
 		}
 		watched[address] = struct{}{}
 	}
-	indexed := make(map[string]struct{}, len(watched))
-	for address := range watched {
-		indexed[address] = struct{}{}
+	addressIndex := config.AddressIndex
+	if addressIndex == nil {
+		addressIndex, err = NewSolanaAddressIndex(config.WatchedAddresses)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		addressIndex.mu.Lock()
+		for address := range watched {
+			addressIndex.addresses[address] = struct{}{}
+		}
+		addressIndex.mu.Unlock()
 	}
-	return &SolanaSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, assets: assets, watched: watched, indexed: indexed}, nil
+	return &SolanaSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, assets: assets, watched: watched, addressIndex: addressIndex}, nil
 }
 
 type solanaBlock struct {
@@ -297,6 +357,12 @@ func (s *SolanaSource) scanIndexedRange(ctx context.Context, from, to, safe uint
 }
 
 func (s *SolanaSource) solanaIndexAddresses(ctx context.Context) ([]string, error) {
+	cached, ready, refreshAfter := s.addressIndex.snapshot()
+	now := s.http.now().UTC()
+	if ready && now.Before(refreshAfter) {
+		return cached, nil
+	}
+	discovered := make([]string, 0)
 	if len(s.assets) > 0 {
 		programs := []string{solanaTokenProgram, solanaToken2022Program}
 		for owner := range s.watched {
@@ -305,28 +371,21 @@ func (s *SolanaSource) solanaIndexAddresses(ctx context.Context) ([]string, erro
 				filter := map[string]any{"programId": program}
 				options := map[string]any{"commitment": "finalized", "encoding": "jsonParsed"}
 				if err := s.http.rpc(ctx, "solana token accounts", "getTokenAccountsByOwner", []any{owner, filter, options}, &response); err != nil {
+					if ready {
+						return cached, nil
+					}
 					return nil, err
 				}
-				s.indexMu.Lock()
 				for _, account := range response.Value {
 					if !validBase58Length(account.Pubkey, 32) {
-						s.indexMu.Unlock()
 						return nil, malformed("solana token accounts", errors.New("invalid token account address"))
 					}
-					s.indexed[account.Pubkey] = struct{}{}
+					discovered = append(discovered, account.Pubkey)
 				}
-				s.indexMu.Unlock()
 			}
 		}
 	}
-	s.indexMu.Lock()
-	addresses := make([]string, 0, len(s.indexed))
-	for address := range s.indexed {
-		addresses = append(addresses, address)
-	}
-	s.indexMu.Unlock()
-	sort.Strings(addresses)
-	return addresses, nil
+	return s.addressIndex.store(discovered, now), nil
 }
 
 func (s *SolanaSource) solanaAddressSignatures(ctx context.Context, addresses []string, from, to uint64) (map[string]uint64, error) {

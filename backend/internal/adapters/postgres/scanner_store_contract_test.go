@@ -17,6 +17,7 @@ func TestScannerStoreKeepsBoundedBlockHistoryAndNoCompletedQueueCopies(t *testin
 		"DELETE FROM chain_blocks WHERE chain_id=$1 AND height<$2::numeric",
 		"DELETE FROM scanner_gaps WHERE chain_id=$1 AND status='healed' AND to_height<$2::numeric",
 		"UPDATE scanner_gaps SET status='healed'",
+		"UPDATE scanner_gaps SET to_height=GREATEST(to_height,$3::numeric),occurrence_count=occurrence_count+1",
 		"DELETE FROM scanner_transfer_queue WHERE event_id=$1 AND status='leased' AND locked_by=$2",
 		"!isSerializationFailure(err) || attempt == 2",
 	} {

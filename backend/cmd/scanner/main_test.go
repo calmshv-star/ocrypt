@@ -65,6 +65,18 @@ func TestWatchAddressSetKeyIgnoresRepositoryOrdering(t *testing.T) {
 	}
 }
 
+func TestScannerRetryDelayBacksOffAndCaps(t *testing.T) {
+	base := 5 * time.Second
+	for _, test := range []struct {
+		streak int
+		want   time.Duration
+	}{{0, base}, {1, base}, {2, 10 * time.Second}, {3, 20 * time.Second}, {10, 2 * time.Minute}} {
+		if got := scannerRetryDelay(base, test.streak); got != test.want {
+			t.Fatalf("streak %d: got %v want %v", test.streak, got, test.want)
+		}
+	}
+}
+
 func TestFailoverScannerConfigurationRequiresSingleHeadQuorum(t *testing.T) {
 	values := map[string]string{
 		"SCANNER_UNSAFE_DEVELOPMENT_STATIC_CONFIG": "true", "ENVIRONMENT": "test",
