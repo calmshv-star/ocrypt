@@ -68,6 +68,25 @@ func (e *ProviderError) Error() string {
 
 func (e *ProviderError) Unwrap() error { return e.Cause }
 
+// Retryable distinguishes temporary provider availability from durable scan
+// integrity failures. Disagreements are retryable only when they wrap a
+// retryable provider failure; genuinely different canonical data still opens
+// an operator-visible gap.
+func (e *ProviderError) Retryable() bool {
+	if e == nil {
+		return false
+	}
+	switch e.Kind {
+	case ErrorTransient, ErrorRateLimited:
+		return true
+	case ErrorDisagreement:
+		var nested interface{ Retryable() bool }
+		return errors.As(e.Cause, &nested) && nested.Retryable()
+	default:
+		return false
+	}
+}
+
 func ErrorKindOf(err error) ErrorKind {
 	var providerErr *ProviderError
 	if errors.As(err, &providerErr) {

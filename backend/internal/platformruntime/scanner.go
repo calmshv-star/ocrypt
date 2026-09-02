@@ -46,11 +46,12 @@ type ScannerRuntime struct {
 }
 
 type ScannerLoader struct {
-	Reader            platformadmin.RuntimeStateReader
-	ProviderAdmission providerops.AdmissionReader
-	WatchAddresses    WatchAddressReader
-	SecretDir         string
-	UnsafeTestBypass  bool
+	Reader              platformadmin.RuntimeStateReader
+	ProviderAdmission   providerops.AdmissionReader
+	WatchAddresses      WatchAddressReader
+	SecretDir           string
+	ProviderMinInterval time.Duration
+	UnsafeTestBypass    bool
 }
 
 type WatchAddressReader interface {
@@ -283,7 +284,7 @@ func (l ScannerLoader) Load(ctx context.Context, keys ScannerKeys, now time.Time
 				return ScannerRuntime{}, fmt.Errorf("initialize shared Solana address index: %w", err)
 			}
 		}
-		source, err := providers.NewSource(providers.Config{Kind: providerKind, HTTP: providers.HTTPConfig{Endpoint: rpc.Endpoint, Headers: headers, Timeout: timeout}, IndexerHTTP: providers.HTTPConfig{Endpoint: indexerEndpoint, Headers: indexerHeaders, Timeout: timeout}, ProviderID: rpc.ProviderID, ChainID: keys.Chain, HeadTag: rpc.HeadTag, GenesisHash: chain.GenesisHash, NativeAssetID: nativeAssetID, NativeDecimals: nativeDecimals, Assets: assets, IncludeInternal: chain.IncludeInternal, GasFreeContracts: chain.GasFreeContracts, GasFreeFeeCollectors: chain.GasFreeFeeCollectors, WatchedAddresses: watchedAddresses, AddressFiltered: true, Overlap: chain.Overlap, PageSize: chain.PageSize, SolanaAddressIndex: solanaAddressIndex})
+		source, err := providers.NewSource(providers.Config{Kind: providerKind, HTTP: providers.HTTPConfig{Endpoint: rpc.Endpoint, Headers: headers, Timeout: timeout, MinInterval: l.ProviderMinInterval}, IndexerHTTP: providers.HTTPConfig{Endpoint: indexerEndpoint, Headers: indexerHeaders, Timeout: timeout, MinInterval: l.ProviderMinInterval}, ProviderID: rpc.ProviderID, ChainID: keys.Chain, HeadTag: rpc.HeadTag, GenesisHash: chain.GenesisHash, NativeAssetID: nativeAssetID, NativeDecimals: nativeDecimals, Assets: assets, IncludeInternal: chain.IncludeInternal, GasFreeContracts: chain.GasFreeContracts, GasFreeFeeCollectors: chain.GasFreeFeeCollectors, WatchedAddresses: watchedAddresses, AddressFiltered: true, Overlap: chain.Overlap, PageSize: chain.PageSize, SolanaAddressIndex: solanaAddressIndex})
 		if err != nil {
 			return ScannerRuntime{}, fmt.Errorf("initialize admitted RPC provider %s: %w", key, err)
 		}

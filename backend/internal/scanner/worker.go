@@ -55,6 +55,14 @@ type Source interface {
 	ScanRange(context.Context, uint64, uint64) (RangeBatch, error)
 }
 
+// Retryable reports whether an upstream failure is expected to clear without
+// operator action. A retryable RPC failure happens before the cursor advances,
+// so it is not a scanner gap and must not pollute the operator queue.
+func Retryable(err error) bool {
+	var retryable interface{ Retryable() bool }
+	return errors.As(err, &retryable) && retryable.Retryable()
+}
+
 // TransactionSource is the fast recovery lane used when a customer supplies a
 // transaction hash before the sequential scanner has reached its block. The
 // returned events must be derived from finalized chain data and pass through
@@ -169,8 +177,10 @@ func (w Worker) RunOnce(ctx context.Context) (RangeBatch, error) {
 	}
 	batch, err := w.Source.ScanRange(ctx, from, to)
 	if err != nil {
-		if gapErr := w.Store.RecordGap(ctx, w.ChainID, from, to, "provider_error"); gapErr == nil && w.Observer != nil {
-			w.Observer.IncScannerGap("provider_error")
+		if !Retryable(err) {
+			if gapErr := w.Store.RecordGap(ctx, w.ChainID, from, to, "provider_error"); gapErr == nil && w.Observer != nil {
+				w.Observer.IncScannerGap("provider_error")
+			}
 		}
 		return RangeBatch{}, err
 	}

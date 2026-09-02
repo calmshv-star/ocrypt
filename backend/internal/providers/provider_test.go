@@ -963,6 +963,21 @@ func TestJSONRPC429UsesRateLimitedTaxonomyAndCooldown(t *testing.T) {
 	}
 }
 
+func TestProviderErrorRetryabilityPreservesCanonicalDisagreements(t *testing.T) {
+	temporary := &ProviderError{Kind: ErrorTransient, Operation: "test"}
+	if !temporary.Retryable() {
+		t.Fatal("transient provider failure is not retryable")
+	}
+	wrappedTemporary := &ProviderError{Kind: ErrorDisagreement, Operation: "quorum", Cause: fmt.Errorf("provider failed: %w", temporary)}
+	if !wrappedTemporary.Retryable() {
+		t.Fatal("quorum disagreement wrapping a temporary failure is not retryable")
+	}
+	canonicalDisagreement := &ProviderError{Kind: ErrorDisagreement, Operation: "quorum", Cause: errors.New("providers returned different canonical ranges")}
+	if canonicalDisagreement.Retryable() {
+		t.Fatal("canonical disagreement was incorrectly marked retryable")
+	}
+}
+
 func TestSolanaFailoverProvidersShareTokenAccountIndex(t *testing.T) {
 	const watched = "So11111111111111111111111111111111111111112"
 	const tokenAccount = "11111111111111111111111111111111"

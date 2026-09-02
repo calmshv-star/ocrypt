@@ -15,6 +15,11 @@ type sourceFixture struct {
 	err   error
 }
 
+type retryableFixtureError struct{}
+
+func (retryableFixtureError) Error() string   { return "retry later" }
+func (retryableFixtureError) Retryable() bool { return true }
+
 func (s sourceFixture) Heads(context.Context) ([]ProviderHead, error) { return s.heads, nil }
 func (s sourceFixture) ScanRange(context.Context, uint64, uint64) (RangeBatch, error) {
 	return s.batch, s.err
@@ -101,6 +106,17 @@ func TestScannerRecordsGapAndDoesNotAdvanceOnProviderFailure(t *testing.T) {
 	_, err := (Worker{ChainID: "chain", GenesisHash: "g", Source: source, Store: store, Quorum: 1, Overlap: 1, RangeSize: 2, Now: func() time.Time { return now }, Observer: observer}).RunOnce(context.Background())
 	if err == nil || store.gaps != 1 || store.commits != 0 || observer.gaps["provider_error"] != 1 || observer.lag != 1 {
 		t.Fatalf("gaps=%d observed=%v lag=%d commits=%d err=%v", store.gaps, observer.gaps, observer.lag, store.commits, err)
+	}
+}
+
+func TestScannerRetriesTemporaryProviderFailureWithoutOpeningGap(t *testing.T) {
+	now := time.Now().UTC()
+	store := &storeFixture{lease: Lease{Height: 1}}
+	source := sourceFixture{heads: []ProviderHead{{Provider: "a", ChainID: "chain", GenesisHash: "g", SafeHeight: 2, ObservedAt: now}}, err: retryableFixtureError{}}
+	observer := &observerFixture{}
+	_, err := (Worker{ChainID: "chain", GenesisHash: "g", Source: source, Store: store, Quorum: 1, Overlap: 1, RangeSize: 2, Now: func() time.Time { return now }, Observer: observer}).RunOnce(context.Background())
+	if err == nil || store.gaps != 0 || store.commits != 0 || len(observer.gaps) != 0 {
+		t.Fatalf("gaps=%d observed=%v commits=%d err=%v", store.gaps, observer.gaps, store.commits, err)
 	}
 }
 func TestScannerFailsClosedOnWrongGenesisOrBrokenParent(t *testing.T) {

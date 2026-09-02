@@ -84,7 +84,7 @@ func main() {
 			slog.Error("provider operations service initialization failed", "error", createErr)
 			os.Exit(1)
 		}
-		runtimeLoader = &platformruntime.ScannerLoader{Reader: platformRepository, ProviderAdmission: providerService, WatchAddresses: platformRepository, SecretDir: config.platformSecretDir}
+		runtimeLoader = &platformruntime.ScannerLoader{Reader: platformRepository, ProviderAdmission: providerService, WatchAddresses: platformRepository, SecretDir: config.platformSecretDir, ProviderMinInterval: config.providerMinInterval}
 	}
 	metrics := telemetry.New("scanner")
 	worker := scanner.Worker{
@@ -152,6 +152,11 @@ func main() {
 				metrics.ObserveCycle("scanner", "partial", len(batch.Blocks)+len(batch.Events), time.Since(started))
 				slog.Warn("canonical reorg compensated and cursor rewound", "chain_id", config.chainID, "height", reorg.Height, "old_hash", reorg.CommittedHash, "new_hash", reorg.NewHash)
 				return true
+			}
+			if scanner.Retryable(err) {
+				metrics.ObserveCycle("scanner", "retry", 0, time.Since(started))
+				slog.Warn("scanner provider temporarily unavailable; retry scheduled", "chain_id", config.chainID, "error", err)
+				return false
 			}
 			metrics.ObserveCycle("scanner", "failure", 0, time.Since(started))
 			slog.Error("scanner iteration failed", "chain_id", config.chainID, "error", err)
