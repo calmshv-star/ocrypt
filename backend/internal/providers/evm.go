@@ -368,7 +368,7 @@ func (s *EVMSource) scanWatchedRange(ctx context.Context, from, to uint64) (scan
 	}
 	safeHeight, err := parseHexUint64(head.Number)
 	if err != nil || to > safeHeight {
-		return scanner.RangeBatch{}, &ProviderError{Kind: ErrorPermanent, Operation: "evm scan range", Cause: errors.New("range exceeds finalized head")}
+		return scanner.RangeBatch{}, &ProviderError{Kind: ErrorTransient, Operation: "evm scan range", Cause: errors.New("range exceeds finalized head")}
 	}
 	batch := scanner.RangeBatch{From: from, To: to}
 	if len(s.watched) == 0 {

@@ -275,6 +275,25 @@ func TestEVMProviderUsesItsAdmittedSafeHeadTag(t *testing.T) {
 	}
 }
 
+func TestEVMFinalizedHeadLagIsRetryableForWatchedRanges(t *testing.T) {
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		return 200, rpcResult(t, request, func(method string, params []json.RawMessage) json.RawMessage {
+			if method != "eth_getBlockByNumber" || len(params) == 0 || string(params[0]) != `"finalized"` {
+				t.Fatalf("unexpected RPC request: %s %s", method, params)
+			}
+			return json.RawMessage(`{"number":"0x1","hash":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parentHash":"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","timestamp":"0x64","transactions":[]}`)
+		})
+	})
+	source, err := NewEVMSource(EVMConfig{HTTP: HTTPConfig{Endpoint: "https://evm.example", Client: client}, ProviderID: "evm-a", ChainID: "eip155:1", NativeAssetID: "eth", NativeDecimals: 18, AddressFiltered: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = source.ScanRange(context.Background(), 2, 2)
+	if ErrorKindOf(err) != ErrorTransient || !scanner.Retryable(err) {
+		t.Fatalf("finalized head lag was not retryable: %v", err)
+	}
+}
+
 func TestEVMEmptyRouteWatchFastForwardsWithSparseCursorEvidence(t *testing.T) {
 	requested := make([]uint64, 0, 2)
 	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
