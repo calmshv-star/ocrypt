@@ -117,7 +117,7 @@ func TestEVMDirectSourceParsesNativeERC20AndInternalTraceReplaySafely(t *testing
 			}
 		})
 	})
-	source, err := NewEVMSource(EVMConfig{HTTP: HTTPConfig{Endpoint: "https://evm.example", Client: client}, ProviderID: "evm-a", ChainID: "eip155:1", NativeAssetID: "eth", NativeDecimals: 18, IncludeInternal: true, Tokens: map[string]EVMToken{"0x4444444444444444444444444444444444444444": {AssetID: "usdt-eth", Decimals: 6}}})
+	source, err := NewEVMSource(EVMConfig{HTTP: HTTPConfig{Endpoint: "https://evm.example", Client: client}, ProviderID: "evm-a", ChainID: "eip155:1", GenesisHash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", NativeAssetID: "eth", NativeDecimals: 18, IncludeInternal: true, Tokens: map[string]EVMToken{"0x4444444444444444444444444444444444444444": {AssetID: "usdt-eth", Decimals: 6}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestEVMDirectSourceParsesNativeERC20AndInternalTraceReplaySafely(t *testing
 	if _, err = source.Heads(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if chainIdentityCalls != 1 || genesisCalls != 1 {
+	if chainIdentityCalls != 1 || genesisCalls != 0 {
 		t.Fatalf("immutable EVM identity was fetched more than once: chain=%d genesis=%d", chainIdentityCalls, genesisCalls)
 	}
 	first, err := source.ScanRange(context.Background(), 1, 1)

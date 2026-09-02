@@ -29,6 +29,7 @@ type EVMConfig struct {
 	HTTP             HTTPConfig
 	ProviderID       string
 	ChainID          string
+	GenesisHash      string
 	HeadTag          string
 	NativeAssetID    string
 	NativeDecimals   uint8
@@ -40,20 +41,21 @@ type EVMConfig struct {
 }
 
 type EVMSource struct {
-	http            *endpointClient
-	providerID      string
-	chainID         string
-	headTag         string
-	nativeAssetID   string
-	nativeDecimals  uint8
-	tokens          map[string]EVMToken
-	includeInternal bool
-	watched         map[string]struct{}
-	addressFiltered bool
-	overlap         uint64
-	identityMu      sync.Mutex
-	identityReady   bool
-	genesisHash     string
+	http                  *endpointClient
+	providerID            string
+	chainID               string
+	headTag               string
+	nativeAssetID         string
+	nativeDecimals        uint8
+	tokens                map[string]EVMToken
+	includeInternal       bool
+	watched               map[string]struct{}
+	addressFiltered       bool
+	overlap               uint64
+	identityMu            sync.Mutex
+	identityReady         bool
+	genesisHash           string
+	configuredGenesisHash string
 }
 
 func NewEVMSource(config EVMConfig) (*EVMSource, error) {
@@ -63,6 +65,12 @@ func NewEVMSource(config EVMConfig) (*EVMSource, error) {
 	}
 	if strings.TrimSpace(config.ProviderID) == "" || strings.TrimSpace(config.ChainID) == "" || config.NativeDecimals > 36 || (strings.TrimSpace(config.NativeAssetID) == "" && len(config.Tokens) == 0) {
 		return nil, errors.New("invalid EVM provider identity or native asset")
+	}
+	configuredGenesisHash := ""
+	if strings.TrimSpace(config.GenesisHash) != "" {
+		if canonical, hashErr := canonicalEVMHash(config.GenesisHash); hashErr == nil {
+			configuredGenesisHash = canonical
+		}
 	}
 	headTag := strings.TrimSpace(strings.ToLower(config.HeadTag))
 	if headTag == "" {
@@ -91,7 +99,7 @@ func NewEVMSource(config EVMConfig) (*EVMSource, error) {
 	if overlap == 0 {
 		overlap = 1
 	}
-	return &EVMSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, headTag: headTag, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, tokens: tokens, includeInternal: config.IncludeInternal, watched: watched, addressFiltered: config.AddressFiltered, overlap: overlap}, nil
+	return &EVMSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, headTag: headTag, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, tokens: tokens, includeInternal: config.IncludeInternal, watched: watched, addressFiltered: config.AddressFiltered, overlap: overlap, configuredGenesisHash: configuredGenesisHash}, nil
 }
 
 type evmBlock struct {
@@ -178,6 +186,11 @@ func (s *EVMSource) identity(ctx context.Context) (string, error) {
 	reported, err := parseHexUint64(reportedChain)
 	if err != nil || reported != expected {
 		return "", &ProviderError{Kind: ErrorPermanent, Operation: "evm chain identity", Cause: errors.New("chain ID mismatch")}
+	}
+	if s.configuredGenesisHash != "" {
+		s.genesisHash = s.configuredGenesisHash
+		s.identityReady = true
+		return s.genesisHash, nil
 	}
 	genesis, err := s.block(ctx, 0, false)
 	if err != nil {
