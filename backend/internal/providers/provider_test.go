@@ -91,13 +91,16 @@ func TestEVMDirectSourceParsesNativeERC20AndInternalTraceReplaySafely(t *testing
 		Traces   json.RawMessage `json:"traces"`
 	}
 	readFixture(t, "evm.json", &fixture)
+	chainIdentityCalls, genesisCalls := 0, 0
 	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
 		return 200, rpcResult(t, request, func(method string, params []json.RawMessage) json.RawMessage {
 			switch method {
 			case "eth_chainId":
+				chainIdentityCalls++
 				return fixture.ChainID
 			case "eth_getBlockByNumber":
 				if len(params) > 0 && string(params[0]) == `"0x0"` {
+					genesisCalls++
 					return fixture.Genesis
 				}
 				if len(params) == 2 && string(params[0]) == `"0x1"` && string(params[1]) != "true" {
@@ -121,6 +124,12 @@ func TestEVMDirectSourceParsesNativeERC20AndInternalTraceReplaySafely(t *testing
 	heads, err := source.Heads(context.Background())
 	if err != nil || heads[0].SafeHeight != 1 || heads[0].GenesisHash == "" {
 		t.Fatalf("unexpected head: %+v %v", heads, err)
+	}
+	if _, err = source.Heads(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if chainIdentityCalls != 1 || genesisCalls != 1 {
+		t.Fatalf("immutable EVM identity was fetched more than once: chain=%d genesis=%d", chainIdentityCalls, genesisCalls)
 	}
 	first, err := source.ScanRange(context.Background(), 1, 1)
 	if err != nil {

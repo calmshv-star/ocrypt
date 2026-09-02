@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/chains"
@@ -50,6 +51,9 @@ type EVMSource struct {
 	watched         map[string]struct{}
 	addressFiltered bool
 	overlap         uint64
+	identityMu      sync.Mutex
+	identityReady   bool
+	genesisHash     string
 }
 
 func NewEVMSource(config EVMConfig) (*EVMSource, error) {
@@ -142,19 +146,7 @@ type evmTraceCall struct {
 }
 
 func (s *EVMSource) Heads(ctx context.Context) ([]scanner.ProviderHead, error) {
-	var reportedChain string
-	if err := s.http.rpc(ctx, "evm chain identity", "eth_chainId", []any{}, &reportedChain); err != nil {
-		return nil, err
-	}
-	expected, err := evmChainNumericID(s.chainID)
-	if err != nil {
-		return nil, err
-	}
-	reported, err := parseHexUint64(reportedChain)
-	if err != nil || reported != expected {
-		return nil, &ProviderError{Kind: ErrorPermanent, Operation: "evm chain identity", Cause: errors.New("chain ID mismatch")}
-	}
-	genesis, err := s.block(ctx, 0, false)
+	genesisHash, err := s.identity(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -166,11 +158,38 @@ func (s *EVMSource) Heads(ctx context.Context) ([]scanner.ProviderHead, error) {
 	if err != nil {
 		return nil, malformed("evm finalized head", err)
 	}
+	return []scanner.ProviderHead{{Provider: s.providerID, ChainID: s.chainID, GenesisHash: genesisHash, SafeHeight: height, ObservedAt: s.http.now().UTC()}}, nil
+}
+
+func (s *EVMSource) identity(ctx context.Context) (string, error) {
+	s.identityMu.Lock()
+	defer s.identityMu.Unlock()
+	if s.identityReady {
+		return s.genesisHash, nil
+	}
+	var reportedChain string
+	if err := s.http.rpc(ctx, "evm chain identity", "eth_chainId", []any{}, &reportedChain); err != nil {
+		return "", err
+	}
+	expected, err := evmChainNumericID(s.chainID)
+	if err != nil {
+		return "", err
+	}
+	reported, err := parseHexUint64(reportedChain)
+	if err != nil || reported != expected {
+		return "", &ProviderError{Kind: ErrorPermanent, Operation: "evm chain identity", Cause: errors.New("chain ID mismatch")}
+	}
+	genesis, err := s.block(ctx, 0, false)
+	if err != nil {
+		return "", err
+	}
 	genesisHash, err := canonicalEVMHash(genesis.Hash)
 	if err != nil {
-		return nil, malformed("evm genesis", err)
+		return "", malformed("evm genesis", err)
 	}
-	return []scanner.ProviderHead{{Provider: s.providerID, ChainID: s.chainID, GenesisHash: genesisHash, SafeHeight: height, ObservedAt: s.http.now().UTC()}}, nil
+	s.genesisHash = genesisHash
+	s.identityReady = true
+	return genesisHash, nil
 }
 
 func (s *EVMSource) ScanRange(ctx context.Context, from, to uint64) (scanner.RangeBatch, error) {
