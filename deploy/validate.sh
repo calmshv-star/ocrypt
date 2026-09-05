@@ -32,7 +32,7 @@ files.each { |file| load_yaml.call(file) }
 contracts = JSON.parse(File.read("deploy/runtime-contracts.json"))
 expected = contracts.keys
 tool_commands = %w[migration-control migration-control-worker migration-traffic-actuator]
-local_commands = %w[bootstrap-envelope]
+local_commands = %w[bootstrap-envelope ton-payment-recovery]
 compose = load_yaml.call("infra/compose.yaml")
 services = compose.fetch("services")
 standalone = load_yaml.call("deploy/standalone/compose.shadow.yaml")
