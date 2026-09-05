@@ -105,9 +105,13 @@ type tonBlocksResponse struct {
 }
 
 type tonBlock struct {
+	Workchain  int32     `json:"workchain"`
+	Shard      string    `json:"shard"`
 	Seqno      uint64    `json:"seqno"`
 	RootHash   string    `json:"root_hash"`
 	GenUtime   jsonInt64 `json:"gen_utime"`
+	StartLT    jsonInt64 `json:"start_lt"`
+	EndLT      jsonInt64 `json:"end_lt"`
 	PrevBlocks []struct {
 		Seqno    uint64 `json:"seqno"`
 		RootHash string `json:"root_hash"`
@@ -258,15 +262,14 @@ func (s *TONSource) LookupTransaction(ctx context.Context, chainID, transactionI
 	// Toncenter accepts the common base64 form as well as hex on different
 	// installations. Preserve the merchant-supplied representation for the
 	// query, then canonicalize every returned action before trusting it.
-	actions, err := s.tonActionPages(ctx, url.Values{"transaction_hash": {strings.TrimSpace(transactionID)}})
+	actions, err := s.tonActionPages(ctx, url.Values{"tx_hash": {strings.TrimSpace(transactionID)}})
 	if err != nil {
 		return nil, err
 	}
 	filtered := actions[:0]
 	seqnos := make(map[uint64]struct{})
 	for _, action := range actions {
-		canonical, hashErr := canonicalTONHash(tonActionTransactionHash(action))
-		if hashErr != nil || canonical != txHash {
+		if !tonActionContainsTransaction(action, txHash) {
 			continue
 		}
 		if action.TraceMCSeqnoEnd == 0 {
@@ -301,13 +304,26 @@ func (s *TONSource) LookupTransaction(ctx context.Context, chainID, transactionI
 	return s.normalizeTONActions(filtered, blocks, 0, safe)
 }
 
+func tonActionContainsTransaction(action tonAction, txHash string) bool {
+	for _, hash := range append([]string{action.TransactionHash, action.TraceID}, action.Transactions...) {
+		canonical, err := canonicalTONHash(hash)
+		if err == nil && canonical == txHash {
+			return true
+		}
+	}
+	return false
+}
+
 type tonBlockEvidence struct {
 	Hash string
 	Time time.Time
 }
 
-// scanWatchedRange uses the indexed V3 time filters to read a whole contiguous
-// masterchain range and the watched account's actions in bounded pages. This
+// scanWatchedRange reads a contiguous masterchain range and watched actions in
+// bounded pages. Block timestamps are valid bounds for other masterchain blocks,
+// but NOT for actions: a shard transaction can predate the masterchain block
+// which includes it. Action bounds therefore use the previous shard frontier's
+// logical time, with exact trace/masterchain membership checked afterwards. This
 // preserves every block/hash check while avoiding two public HTTP requests per
 // block, which cannot keep up with TON's head under the unauthenticated 1 RPS
 // limit.
@@ -378,7 +394,11 @@ func (s *TONSource) scanWatchedRange(ctx context.Context, from, to, safe uint64)
 		batch.Blocks = append(batch.Blocks, scanner.Block{Height: seqno, Hash: hash, ParentHash: parentHash, Time: blockTime})
 		evidence[seqno] = tonBlockEvidence{Hash: hash, Time: blockTime}
 	}
-	events, err := s.tonActionsWindow(ctx, from, to, int64(first.GenUtime), int64(last.GenUtime), evidence, safe)
+	startLT, endLT, err := s.tonActionsLTBounds(ctx, from, first, last)
+	if err != nil {
+		return scanner.RangeBatch{}, err
+	}
+	events, err := s.tonActionsWindow(ctx, from, to, startLT, endLT, evidence, safe)
 	if err != nil {
 		return scanner.RangeBatch{}, err
 	}
@@ -405,16 +425,125 @@ func (s *TONSource) tonActions(ctx context.Context, seqno uint64, blockHash stri
 	return s.normalizeTONActions(all, map[uint64]tonBlockEvidence{seqno: {Hash: blockHash, Time: blockTime}}, seqno, safe)
 }
 
-func (s *TONSource) tonActionsWindow(ctx context.Context, from, to uint64, startUtime, endUtime int64, blocks map[uint64]tonBlockEvidence, safe uint64) ([]domain.TransferEvent, error) {
+// Every newly included shard transaction follows that shard's previous frontier
+// in logical time. Taking the minimum across ALL frontier shards also covers a
+// lagging shard and shard splits/merges; using only the preceding masterchain's
+// LT (or wall clock) does not. The final masterchain block's end_lt bounds all of
+// its referenced transactions above. Toncenter filters actions by trace_end_lt.
+// Missing frontier evidence must stop the range, never fall back to time bounds.
+func (s *TONSource) tonActionsLTBounds(ctx context.Context, from uint64, first, last tonBlock) (int64, int64, error) {
+	endLT := int64(last.EndLT)
+	if last.StartLT <= 0 || endLT <= int64(last.StartLT) {
+		return 0, 0, malformed("ton action logical time bounds", errors.New("missing masterchain logical time"))
+	}
+	if from == 0 {
+		return 0, endLT, nil
+	}
+	var state tonBlocksResponse
+	query := url.Values{"seqno": {strconv.FormatUint(from-1, 10)}}
+	if err := s.http.request(ctx, "ton previous shard frontier", http.MethodGet, []string{"api", "v3", "masterchainBlockShardState"}, query, nil, &state); err != nil {
+		return 0, 0, err
+	}
+	if len(state.Blocks) == 0 || len(state.Blocks) > 1000 {
+		return 0, 0, malformed("ton previous shard frontier", errors.New("invalid shard frontier count"))
+	}
+	startLT := endLT
+	masterchainFound := false
+	masterchainEndLT := int64(0)
+	workchains := make(map[int32]bool)
+	shards := make(map[int32][]uint64)
+	seen := make(map[string]bool)
+	for _, block := range state.Blocks {
+		key := strconv.FormatInt(int64(block.Workchain), 10) + ":" + block.Shard
+		hash, err := canonicalTONHash(block.RootHash)
+		if err != nil || block.Shard == "" || seen[key] || block.StartLT < 0 || block.EndLT <= block.StartLT || int64(block.EndLT) >= endLT {
+			return 0, 0, malformed("ton previous shard frontier", errors.New("invalid shard frontier block"))
+		}
+		seen[key] = true
+		workchains[block.Workchain] = true
+		shard, shardErr := strconv.ParseUint(block.Shard, 16, 64)
+		if shardErr != nil || shard == 0 {
+			return 0, 0, malformed("ton previous shard frontier", errors.New("invalid shard identifier"))
+		}
+		shards[block.Workchain] = append(shards[block.Workchain], shard)
+		if block.Workchain == -1 {
+			if masterchainFound || block.Seqno != from-1 || shard != uint64(1)<<63 {
+				return 0, 0, malformed("ton previous shard frontier", errors.New("previous masterchain sequence mismatch"))
+			}
+			masterchainFound = true
+			masterchainEndLT = int64(block.EndLT)
+			if len(first.PrevBlocks) != 1 {
+				return 0, 0, malformed("ton previous shard frontier", errors.New("missing previous masterchain binding"))
+			}
+			if first.PrevBlocks[0].Seqno != 0 && first.PrevBlocks[0].Seqno != from-1 {
+				return 0, 0, malformed("ton previous shard frontier", errors.New("previous masterchain binding mismatch"))
+			}
+			if declared := first.PrevBlocks[0].RootHash; declared != "" {
+				canonical, err := canonicalTONHash(declared)
+				if err != nil || canonical != hash {
+					return 0, 0, malformed("ton previous shard frontier", errors.New("previous masterchain hash mismatch"))
+				}
+			}
+		}
+		if int64(block.EndLT) < startLT {
+			startLT = int64(block.EndLT)
+		}
+	}
+	if !masterchainFound {
+		return 0, 0, malformed("ton previous shard frontier", errors.New("missing previous masterchain block"))
+	}
+	for _, block := range state.Blocks {
+		if int64(block.EndLT) > masterchainEndLT {
+			return 0, 0, malformed("ton previous shard frontier", errors.New("shard logical time exceeds masterchain frontier"))
+		}
+	}
+	for _, account := range s.watched {
+		workchain, _ := strconv.ParseInt(strings.SplitN(account, ":", 2)[0], 10, 32)
+		if !workchains[int32(workchain)] {
+			return 0, 0, malformed("ton previous shard frontier", errors.New("missing watched workchain frontier"))
+		}
+		if !tonCompleteShardFrontier(shards[int32(workchain)]) {
+			return 0, 0, malformed("ton previous shard frontier", errors.New("incomplete or overlapping watched shard frontier"))
+		}
+	}
+	return startLT, endLT, nil
+}
+
+// TON shard IDs encode the address prefix followed by a terminator bit. Their
+// half-open ranges must tile the entire 64-bit address space exactly, otherwise
+// a missing slower shard could silently raise our lower logical-time bound.
+func tonCompleteShardFrontier(shards []uint64) bool {
+	if len(shards) == 0 {
+		return false
+	}
+	sort.Slice(shards, func(i, j int) bool { return shards[i] < shards[j] })
+	next := uint64(0)
+	for i, shard := range shards {
+		tag := shard & -shard
+		if tag == 0 || shard-tag != next {
+			return false
+		}
+		next = shard + tag
+		if next == 0 && i != len(shards)-1 {
+			return false
+		}
+	}
+	return next == 0
+}
+
+func (s *TONSource) tonActionsWindow(ctx context.Context, from, to uint64, startLT, endLT int64, blocks map[uint64]tonBlockEvidence, safe uint64) ([]domain.TransferEvent, error) {
 	all, err := s.tonActionPages(ctx, url.Values{
-		"start_utime": {strconv.FormatInt(startUtime, 10)},
-		"end_utime":   {strconv.FormatInt(endUtime, 10)},
+		"start_lt": {strconv.FormatInt(startLT, 10)},
+		"end_lt":   {strconv.FormatInt(endLT, 10)},
 	})
 	if err != nil {
 		return nil, err
 	}
 	filtered := all[:0]
 	for _, action := range all {
+		if action.TraceMCSeqnoEnd == 0 {
+			return nil, malformed("ton block actions", errors.New("missing action masterchain binding"))
+		}
 		if action.TraceMCSeqnoEnd >= from && action.TraceMCSeqnoEnd <= to {
 			filtered = append(filtered, action)
 		}
@@ -430,7 +559,12 @@ func (s *TONSource) tonActionPages(ctx context.Context, base url.Values) ([]tonA
 	}
 	for _, account := range accounts {
 		accountTotal := uint64(0)
+		var expectedTotal *uint64
+		seen := make(map[string]bool)
 		for offset := uint64(0); ; offset += uint64(s.pageSize) {
+			if offset >= 100000 {
+				return nil, malformed("ton block actions", errors.New("action pagination safety limit exceeded"))
+			}
 			query := make(url.Values, len(base)+4)
 			for key, values := range base {
 				query[key] = append([]string(nil), values...)
@@ -447,6 +581,18 @@ func (s *TONSource) tonActionPages(ctx context.Context, base url.Values) ([]tonA
 			}
 			if (page.Total != nil && (*page.Total > 100000 || offset > *page.Total)) || len(page.Actions) > int(s.pageSize) {
 				return nil, malformed("ton block actions", errors.New("invalid pagination metadata"))
+			}
+			if page.Total != nil {
+				if expectedTotal != nil && *expectedTotal != *page.Total {
+					return nil, malformed("ton block actions", errors.New("action pagination total changed"))
+				}
+				expectedTotal = page.Total
+			}
+			for _, action := range page.Actions {
+				if seen[action.ActionID] {
+					return nil, malformed("ton block actions", errors.New("action pagination repeated a row"))
+				}
+				seen[action.ActionID] = true
 			}
 			all = append(all, page.Actions...)
 			accountTotal += uint64(len(page.Actions))
