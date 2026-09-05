@@ -4,7 +4,7 @@
     "chain_id": "eip155:1",
     "genesis_hash": "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
     "native_asset_id": "eth-ethereum",
-    "endpoints": ["https://ethereum.publicnode.com", "https://eth.drpc.org", "https://rpc.mevblocker.io"],
+    "endpoints": ["https://mainnet.gateway.tenderly.co", "https://ethereum-rpc.polkachu.com", "https://rpc.mevblocker.io"],
     "tokens": {
       "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48": {"asset_id": "usdc-ethereum", "decimals": 6},
       "0xdAC17F958D2ee523a2206206994597C13D831ec7": {"asset_id": "usdt-ethereum", "decimals": 6}

@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/application"
@@ -33,11 +35,107 @@ type potentialRoute struct {
 	Route    domain.PaymentRoute
 }
 
+// ExactRecoveryTarget confines an operator recovery to one previously missing
+// native transfer and one exact route. It is not a manual matching override.
+type ExactRecoveryTarget struct {
+	IntentID, RouteID string
+	Identity          domain.EventIdentity
+	Amount            money.Amount
+	AssetDecimals     uint8
+}
+
+type exactRecoveryStore struct {
+	store    *Store
+	expected ExactRecoveryTarget
+}
+
+func (s *Store) ForExactRecovery(expected ExactRecoveryTarget) (application.TransferSettlementStore, error) {
+	if s == nil || !ids.Valid(expected.IntentID) || !ids.Valid(expected.RouteID) || expected.Identity.Validate() != nil || expected.Amount.IsZero() {
+		return nil, fmt.Errorf("%w: exact recovery target is incomplete", domain.ErrValidation)
+	}
+	if !(expected.Identity.ChainID == "ton:mainnet" && expected.AssetDecimals == 9) && !(strings.HasPrefix(expected.Identity.ChainID, "eip155:") && expected.AssetDecimals == 18) {
+		return nil, fmt.Errorf("%w: unsupported native recovery asset precision", domain.ErrValidation)
+	}
+	return exactRecoveryStore{store: s, expected: expected}, nil
+}
+
+func (s exactRecoveryStore) IngestAndSettle(ctx context.Context, event domain.TransferEvent) (application.SettlementResult, error) {
+	return s.store.ingestAndSettle(ctx, event, &s.expected)
+}
+
+func (expected ExactRecoveryTarget) validateEvent(event domain.TransferEvent) error {
+	if event.Identity != expected.Identity || event.Amount.Cmp(expected.Amount) != 0 || event.AssetDecimals != expected.AssetDecimals || event.Status != domain.TransferFinalized {
+		return fmt.Errorf("%w: recovery transfer differs from the explicit target", domain.ErrStateConflict)
+	}
+	if (expected.AssetDecimals == 18 && (event.Kind != "native_top_level" || event.Identity.EventIndex != "native:0")) || (expected.AssetDecimals == 9 && event.Kind != "native_message") {
+		return fmt.Errorf("%w: recovery requires a canonical native transfer", domain.ErrStateConflict)
+	}
+	return nil
+}
+
+func (expected ExactRecoveryTarget) validateCandidates(event domain.TransferEvent, candidates []settlementCandidate) error {
+	if len(candidates) != 1 || candidates[0].IntentID != expected.IntentID || candidates[0].RouteID != expected.RouteID || candidates[0].Expected.Cmp(expected.Amount) != 0 {
+		return fmt.Errorf("%w: recovery no longer has the intended unique exact route", domain.ErrStateConflict)
+	}
+	if event.Confirmations < candidates[0].RequiredFinality {
+		return fmt.Errorf("%w: recovery does not satisfy route finality", domain.ErrStateConflict)
+	}
+	return nil
+}
+
+func (expected ExactRecoveryTarget) validateResult(result application.SettlementResult) error {
+	if result.Outcome != application.SettlementSettled || result.PaymentIntentID != expected.IntentID || result.PaymentRouteID != expected.RouteID {
+		return fmt.Errorf("%w: recovery did not settle the explicit target; rolling back", domain.ErrStateConflict)
+	}
+	return nil
+}
+
+func validateRecoveryNativeAsset(ctx context.Context, tx pgx.Tx, expected ExactRecoveryTarget, event domain.TransferEvent) error {
+	var valid bool
+	// These reads share the SERIALIZABLE snapshot with the locked candidate and
+	// every settlement write. A token asset cannot be relabelled as native by CLI.
+	err := tx.QueryRow(ctx, `SELECT EXISTS(
+SELECT 1 FROM payment_routes r JOIN assets a ON a.id=r.asset_id AND a.chain_id=r.chain_id
+WHERE r.id=$1 AND r.intent_id=$2 AND r.chain_id=$3 AND r.asset_id=$4
+AND a.kind='native' AND a.decimals=$5 AND r.asset_decimals=$5
+AND $6 BETWEEN r.starts_at AND r.expires_at)`, expected.RouteID, expected.IntentID, expected.Identity.ChainID, expected.Identity.AssetID, expected.AssetDecimals, event.OnChainTime).Scan(&valid)
+	if err != nil {
+		return fmt.Errorf("recovery native asset validation: %w", err)
+	}
+	if !valid {
+		return fmt.Errorf("%w: recovery native asset, route precision or payment window mismatch", domain.ErrStateConflict)
+	}
+	return nil
+}
+
 // IngestAndSettle is the financial transaction boundary used by chain workers.
 // The worker database role is intentionally separate from merchant API roles and
 // must have the narrowly scoped BYPASSRLS grants required for cross-tenant routing.
 func (s *Store) IngestAndSettle(ctx context.Context, event domain.TransferEvent) (result application.SettlementResult, err error) {
-	err = pgx.BeginTxFunc(ctx, s.db.pool, pgx.TxOptions{IsoLevel: pgx.Serializable}, func(tx pgx.Tx) error {
+	return s.ingestAndSettle(ctx, event, nil)
+}
+
+func (s *Store) ingestAndSettle(ctx context.Context, event domain.TransferEvent, expected *ExactRecoveryTarget) (result application.SettlementResult, err error) {
+	err = pgx.BeginTxFunc(ctx, s.db.pool, pgx.TxOptions{IsoLevel: pgx.Serializable}, func(tx pgx.Tx) (txErr error) {
+		// This executes before BeginTxFunc can commit, including on every early
+		// return below. A failed recovery never commits an unmatched/other order.
+		defer func() {
+			if expected != nil && txErr == nil {
+				txErr = expected.validateResult(result)
+			}
+		}()
+		if expected != nil {
+			if err := expected.validateEvent(event); err != nil {
+				return err
+			}
+			var exists bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM transfer_events WHERE chain_id=$1 AND transaction_id=$2 AND event_identity=$3 AND asset_id=$4 AND to_address=$5)`, event.Identity.ChainID, event.Identity.TransactionID, event.Identity.EventIndex, event.Identity.AssetID, event.Identity.ToAddress).Scan(&exists); err != nil {
+				return err
+			}
+			if exists {
+				return fmt.Errorf("%w: recovery transfer already exists", domain.ErrStateConflict)
+			}
+		}
 		actionable, eventID, canonical, err := insertCanonicalTransfer(ctx, tx, event)
 		if err != nil {
 			return err
@@ -45,12 +143,23 @@ func (s *Store) IngestAndSettle(ctx context.Context, event domain.TransferEvent)
 		event = canonical
 		result.TransferEventID = eventID
 		if !actionable {
+			if expected != nil {
+				return fmt.Errorf("%w: recovery transfer is a duplicate", domain.ErrStateConflict)
+			}
 			result.Outcome = application.SettlementDuplicate
 			return nil
 		}
 		candidates, err := findSettlementCandidates(ctx, tx, event)
 		if err != nil {
 			return err
+		}
+		if expected != nil {
+			if err := expected.validateCandidates(event, candidates); err != nil {
+				return err
+			}
+			if err := validateRecoveryNativeAsset(ctx, tx, *expected, event); err != nil {
+				return err
+			}
 		}
 		if event.Status != domain.TransferFinalized {
 			if len(candidates) == 1 {
@@ -69,6 +178,9 @@ func (s *Store) IngestAndSettle(ctx context.Context, event domain.TransferEvent)
 			return err
 		}
 		if alreadyClassified {
+			if expected != nil {
+				return fmt.Errorf("%w: recovery transfer is already classified", domain.ErrStateConflict)
+			}
 			result.Outcome = application.SettlementDuplicate
 			return nil
 		}
@@ -373,8 +485,26 @@ func insertCanonicalTransfer(ctx context.Context, tx pgx.Tx, event domain.Transf
 		canonical.ID = existingID
 		return true, existingID, canonical, nil
 	}
-	if blockHash != event.BlockHash || blockHeight != event.BlockHeight || !onChainTime.Equal(event.OnChainTime) || !bytes.Equal(existingEvidence, evidence) {
+	if blockHash != event.BlockHash || blockHeight != event.BlockHeight || !onChainTime.Equal(event.OnChainTime) {
 		return false, "", domain.TransferEvent{}, fmt.Errorf("%w: duplicate transfer identity has different canonical inclusion facts", domain.ErrInvariantViolation)
+	}
+	if !bytes.Equal(existingEvidence, evidence) {
+		if !matchesLegacyNativeEVMEvidence(event, existingEvidence) {
+			return false, "", domain.TransferEvent{}, fmt.Errorf("%w: duplicate transfer identity has different canonical inclusion facts", domain.ErrInvariantViolation)
+		}
+		var nativeAsset bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM assets WHERE id=$1 AND chain_id=$2 AND kind='native' AND decimals=18)`, event.Identity.AssetID, event.Identity.ChainID).Scan(&nativeAsset); err != nil {
+			return false, "", domain.TransferEvent{}, err
+		}
+		if !nativeAsset {
+			return false, "", domain.TransferEvent{}, fmt.Errorf("%w: legacy EVM evidence requires a native asset", domain.ErrInvariantViolation)
+		}
+		// Keep the original canonical evidence, including the hash already in
+		// immutable observations and emitted webhooks. Only confirmation/finality
+		// progress below may be written; the ordinary classified-event guard
+		// prevents a second match, ledger transaction or settlement notification.
+		canonical.EvidenceHash = hex.EncodeToString(existingEvidence)
+		canonical.NativeEVMRawEvidence = nil
 	}
 	canonical.ID = existingID
 	canonical.Status = domain.TransferStatus(status)
@@ -400,6 +530,89 @@ func insertCanonicalTransfer(ctx context.Context, tx pgx.Tx, event domain.Transf
 		return true, existingID, canonical, nil
 	}
 	return false, existingID, canonical, nil
+}
+
+// These field orders match the two version-1 provider evidence encodings. The
+// compatibility proof must bind BOTH hashes to the same complete receipt; a
+// caller-supplied alternative digest alone is never sufficient.
+type nativeEVMCompatibilityTransaction struct {
+	Hash             string `json:"hash"`
+	From             string `json:"from"`
+	To               string `json:"to"`
+	Value            string `json:"value"`
+	TransactionIndex string `json:"transactionIndex"`
+}
+
+type nativeEVMCompatibilityReceipt struct {
+	TransactionHash  string          `json:"transactionHash"`
+	BlockHash        string          `json:"blockHash"`
+	BlockNumber      string          `json:"blockNumber"`
+	Status           string          `json:"status"`
+	TransactionIndex string          `json:"transactionIndex"`
+	Logs             json.RawMessage `json:"logs"`
+}
+
+func matchesLegacyNativeEVMEvidence(event domain.TransferEvent, storedEvidence []byte) bool {
+	if !strings.HasPrefix(event.Identity.ChainID, "eip155:") || event.Kind != "native_top_level" || event.Identity.EventIndex != "native:0" || event.ParserVersion != "evm-v1" || event.AssetDecimals != 18 || event.Status != domain.TransferFinalized || len(storedEvidence) != sha256.Size || len(event.NativeEVMRawEvidence) == 0 || len(event.NativeEVMRawEvidence) > 1<<20 {
+		return false
+	}
+	if chain, err := strconv.ParseUint(strings.TrimPrefix(event.Identity.ChainID, "eip155:"), 10, 64); err != nil || chain == 0 {
+		return false
+	}
+	var proof struct {
+		Transaction nativeEVMCompatibilityTransaction `json:"transaction"`
+		Receipt     nativeEVMCompatibilityReceipt     `json:"receipt"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(event.NativeEVMRawEvidence))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&proof) != nil {
+		return false
+	}
+	canonical, err := json.Marshal(proof)
+	if err != nil || !bytes.Equal(canonical, event.NativeEVMRawEvidence) {
+		return false // Also rejects duplicate/missing keys and trailing JSON.
+	}
+	currentHash := sha256.Sum256(canonical)
+	if hex.EncodeToString(currentHash[:]) != event.EvidenceHash {
+		return false
+	}
+	tx, receipt := proof.Transaction, proof.Receipt
+	if !sameNativeEVMHex(tx.Hash, event.Identity.TransactionID, 32) || !sameNativeEVMHex(receipt.TransactionHash, event.Identity.TransactionID, 32) || !sameNativeEVMHex(tx.From, event.FromAddress, 20) || !sameNativeEVMHex(tx.To, event.Identity.ToAddress, 20) || !sameNativeEVMHex(receipt.BlockHash, event.BlockHash, 32) || receipt.Status != "0x1" {
+		return false
+	}
+	height, heightErr := nativeEVMHexUint64(receipt.BlockNumber)
+	txIndex, txIndexErr := nativeEVMHexUint64(tx.TransactionIndex)
+	receiptIndex, receiptIndexErr := nativeEVMHexUint64(receipt.TransactionIndex)
+	if heightErr != nil || height != event.BlockHeight || txIndexErr != nil || receiptIndexErr != nil || txIndex != receiptIndex || !strings.HasPrefix(tx.Value, "0x") {
+		return false
+	}
+	value, ok := new(big.Int).SetString(strings.TrimPrefix(tx.Value, "0x"), 16)
+	if !ok || value.Sign() <= 0 || value.BitLen() > 256 || value.String() != event.Amount.String() {
+		return false
+	}
+	legacy, err := json.Marshal(struct {
+		Receipt nativeEVMCompatibilityReceipt `json:"receipt"`
+	}{Receipt: receipt})
+	if err != nil {
+		return false
+	}
+	legacyHash := sha256.Sum256(legacy)
+	return bytes.Equal(legacyHash[:], storedEvidence)
+}
+
+func sameNativeEVMHex(left, right string, size int) bool {
+	if len(left) != 2+size*2 || len(right) != 2+size*2 || !strings.HasPrefix(left, "0x") || !strings.HasPrefix(right, "0x") || !strings.EqualFold(left, right) {
+		return false
+	}
+	_, err := hex.DecodeString(left[2:])
+	return err == nil
+}
+
+func nativeEVMHexUint64(value string) (uint64, error) {
+	if !strings.HasPrefix(value, "0x") {
+		return 0, errors.New("invalid EVM hex quantity")
+	}
+	return strconv.ParseUint(value[2:], 16, 64)
 }
 
 func mergeTransferProgress(current domain.TransferStatus, confirmations uint64, reported domain.TransferStatus, reportedConfirmations uint64) (domain.TransferStatus, uint64, bool, error) {

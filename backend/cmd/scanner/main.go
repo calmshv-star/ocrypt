@@ -26,9 +26,47 @@ import (
 	"github.com/calmshv-star/ocrypt/backend/internal/telemetry"
 )
 
-type scanHealth struct{ lastSuccess atomic.Int64 }
+type scanHealth struct {
+	lastSuccess   atomic.Int64
+	lastBlockTime atomic.Int64
+	headLag       atomic.Uint64
+	paused        atomic.Bool
+	warnedLag     atomic.Bool
+}
+
+type scanObserver struct {
+	*telemetry.Registry
+	health *scanHealth
+}
+
+func (o *scanObserver) SetScannerHeadLag(lag uint64) {
+	o.Registry.SetScannerHeadLag(lag)
+	o.health.headLag.Store(lag)
+}
+
+func (h *scanHealth) recordSuccess(batch scanner.RangeBatch, now time.Time) {
+	if len(batch.Blocks) > 0 {
+		h.lastBlockTime.Store(batch.Blocks[len(batch.Blocks)-1].Time.Unix())
+	}
+	h.lastSuccess.Store(now.Unix())
+}
+
+func (h *scanHealth) catchingUp(now time.Time, maxCursorAge time.Duration) bool {
+	if h.paused.Load() || h.headLag.Load() == 0 {
+		return false
+	}
+	lastBlock := h.lastBlockTime.Load()
+	return lastBlock == 0 || now.Sub(time.Unix(lastBlock, 0)) > maxCursorAge
+}
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--check-ready" {
+		if err := probeScannerReadiness(os.Getenv("SCANNER_HEALTH_ADDRESS")); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	config, err := loadScannerConfig()
@@ -87,13 +125,13 @@ func main() {
 		runtimeLoader = &platformruntime.ScannerLoader{Reader: platformRepository, ProviderAdmission: providerService, WatchAddresses: platformRepository, SecretDir: config.platformSecretDir, ProviderMinInterval: config.providerMinInterval}
 	}
 	metrics := telemetry.New("scanner")
+	health := &scanHealth{}
 	worker := scanner.Worker{
 		ChainID: config.chainID, GenesisHash: config.genesisHash, Shard: config.shard, Owner: config.workerID,
 		Source: source, Store: store, Quorum: config.quorum, Overlap: config.overlap, RangeSize: config.rangeSize,
-		LeaseDuration: config.leaseDuration, MaxHeadAge: config.maxHeadAge, Observer: metrics,
+		LeaseDuration: config.leaseDuration, MaxHeadAge: config.maxHeadAge, Observer: &scanObserver{Registry: metrics, health: health},
 	}
-	health := &scanHealth{}
-	healthServer := &http.Server{Addr: config.healthAddress, Handler: metrics.Handler(scannerHealthHandler(pool, health, config.maxReadyAge)), ReadHeaderTimeout: 3 * time.Second}
+	healthServer := &http.Server{Addr: config.healthAddress, Handler: metrics.Handler(scannerHealthHandler(pool, health, config.maxReadyAge, config.maxCursorAge)), ReadHeaderTimeout: 3 * time.Second}
 	go func() {
 		if err := healthServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("scanner health server failed", "error", err)
@@ -105,6 +143,7 @@ func main() {
 	staticWatchSourceReady := false
 	run := func() bool {
 		started := time.Now()
+		health.paused.Store(false)
 		if staticWatchAddresses != nil {
 			addresses, loadErr := staticWatchAddresses.ScannerWatchAddresses(ctx, config.chainID, time.Now().UTC())
 			if loadErr != nil {
@@ -136,6 +175,7 @@ func main() {
 				return false
 			}
 			if runtime.Paused {
+				health.paused.Store(true)
 				health.lastSuccess.Store(time.Now().UTC().Unix())
 				metrics.ObserveCycle("scanner", "idle", 0, time.Since(started))
 				return true
@@ -150,26 +190,32 @@ func main() {
 			if errors.As(err, &reorg) {
 				health.lastSuccess.Store(time.Now().UTC().Unix())
 				metrics.ObserveCycle("scanner", "partial", len(batch.Blocks)+len(batch.Events), time.Since(started))
-				slog.Warn("canonical reorg compensated and cursor rewound", "chain_id", config.chainID, "height", reorg.Height, "old_hash", reorg.CommittedHash, "new_hash", reorg.NewHash)
+				slog.Warn("canonical reorg compensated and cursor rewound", "chain_id", worker.ChainID, "height", reorg.Height, "old_hash", reorg.CommittedHash, "new_hash", reorg.NewHash)
 				return true
 			}
 			if scanner.Retryable(err) {
 				metrics.ObserveCycle("scanner", "retry", 0, time.Since(started))
-				slog.Warn("scanner provider temporarily unavailable; retry scheduled", "chain_id", config.chainID, "error", err)
+				slog.Warn("scanner provider temporarily unavailable; retry scheduled", "chain_id", worker.ChainID, "error", err)
 				return false
 			}
 			metrics.ObserveCycle("scanner", "failure", 0, time.Since(started))
-			slog.Error("scanner iteration failed", "chain_id", config.chainID, "error", err)
+			slog.Error("scanner iteration failed", "chain_id", worker.ChainID, "error", err)
 			return false
 		}
-		health.lastSuccess.Store(time.Now().UTC().Unix())
+		health.recordSuccess(batch, time.Now().UTC())
+		lagging := health.catchingUp(time.Now().UTC(), config.maxCursorAge)
+		if lagging && health.warnedLag.CompareAndSwap(false, true) {
+			slog.Warn("scanner is committing historical blocks; current payments are delayed", "chain_id", worker.ChainID, "remaining_blocks", health.headLag.Load(), "cursor_block_time", time.Unix(health.lastBlockTime.Load(), 0).UTC())
+		} else if !lagging && health.warnedLag.CompareAndSwap(true, false) {
+			slog.Info("scanner payment backlog recovered", "chain_id", worker.ChainID, "remaining_blocks", health.headLag.Load())
+		}
 		outcome := "success"
 		if len(batch.Blocks) == 0 && len(batch.Events) == 0 {
 			outcome = "idle"
 		}
 		metrics.ObserveCycle("scanner", outcome, len(batch.Blocks)+len(batch.Events), time.Since(started))
 		if len(batch.Blocks) > 0 {
-			slog.Info("scanner range committed", "chain_id", config.chainID, "from", batch.From, "to", batch.To, "events", len(batch.Events))
+			slog.Info("scanner range committed", "chain_id", worker.ChainID, "from", batch.From, "to", batch.To, "events", len(batch.Events))
 		}
 		return true
 	}
@@ -181,7 +227,11 @@ func main() {
 		} else {
 			failureStreak++
 		}
-		delay := scannerRetryDelay(config.pollInterval, failureStreak)
+		remaining := health.headLag.Load()
+		if health.paused.Load() {
+			remaining = 0 // Maintenance must retain the normal polling interval.
+		}
+		delay := scannerCycleDelay(config.pollInterval, failureStreak, remaining, worker.RangeSize, worker.Overlap)
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
@@ -193,6 +243,15 @@ func main() {
 		case <-timer.C:
 		}
 	}
+}
+
+// Catch-up removes only the idle pause between successful ranges. It does not
+// bypass provider pacing, increase an admitted range, or change quorum/finality.
+func scannerCycleDelay(pollInterval time.Duration, failureStreak int, remaining, rangeSize, overlap uint64) time.Duration {
+	if failureStreak == 0 && rangeSize > overlap && remaining > rangeSize-overlap && pollInterval > time.Second {
+		return time.Second
+	}
+	return scannerRetryDelay(pollInterval, failureStreak)
 }
 
 func scannerRetryDelay(pollInterval time.Duration, failureStreak int) time.Duration {
@@ -228,8 +287,9 @@ type scannerConfig struct {
 	overlap, rangeSize                                                               uint64
 	nativeDecimals                                                                   uint8
 	pageSize                                                                         uint32
+	evmBlockBatchSize                                                                uint8
 	includeInternal                                                                  bool
-	pollInterval, leaseDuration, maxHeadAge, maxReadyAge                             time.Duration
+	pollInterval, leaseDuration, maxHeadAge, maxReadyAge, maxCursorAge               time.Duration
 	providerMinInterval                                                              time.Duration
 	staticConfig                                                                     bool
 	addressFiltered, routeWatchAddresses                                             bool
@@ -296,6 +356,14 @@ func loadScannerConfig() (scannerConfig, error) {
 		return config, errors.New("SCANNER_PAGE_SIZE must be a positive 32-bit integer")
 	}
 	config.pageSize = uint32(pageSize)
+	blockBatchSize, err := positiveUint("SCANNER_EVM_BLOCK_BATCH_SIZE", 1)
+	if err != nil || blockBatchSize > 4 {
+		return config, errors.New("SCANNER_EVM_BLOCK_BATCH_SIZE must be between 1 and 4")
+	}
+	config.evmBlockBatchSize = uint8(blockBatchSize)
+	if blockBatchSize > 1 && (!config.staticConfig || config.chainID != "eip155:1" || config.providerKind != "evm-jsonrpc" || !config.addressFiltered || config.includeInternal) {
+		return config, errors.New("EVM block batching is currently admitted only for the static address-filtered Ethereum scanner without internal traces")
+	}
 	if config.quorum, err = positiveInt("SCANNER_QUORUM", 2); err != nil {
 		return config, err
 	}
@@ -315,6 +383,11 @@ func loadScannerConfig() (scannerConfig, error) {
 		return config, err
 	}
 	if config.maxReadyAge, err = positiveDuration("SCANNER_MAX_READY_AGE", 2*time.Minute); err != nil {
+		return config, err
+	}
+	// Conservative across chains: the wall-clock age includes consensus
+	// finality delay. Operators may tighten it for fast-finality chains.
+	if config.maxCursorAge, err = positiveDuration("SCANNER_MAX_CURSOR_AGE", 30*time.Minute); err != nil {
 		return config, err
 	}
 	if config.providerMinInterval, err = nonNegativeDuration("SCANNER_PROVIDER_MIN_INTERVAL", 0); err != nil {
@@ -376,6 +449,7 @@ func scannerSource(config scannerConfig) (scanner.Source, error) {
 			Assets: config.assets, IncludeInternal: config.includeInternal, GasFreeContracts: config.gasFreeContracts,
 			GasFreeFeeCollectors: config.gasFreeFeeCollectors, WatchedAddresses: config.watchedAddresses, AddressFiltered: config.addressFiltered, Overlap: config.overlap, PageSize: config.pageSize,
 			SolanaAddressIndex: solanaAddressIndex,
+			EVMBlockBatchSize:  config.evmBlockBatchSize,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("initialize %s: %w", providerID, err)
@@ -433,7 +507,7 @@ func parseProviderHeaders(raw string, providerCount int) ([]http.Header, error) 
 	return result, nil
 }
 
-func scannerHealthHandler(pool interface{ Ping(context.Context) error }, health *scanHealth, maxReadyAge time.Duration) http.Handler {
+func scannerHealthHandler(pool interface{ Ping(context.Context) error }, health *scanHealth, maxReadyAge, maxCursorAge time.Duration) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, request *http.Request) {
@@ -442,6 +516,10 @@ func scannerHealthHandler(pool interface{ Ping(context.Context) error }, health 
 		last := time.Unix(health.lastSuccess.Load(), 0)
 		if err := pool.Ping(ctx); err != nil || health.lastSuccess.Load() == 0 || time.Since(last) > maxReadyAge {
 			http.Error(w, "not ready", http.StatusServiceUnavailable)
+			return
+		}
+		if health.catchingUp(time.Now(), maxCursorAge) {
+			http.Error(w, "scanner catching up; current payments delayed", http.StatusServiceUnavailable)
 			return
 		}
 		w.WriteHeader(http.StatusOK)

@@ -60,6 +60,11 @@ type TransferEvent struct {
 	Status        TransferStatus `json:"status"`
 	ParserVersion string         `json:"parser_version"`
 	EvidenceHash  string         `json:"evidence_hash"`
+	// NativeEVMRawEvidence carries the exact watched-native evidence bytes. It
+	// is not an accepted hash alias: storage verifies both evidence encodings
+	// and their transaction/inclusion binding before allowing a legacy replay.
+	// []byte uses JSON base64 so JSONB queues cannot rewrite the hashed bytes.
+	NativeEVMRawEvidence []byte `json:"native_evm_raw_evidence,omitempty"`
 }
 
 func CanTransitionTransfer(from, to TransferStatus) bool {
