@@ -24,8 +24,8 @@ func probeScannerReadiness(address string) error {
 		return fmt.Errorf("invalid scanner health port")
 	}
 	client := &http.Client{
-		Timeout: 3 * time.Second,
-		Transport: &http.Transport{Proxy: nil, DisableKeepAlives: true},
+		Timeout:       3 * time.Second,
+		Transport:     &http.Transport{Proxy: nil, DisableKeepAlives: true},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	response, err := client.Get("http://127.0.0.1:" + port + "/readyz")
