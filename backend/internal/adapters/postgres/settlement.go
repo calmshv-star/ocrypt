@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -484,8 +485,26 @@ func insertCanonicalTransfer(ctx context.Context, tx pgx.Tx, event domain.Transf
 		canonical.ID = existingID
 		return true, existingID, canonical, nil
 	}
-	if blockHash != event.BlockHash || blockHeight != event.BlockHeight || !onChainTime.Equal(event.OnChainTime) || !bytes.Equal(existingEvidence, evidence) {
+	if blockHash != event.BlockHash || blockHeight != event.BlockHeight || !onChainTime.Equal(event.OnChainTime) {
 		return false, "", domain.TransferEvent{}, fmt.Errorf("%w: duplicate transfer identity has different canonical inclusion facts", domain.ErrInvariantViolation)
+	}
+	if !bytes.Equal(existingEvidence, evidence) {
+		if !matchesLegacyNativeEVMEvidence(event, existingEvidence) {
+			return false, "", domain.TransferEvent{}, fmt.Errorf("%w: duplicate transfer identity has different canonical inclusion facts", domain.ErrInvariantViolation)
+		}
+		var nativeAsset bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM assets WHERE id=$1 AND chain_id=$2 AND kind='native' AND decimals=18)`, event.Identity.AssetID, event.Identity.ChainID).Scan(&nativeAsset); err != nil {
+			return false, "", domain.TransferEvent{}, err
+		}
+		if !nativeAsset {
+			return false, "", domain.TransferEvent{}, fmt.Errorf("%w: legacy EVM evidence requires a native asset", domain.ErrInvariantViolation)
+		}
+		// Keep the original canonical evidence, including the hash already in
+		// immutable observations and emitted webhooks. Only confirmation/finality
+		// progress below may be written; the ordinary classified-event guard
+		// prevents a second match, ledger transaction or settlement notification.
+		canonical.EvidenceHash = hex.EncodeToString(existingEvidence)
+		canonical.NativeEVMRawEvidence = nil
 	}
 	canonical.ID = existingID
 	canonical.Status = domain.TransferStatus(status)
@@ -511,6 +530,89 @@ func insertCanonicalTransfer(ctx context.Context, tx pgx.Tx, event domain.Transf
 		return true, existingID, canonical, nil
 	}
 	return false, existingID, canonical, nil
+}
+
+// These field orders match the two version-1 provider evidence encodings. The
+// compatibility proof must bind BOTH hashes to the same complete receipt; a
+// caller-supplied alternative digest alone is never sufficient.
+type nativeEVMCompatibilityTransaction struct {
+	Hash             string `json:"hash"`
+	From             string `json:"from"`
+	To               string `json:"to"`
+	Value            string `json:"value"`
+	TransactionIndex string `json:"transactionIndex"`
+}
+
+type nativeEVMCompatibilityReceipt struct {
+	TransactionHash  string          `json:"transactionHash"`
+	BlockHash        string          `json:"blockHash"`
+	BlockNumber      string          `json:"blockNumber"`
+	Status           string          `json:"status"`
+	TransactionIndex string          `json:"transactionIndex"`
+	Logs             json.RawMessage `json:"logs"`
+}
+
+func matchesLegacyNativeEVMEvidence(event domain.TransferEvent, storedEvidence []byte) bool {
+	if !strings.HasPrefix(event.Identity.ChainID, "eip155:") || event.Kind != "native_top_level" || event.Identity.EventIndex != "native:0" || event.ParserVersion != "evm-v1" || event.AssetDecimals != 18 || event.Status != domain.TransferFinalized || len(storedEvidence) != sha256.Size || len(event.NativeEVMRawEvidence) == 0 || len(event.NativeEVMRawEvidence) > 1<<20 {
+		return false
+	}
+	if chain, err := strconv.ParseUint(strings.TrimPrefix(event.Identity.ChainID, "eip155:"), 10, 64); err != nil || chain == 0 {
+		return false
+	}
+	var proof struct {
+		Transaction nativeEVMCompatibilityTransaction `json:"transaction"`
+		Receipt     nativeEVMCompatibilityReceipt     `json:"receipt"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(event.NativeEVMRawEvidence))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&proof) != nil {
+		return false
+	}
+	canonical, err := json.Marshal(proof)
+	if err != nil || !bytes.Equal(canonical, event.NativeEVMRawEvidence) {
+		return false // Also rejects duplicate/missing keys and trailing JSON.
+	}
+	currentHash := sha256.Sum256(canonical)
+	if hex.EncodeToString(currentHash[:]) != event.EvidenceHash {
+		return false
+	}
+	tx, receipt := proof.Transaction, proof.Receipt
+	if !sameNativeEVMHex(tx.Hash, event.Identity.TransactionID, 32) || !sameNativeEVMHex(receipt.TransactionHash, event.Identity.TransactionID, 32) || !sameNativeEVMHex(tx.From, event.FromAddress, 20) || !sameNativeEVMHex(tx.To, event.Identity.ToAddress, 20) || !sameNativeEVMHex(receipt.BlockHash, event.BlockHash, 32) || receipt.Status != "0x1" {
+		return false
+	}
+	height, heightErr := nativeEVMHexUint64(receipt.BlockNumber)
+	txIndex, txIndexErr := nativeEVMHexUint64(tx.TransactionIndex)
+	receiptIndex, receiptIndexErr := nativeEVMHexUint64(receipt.TransactionIndex)
+	if heightErr != nil || height != event.BlockHeight || txIndexErr != nil || receiptIndexErr != nil || txIndex != receiptIndex || !strings.HasPrefix(tx.Value, "0x") {
+		return false
+	}
+	value, ok := new(big.Int).SetString(strings.TrimPrefix(tx.Value, "0x"), 16)
+	if !ok || value.Sign() <= 0 || value.BitLen() > 256 || value.String() != event.Amount.String() {
+		return false
+	}
+	legacy, err := json.Marshal(struct {
+		Receipt nativeEVMCompatibilityReceipt `json:"receipt"`
+	}{Receipt: receipt})
+	if err != nil {
+		return false
+	}
+	legacyHash := sha256.Sum256(legacy)
+	return bytes.Equal(legacyHash[:], storedEvidence)
+}
+
+func sameNativeEVMHex(left, right string, size int) bool {
+	if len(left) != 2+size*2 || len(right) != 2+size*2 || !strings.HasPrefix(left, "0x") || !strings.HasPrefix(right, "0x") || !strings.EqualFold(left, right) {
+		return false
+	}
+	_, err := hex.DecodeString(left[2:])
+	return err == nil
+}
+
+func nativeEVMHexUint64(value string) (uint64, error) {
+	if !strings.HasPrefix(value, "0x") {
+		return 0, errors.New("invalid EVM hex quantity")
+	}
+	return strconv.ParseUint(value[2:], 16, 64)
 }
 
 func mergeTransferProgress(current domain.TransferStatus, confirmations uint64, reported domain.TransferStatus, reportedConfirmations uint64) (domain.TransferStatus, uint64, bool, error) {

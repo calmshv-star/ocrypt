@@ -38,6 +38,8 @@ type EVMConfig struct {
 	WatchedAddresses []string
 	AddressFiltered  bool
 	Overlap          uint64
+	// BlockBatchSize is opt-in; zero/one keeps the existing single-RPC path.
+	BlockBatchSize uint8
 }
 
 type EVMSource struct {
@@ -52,6 +54,7 @@ type EVMSource struct {
 	watched               map[string]struct{}
 	addressFiltered       bool
 	overlap               uint64
+	blockBatchSize        uint8
 	identityMu            sync.Mutex
 	identityReady         bool
 	genesisHash           string
@@ -79,6 +82,13 @@ func NewEVMSource(config EVMConfig) (*EVMSource, error) {
 	if headTag != "finalized" && headTag != "safe" {
 		return nil, errors.New("EVM head tag must be finalized or safe")
 	}
+	blockBatchSize := config.BlockBatchSize
+	if blockBatchSize == 0 {
+		blockBatchSize = 1
+	}
+	if blockBatchSize > 4 {
+		return nil, errors.New("EVM block batch size must be between 1 and 4")
+	}
 	tokens := make(map[string]EVMToken, len(config.Tokens))
 	for address, token := range config.Tokens {
 		canonical, err := canonicalEVMAddress(address)
@@ -99,7 +109,7 @@ func NewEVMSource(config EVMConfig) (*EVMSource, error) {
 	if overlap == 0 {
 		overlap = 1
 	}
-	return &EVMSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, headTag: headTag, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, tokens: tokens, includeInternal: config.IncludeInternal, watched: watched, addressFiltered: config.AddressFiltered, overlap: overlap, configuredGenesisHash: configuredGenesisHash}, nil
+	return &EVMSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, headTag: headTag, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, tokens: tokens, includeInternal: config.IncludeInternal, watched: watched, addressFiltered: config.AddressFiltered, overlap: overlap, configuredGenesisHash: configuredGenesisHash, blockBatchSize: blockBatchSize}, nil
 }
 
 type evmBlock struct {
@@ -344,6 +354,9 @@ func (s *EVMSource) LookupTransaction(ctx context.Context, chainID, transactionI
 		return nil, malformed("evm transaction block", err)
 	}
 	blockHash, _ := canonicalEVMHash(block.Hash)
+	if s.addressFiltered && !s.includeInternal {
+		return s.normalizeWatchedLookup(transaction, receipt, scanner.Block{Height: height, Hash: blockHash, Time: blockTime}, safeHeight)
+	}
 	receipts := map[string]evmReceipt{txHash: receipt}
 	traces := make(map[string]evmTraceCall)
 	if s.includeInternal {
@@ -355,6 +368,83 @@ func (s *EVMSource) LookupTransaction(ctx context.Context, chainID, transactionI
 		traces[txHash] = trace
 	}
 	return s.normalizeEVMTransaction(transaction, receipts, traces, height, blockHash, blockTime, safeHeight)
+}
+
+// normalizeWatchedLookup shares the exact evidence representation with the
+// watched scanner. Receipts include unrelated transfers; only the configured
+// destinations/assets may become payment events, just as with eth_getLogs.
+func (s *EVMSource) normalizeWatchedLookup(transaction evmTransaction, receipt evmReceipt, block scanner.Block, safeHeight uint64) ([]domain.TransferEvent, error) {
+	txHash, err := canonicalEVMHash(transaction.Hash)
+	if err != nil {
+		return nil, malformed("evm transaction", err)
+	}
+	receiptBlock, err := parseHexUint64(receipt.BlockNumber)
+	if err != nil || receiptBlock != block.Height || !strings.EqualFold(receipt.BlockHash, block.Hash) || !strings.EqualFold(receipt.TransactionHash, txHash) {
+		return nil, malformed("evm receipt", errors.New("receipt block binding mismatch"))
+	}
+	if receipt.Status == "0x0" {
+		return nil, nil
+	}
+	if receipt.Status != "0x1" {
+		return nil, malformed("evm receipt", errors.New("invalid receipt status"))
+	}
+	var events []domain.TransferEvent
+	if s.nativeAssetID != "" && transaction.To != "" {
+		to, err := canonicalEVMAddress(transaction.To)
+		if err != nil {
+			return nil, malformed("evm native transfer", err)
+		}
+		if _, watched := s.watched[to]; watched {
+			amount, err := parseHexAmount(transaction.Value)
+			if err != nil {
+				return nil, malformed("evm native transfer", err)
+			}
+			if amount != "0" {
+				native, err := s.normalizeWatchedNativeReceipt(transaction, receipt, block, safeHeight)
+				if err != nil {
+					return nil, err
+				}
+				events = append(events, native...)
+			}
+		}
+	}
+	blocks := map[uint64]scanner.Block{block.Height: block}
+	seen := make(map[string]struct{})
+	for _, log := range receipt.Logs {
+		contract, err := canonicalEVMAddress(log.Address)
+		if err != nil {
+			return nil, malformed("evm token log", err)
+		}
+		if _, supported := s.tokens[contract]; !supported || len(log.Topics) != 3 || !strings.EqualFold(log.Topics[0], erc20TransferTopic) {
+			continue
+		}
+		to, err := addressFromTopic(log.Topics[2])
+		if err != nil {
+			return nil, malformed("evm token log", err)
+		}
+		if _, watched := s.watched[to]; !watched {
+			continue
+		}
+		if !strings.EqualFold(log.TransactionHash, txHash) {
+			return nil, malformed("evm token log", errors.New("log transaction binding mismatch"))
+		}
+		tokens, identity, err := s.normalizeWatchedTokenLog(log, blocks, safeHeight)
+		if err != nil {
+			return nil, err
+		}
+		if _, duplicate := seen[identity]; duplicate {
+			return nil, malformed("evm token log", errors.New("duplicate transfer log"))
+		}
+		seen[identity] = struct{}{}
+		events = append(events, tokens...)
+	}
+	sort.Slice(events, func(i, j int) bool {
+		if events[i].Identity.EventIndex != events[j].Identity.EventIndex {
+			return events[i].Identity.EventIndex < events[j].Identity.EventIndex
+		}
+		return events[i].Identity.AssetID < events[j].Identity.AssetID
+	})
+	return events, nil
 }
 
 // scanWatchedRange keeps the canonical block/reorg evidence while avoiding a
@@ -405,11 +495,20 @@ func (s *EVMSource) scanWatchedRange(ctx context.Context, from, to uint64) (scan
 		return batch, nil
 	}
 	blocks := make(map[uint64]scanner.Block, to-from+1)
+	var prefetched []evmBlock
 	for height := from; height <= to; height++ {
-		block, err := s.block(ctx, height, s.nativeAssetID != "")
-		if err != nil {
-			return scanner.RangeBatch{}, err
+		if len(prefetched) == 0 {
+			last := height
+			if s.blockBatchSize > 1 {
+				last = min(to, height+uint64(s.blockBatchSize)-1)
+			}
+			prefetched, err = s.watchedBlockWindow(ctx, height, last)
+			if err != nil {
+				return scanner.RangeBatch{}, err
+			}
 		}
+		block := prefetched[0]
+		prefetched = prefetched[1:]
 		number, blockTime, err := validateEVMBlock(block, height)
 		if err != nil {
 			return scanner.RangeBatch{}, malformed("evm block", err)
@@ -483,6 +582,32 @@ func (s *EVMSource) scanWatchedRange(ctx context.Context, from, to uint64) (scan
 	return batch, nil
 }
 
+// watchedBlockWindow changes transport only: block validation, receipt proof,
+// token-log coverage and canonical quorum still happen on the unchanged path.
+// Keep at most four full blocks resident, and never fall back/fan out on 429.
+func (s *EVMSource) watchedBlockWindow(ctx context.Context, from, to uint64) ([]evmBlock, error) {
+	if to < from || to-from > 3 {
+		return nil, &ProviderError{Kind: ErrorPermanent, Operation: "evm block window", Cause: errors.New("block window must contain 1..4 blocks")}
+	}
+	if from == to {
+		block, err := s.block(ctx, from, s.nativeAssetID != "")
+		if err != nil {
+			return nil, err
+		}
+		return []evmBlock{block}, nil
+	}
+	blocks := make([]evmBlock, to-from+1)
+	calls := make([]rpcBatchCall, len(blocks))
+	for index := range blocks {
+		calls[index] = rpcBatchCall{Operation: "evm watched block", Method: "eth_getBlockByNumber",
+			Params: []any{hexQuantity(from + uint64(index)), s.nativeAssetID != ""}, Target: &blocks[index]}
+	}
+	if err := s.http.rpcBatch(ctx, "evm watched block batch", calls); err != nil {
+		return nil, err
+	}
+	return blocks, nil
+}
+
 func (s *EVMSource) normalizeWatchedNative(ctx context.Context, transaction evmTransaction, block scanner.Block, safeHeight uint64) ([]domain.TransferEvent, error) {
 	if s.nativeAssetID == "" {
 		return nil, nil
@@ -494,6 +619,14 @@ func (s *EVMSource) normalizeWatchedNative(ctx context.Context, transaction evmT
 	var receipt evmReceipt
 	if err := s.http.rpc(ctx, "evm transaction receipt", "eth_getTransactionReceipt", []any{txHash}, &receipt); err != nil {
 		return nil, err
+	}
+	return s.normalizeWatchedNativeReceipt(transaction, receipt, block, safeHeight)
+}
+
+func (s *EVMSource) normalizeWatchedNativeReceipt(transaction evmTransaction, receipt evmReceipt, block scanner.Block, safeHeight uint64) ([]domain.TransferEvent, error) {
+	txHash, err := canonicalEVMHash(transaction.Hash)
+	if err != nil {
+		return nil, malformed("evm transaction", err)
 	}
 	receiptBlock, err := parseHexUint64(receipt.BlockNumber)
 	if err != nil || receiptBlock != block.Height || !strings.EqualFold(receipt.BlockHash, block.Hash) || !strings.EqualFold(receipt.TransactionHash, txHash) {
@@ -517,7 +650,16 @@ func (s *EVMSource) normalizeWatchedNative(ctx context.Context, transaction evmT
 	}{Transaction: transaction, Receipt: receipt})
 	parsed := chains.EVMReceipt{TransactionID: txHash, BlockHeight: block.Height, BlockHash: block.Hash, BlockTime: block.Time, Success: true, Finalized: true, Confirmations: safeHeight - block.Height + 1, Native: &chains.EVMNative{From: from, To: to, Amount: amount, AssetID: s.nativeAssetID, Decimals: s.nativeDecimals}, RawEvidence: evidence}
 	adapter := chains.EVMAdapter{ChainID: s.chainID, Source: fixedEVMReceipt{value: parsed}}
-	return adapter.Normalize(context.Background(), txHash)
+	events, err := adapter.Normalize(context.Background(), txHash)
+	if err != nil {
+		return nil, err
+	}
+	for i := range events {
+		if events[i].Kind == "native_top_level" && events[i].Identity.EventIndex == "native:0" {
+			events[i].NativeEVMRawEvidence = append([]byte(nil), evidence...)
+		}
+	}
+	return events, nil
 }
 
 func (s *EVMSource) watchedTokenLogs(ctx context.Context, from, to uint64) ([]evmLog, error) {

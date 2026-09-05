@@ -60,6 +60,13 @@ func (h *scanHealth) catchingUp(now time.Time, maxCursorAge time.Duration) bool 
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--check-ready" {
+		if err := probeScannerReadiness(os.Getenv("SCANNER_HEALTH_ADDRESS")); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	config, err := loadScannerConfig()
@@ -280,6 +287,7 @@ type scannerConfig struct {
 	overlap, rangeSize                                                               uint64
 	nativeDecimals                                                                   uint8
 	pageSize                                                                         uint32
+	evmBlockBatchSize                                                                uint8
 	includeInternal                                                                  bool
 	pollInterval, leaseDuration, maxHeadAge, maxReadyAge, maxCursorAge               time.Duration
 	providerMinInterval                                                              time.Duration
@@ -348,6 +356,14 @@ func loadScannerConfig() (scannerConfig, error) {
 		return config, errors.New("SCANNER_PAGE_SIZE must be a positive 32-bit integer")
 	}
 	config.pageSize = uint32(pageSize)
+	blockBatchSize, err := positiveUint("SCANNER_EVM_BLOCK_BATCH_SIZE", 1)
+	if err != nil || blockBatchSize > 4 {
+		return config, errors.New("SCANNER_EVM_BLOCK_BATCH_SIZE must be between 1 and 4")
+	}
+	config.evmBlockBatchSize = uint8(blockBatchSize)
+	if blockBatchSize > 1 && (!config.staticConfig || config.chainID != "eip155:1" || config.providerKind != "evm-jsonrpc" || !config.addressFiltered || config.includeInternal) {
+		return config, errors.New("EVM block batching is currently admitted only for the static address-filtered Ethereum scanner without internal traces")
+	}
 	if config.quorum, err = positiveInt("SCANNER_QUORUM", 2); err != nil {
 		return config, err
 	}
@@ -433,6 +449,7 @@ func scannerSource(config scannerConfig) (scanner.Source, error) {
 			Assets: config.assets, IncludeInternal: config.includeInternal, GasFreeContracts: config.gasFreeContracts,
 			GasFreeFeeCollectors: config.gasFreeFeeCollectors, WatchedAddresses: config.watchedAddresses, AddressFiltered: config.addressFiltered, Overlap: config.overlap, PageSize: config.pageSize,
 			SolanaAddressIndex: solanaAddressIndex,
+			EVMBlockBatchSize:  config.evmBlockBatchSize,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("initialize %s: %w", providerID, err)

@@ -17,6 +17,11 @@ replication lag and chain-scanner backlog are different incidents.
   leases and quorum are unchanged. Failed cycles retain bounded backoff.
 - Quorum errors list provider identities, operation and bounded error category;
   credentials, URLs and raw response bodies are not logged.
+- The scanner image supports `/app/service --check-ready` for a Docker
+  `HEALTHCHECK` (60-second interval, 5-second timeout, two failures). It only
+  contacts the local readiness endpoint; it does not open another database
+  session or scan blocks. Retain `unless-stopped`, not an auto-heal loop tied to
+  readiness. An unhealthy catch-up scanner must be allowed to continue.
 
 ## Restore providers without losing history
 
@@ -41,6 +46,12 @@ can withdraw archive access or throttle callers; re-run the historical probe
 before deploying replacements. Increase the lease along with larger ranges and
 preserve polite per-provider pacing. The incident configuration used range 32,
 overlap 2, lease 90 seconds and pacing 1.2 seconds, without weakening quorum 2.
+After verifying batch support on both independent sources, the static,
+address-filtered Ethereum scanner may set `SCANNER_EVM_BLOCK_BATCH_SIZE=4`.
+Default is 1, maximum is 4. This groups only block-read transport; every block,
+native receipt, token-log range and canonical quorum is still validated. A
+missing, duplicate, null or failed batch result aborts the range. There is no
+retry fan-out or fallback storm. Other chains keep the existing transport.
 
 ## Bounded live release probe
 
@@ -80,3 +91,16 @@ order causes rollback. These commands are not arbitrary manual-credit tools.
 Verify one finalized match, one settlement callback acknowledged by the merchant,
 and actual service activation in the merchant application. An uncertain result
 requires a read-only check before any retry. Recovery never changes scan cursors.
+
+The address-filtered EVM direct verifier and ordinary scanner share native and
+ERC20 evidence encodings. Enable direct Ethereum proofs only with the same
+verified provider, wallet, asset and quorum configuration as the scanner. This
+lane requires a transaction hash; it is not a replacement for full scanning.
+
+Older native EVM recoveries used a receipt-only evidence envelope. A later scan
+can prove compatibility by carrying the exact new envelope bytes as base64
+through the JSONB queue. Storage recomputes both hashes from the same receipt
+and checks all transaction/inclusion facts plus native asset metadata. It keeps
+the original stored hash, observations and callbacks unchanged. Arbitrary hash
+aliases, token events and changed payment facts are rejected. A replay cannot
+create a second credit.
