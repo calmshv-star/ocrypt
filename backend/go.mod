@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
 	github.com/jackc/pgx/v5 v5.10.0
-	github.com/nats-io/nats.go v1.52.0
+	github.com/nats-io/nats.go v1.53.1
 	golang.org/x/crypto v0.56.0
 	gopkg.in/yaml.v3 v3.0.1
 )
