@@ -217,6 +217,11 @@ func (w Worker) RunOnce(ctx context.Context) (RangeBatch, error) {
 		return RangeBatch{}, err
 	}
 	committed = true
+	if w.Observer != nil {
+		// Report the remaining backlog, not the pre-commit lag. A successful
+		// historical range is progress, but does not mean the scanner is current.
+		w.Observer.SetScannerHeadLag(safe - batch.To)
+	}
 	return batch, nil
 }
 func quorumSafeHeight(heads []ProviderHead, chainID, genesis string, quorum int) (uint64, error) {

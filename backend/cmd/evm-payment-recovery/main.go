@@ -1,5 +1,5 @@
-// ton-payment-recovery restores one independently identified native TON payment.
-// It defaults to read-only preflight and never touches scanner cursors or gaps.
+// evm-payment-recovery restores one independently identified native EVM payment.
+// It defaults to read-only preflight and never changes scanner cursors or gaps.
 package main
 
 import (
@@ -11,12 +11,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/adapters/postgres"
 	"github.com/calmshv-star/ocrypt/backend/internal/application"
-	"github.com/calmshv-star/ocrypt/backend/internal/chains"
 	"github.com/calmshv-star/ocrypt/backend/internal/domain"
 	"github.com/calmshv-star/ocrypt/backend/internal/ids"
 	"github.com/calmshv-star/ocrypt/backend/internal/money"
@@ -28,29 +28,26 @@ import (
 
 type config struct {
 	endpoint, wallet, chain, asset, amount, transaction, intent, route string
-	from, to                                                           uint64
 	apply                                                              bool
 }
 
 func main() {
 	var c config
-	flag.StringVar(&c.endpoint, "endpoint", os.Getenv("TON_RECOVERY_ENDPOINT"), "Toncenter-compatible HTTPS origin")
-	flag.StringVar(&c.chain, "chain", "ton:mainnet", "must be ton:mainnet")
-	flag.StringVar(&c.wallet, "wallet", "", "expected canonical raw recipient")
-	flag.StringVar(&c.asset, "asset", "", "configured native TON asset ID")
-	flag.StringVar(&c.amount, "amount", "", "expected amount in atomic units")
-	flag.StringVar(&c.transaction, "transaction", "", "expected canonical normalized action/transaction ID, lower-case hex")
+	flag.StringVar(&c.endpoint, "endpoint", os.Getenv("EVM_RECOVERY_ENDPOINT"), "HTTPS JSON-RPC endpoint")
+	flag.StringVar(&c.chain, "chain", "", "expected canonical eip155 chain ID")
+	flag.StringVar(&c.wallet, "wallet", "", "expected canonical lower-case recipient")
+	flag.StringVar(&c.asset, "asset", "", "configured native asset ID (18 decimals)")
+	flag.StringVar(&c.amount, "amount", "", "expected positive amount in atomic units")
+	flag.StringVar(&c.transaction, "transaction", "", "expected canonical 0x transaction hash")
 	flag.StringVar(&c.intent, "intent", "", "expected payment intent UUID")
 	flag.StringVar(&c.route, "route", "", "expected payment route UUID")
-	flag.Uint64Var(&c.from, "from", 0, "first finalized masterchain block (required)")
-	flag.Uint64Var(&c.to, "to", 0, "last finalized masterchain block, at most 200 blocks")
-	flag.BoolVar(&c.apply, "apply", false, "ingest ONE verified payment through the standard settlement pipeline")
+	flag.BoolVar(&c.apply, "apply", false, "ingest ONE verified native payment through the standard settlement pipeline")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "unexpected positional arguments")
 		os.Exit(2)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	if err := run(ctx, c); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -58,18 +55,28 @@ func main() {
 	}
 }
 
+func canonicalHex(value string, size int) bool {
+	if !strings.HasPrefix(value, "0x") {
+		return false
+	}
+	b, err := hex.DecodeString(value[2:])
+	return err == nil && len(b) == size && "0x"+hex.EncodeToString(b) == value
+}
+
 func (c config) validate() error {
-	if c.chain != "ton:mainnet" || c.endpoint == "" || c.asset == "" || !ids.Valid(c.intent) || !ids.Valid(c.route) {
-		return errors.New("endpoint, ton:mainnet chain, native asset, intent UUID and route UUID are required")
+	parts := strings.Split(c.chain, ":")
+	if len(parts) != 2 || parts[0] != "eip155" {
+		return errors.New("explicit canonical eip155 chain is required")
 	}
-	if c.from == 0 || c.to < c.from || c.to-c.from >= 200 {
-		return errors.New("explicit finalized range of 1..200 blocks is required")
+	id, err := strconv.ParseUint(parts[1], 10, 64)
+	if err != nil || id == 0 || strconv.FormatUint(id, 10) != parts[1] {
+		return errors.New("invalid eip155 chain ID")
 	}
-	if _, err := chains.TONFriendlyAddress(c.wallet); err != nil || strings.ToLower(c.wallet) != c.wallet {
-		return errors.New("wallet must be the canonical lower-case raw TON address")
+	if c.endpoint == "" || c.asset == "" || !ids.Valid(c.intent) || !ids.Valid(c.route) {
+		return errors.New("endpoint, native asset, intent UUID and route UUID are required")
 	}
-	if b, err := hex.DecodeString(c.transaction); err != nil || len(b) != 32 || hex.EncodeToString(b) != c.transaction {
-		return errors.New("transaction must be the canonical 32-byte lower-case hex action identity")
+	if !canonicalHex(c.wallet, 20) || !canonicalHex(c.transaction, 32) {
+		return errors.New("recipient and transaction must be canonical lower-case 0x hex")
 	}
 	if a, err := money.Parse(c.amount); err != nil || a.IsZero() {
 		return errors.New("amount must be positive canonical atomic units")
@@ -82,23 +89,29 @@ func run(ctx context.Context, c config) error {
 		return err
 	}
 	headers := http.Header{}
-	// Secrets are accepted only via process environment/files, never printed.
-	if key := os.Getenv("TON_RECOVERY_API_KEY"); key != "" {
+	// Credentials never appear in command flags or structured output.
+	if key := os.Getenv("EVM_RECOVERY_API_KEY"); key != "" {
 		headers.Set("X-API-Key", key)
 	}
-	source, err := providers.NewTONSource(providers.TONConfig{
-		HTTP:       providers.HTTPConfig{Endpoint: c.endpoint, Headers: headers, Timeout: 20 * time.Second, MinInterval: 2 * time.Second},
-		ProviderID: "operator-ton-payment-recovery", ChainID: c.chain,
-		NativeAssetID: c.asset, NativeDecimals: 9, WatchedAddresses: []string{c.wallet}, PageSize: 100,
+	source, err := providers.NewEVMSource(providers.EVMConfig{
+		HTTP:       providers.HTTPConfig{Endpoint: c.endpoint, Headers: headers, Timeout: 20 * time.Second, MinInterval: time.Second},
+		ProviderID: "operator-evm-payment-recovery", ChainID: c.chain, HeadTag: "finalized",
+		NativeAssetID: c.asset, NativeDecimals: 18, WatchedAddresses: []string{c.wallet}, AddressFiltered: true,
 	})
 	if err != nil {
-		return fmt.Errorf("initialize TON source: %w", err)
+		return fmt.Errorf("initialize EVM source: %w", err)
 	}
-	batch, err := source.ScanRange(ctx, c.from, c.to)
+	// LookupTransaction verifies receipt hash, canonical block and finalized
+	// height. Heads first additionally verifies eth_chainId/genesis identity.
+	heads, err := source.Heads(ctx)
 	if err != nil {
-		return fmt.Errorf("read finalized chain range: %w", err)
+		return fmt.Errorf("verify RPC chain identity/finality: %w", err)
 	}
-	event, err := selectEvent(c, batch)
+	events, err := source.LookupTransaction(ctx, c.chain, c.transaction)
+	if err != nil {
+		return fmt.Errorf("lookup finalized chain transaction: %w", err)
+	}
+	event, err := selectEvent(c, events, heads)
 	if err != nil {
 		return err
 	}
@@ -126,10 +139,7 @@ func run(ctx context.Context, c config) error {
 	if c.apply {
 		mode = "apply"
 	}
-	if err := json.NewEncoder(os.Stdout).Encode(map[string]any{
-		"mode": mode, "verified_event": event, "exact_candidate": candidate,
-		"other_events_not_processed": len(batch.Events) - 1, "scanner_cursor_unchanged": true,
-	}); err != nil {
+	if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"mode": mode, "verified_event": event, "exact_candidate": candidate, "other_events_not_processed": len(events) - 1, "scanner_cursor_unchanged": true}); err != nil {
 		return err
 	}
 	if !c.apply {
@@ -140,7 +150,7 @@ func run(ctx context.Context, c config) error {
 		return err
 	}
 	recoveryStore, err := store.ForExactRecovery(postgres.ExactRecoveryTarget{
-		IntentID: c.intent, RouteID: c.route, Identity: event.Identity, Amount: event.Amount, AssetDecimals: 9,
+		IntentID: c.intent, RouteID: c.route, Identity: event.Identity, Amount: event.Amount, AssetDecimals: 18,
 	})
 	if err != nil {
 		return err
@@ -158,26 +168,17 @@ func run(ctx context.Context, c config) error {
 	return nil
 }
 
-func selectEvent(c config, batch scanner.RangeBatch) (domain.TransferEvent, error) {
-	if batch.From != c.from || batch.To != c.to {
-		return domain.TransferEvent{}, errors.New("provider returned a different range")
+func selectEvent(c config, events []domain.TransferEvent, heads []scanner.ProviderHead) (domain.TransferEvent, error) {
+	if len(heads) != 1 || heads[0].ChainID != c.chain || heads[0].Provider == "" || !canonicalHex(heads[0].GenesisHash, 32) || heads[0].ObservedAt.IsZero() {
+		return domain.TransferEvent{}, errors.New("missing verified chain identity")
 	}
 	var selected []domain.TransferEvent
-	for _, event := range batch.Events {
+	for _, event := range events {
 		if event.Identity.ChainID != c.chain || event.Identity.TransactionID != c.transaction || event.Identity.AssetID != c.asset || event.Identity.ToAddress != c.wallet || event.Amount.String() != c.amount {
 			continue
 		}
-		if event.Status != domain.TransferFinalized || event.Kind != "native_message" || event.AssetDecimals != 9 || event.BlockHeight < c.from || event.BlockHeight > c.to {
-			return domain.TransferEvent{}, errors.New("targeted event is not a finalized native TON transfer in the requested range")
-		}
-		bound := false
-		for _, block := range batch.Blocks {
-			if block.Height == event.BlockHeight && block.Hash == event.BlockHash && block.Time.Equal(event.OnChainTime) {
-				bound = true
-			}
-		}
-		if !bound {
-			return domain.TransferEvent{}, errors.New("targeted event is not bound to canonical block evidence")
+		if event.Status != domain.TransferFinalized || event.Kind != "native_top_level" || event.Identity.EventIndex != "native:0" || event.AssetDecimals != 18 || event.BlockHeight == 0 || event.BlockHeight > heads[0].SafeHeight || event.Confirmations == 0 || event.ID == "" || !canonicalHex(event.BlockHash, 32) || event.OnChainTime.IsZero() || event.ParserVersion == "" || len(event.EvidenceHash) != 64 {
+			return domain.TransferEvent{}, errors.New("target is not a finalized canonical native top-level EVM transfer")
 		}
 		selected = append(selected, event)
 	}
@@ -211,14 +212,12 @@ func preflight(ctx context.Context, pool *pgxpool.Pool, c config, event domain.T
 	if exists {
 		return result, errors.New("transfer already exists; recovery makes no changes, inspect its existing match/callback")
 	}
-	// Same exact-route eligibility as normal settlement, deliberately excluding
-	// exceptional/reorg paths: this tool only restores previously missing transfers.
 	rows, err := tx.Query(ctx, `SELECT r.intent_id::text,r.id::text,i.merchant_order_id,i.amount_minor::text,i.currency,r.required_finality
 FROM payment_routes r JOIN payment_intents i ON i.id=r.intent_id AND i.tenant_id=r.tenant_id
 JOIN merchants m ON m.id=r.merchant_id AND m.tenant_id=r.tenant_id
 JOIN assets a ON a.id=r.asset_id AND a.chain_id=r.chain_id
 WHERE r.provider='on_chain' AND r.chain_id=$1 AND r.asset_id=$2 AND r.receiving_address=$3
-AND a.kind='native' AND a.decimals=9 AND r.asset_decimals=9
+AND a.kind='native' AND a.decimals=18 AND r.asset_decimals=18
 AND r.expected_amount_atomic=$4::numeric AND r.status IN ('active','expired')
 AND i.status IN ('pending','observed','partially_paid','confirmed','expired','needs_review','reorg_review')
 AND $5 BETWEEN r.starts_at AND r.expires_at

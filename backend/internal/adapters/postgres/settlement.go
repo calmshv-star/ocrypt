@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/application"
@@ -33,11 +34,107 @@ type potentialRoute struct {
 	Route    domain.PaymentRoute
 }
 
+// ExactRecoveryTarget confines an operator recovery to one previously missing
+// native transfer and one exact route. It is not a manual matching override.
+type ExactRecoveryTarget struct {
+	IntentID, RouteID string
+	Identity          domain.EventIdentity
+	Amount            money.Amount
+	AssetDecimals     uint8
+}
+
+type exactRecoveryStore struct {
+	store    *Store
+	expected ExactRecoveryTarget
+}
+
+func (s *Store) ForExactRecovery(expected ExactRecoveryTarget) (application.TransferSettlementStore, error) {
+	if s == nil || !ids.Valid(expected.IntentID) || !ids.Valid(expected.RouteID) || expected.Identity.Validate() != nil || expected.Amount.IsZero() {
+		return nil, fmt.Errorf("%w: exact recovery target is incomplete", domain.ErrValidation)
+	}
+	if !(expected.Identity.ChainID == "ton:mainnet" && expected.AssetDecimals == 9) && !(strings.HasPrefix(expected.Identity.ChainID, "eip155:") && expected.AssetDecimals == 18) {
+		return nil, fmt.Errorf("%w: unsupported native recovery asset precision", domain.ErrValidation)
+	}
+	return exactRecoveryStore{store: s, expected: expected}, nil
+}
+
+func (s exactRecoveryStore) IngestAndSettle(ctx context.Context, event domain.TransferEvent) (application.SettlementResult, error) {
+	return s.store.ingestAndSettle(ctx, event, &s.expected)
+}
+
+func (expected ExactRecoveryTarget) validateEvent(event domain.TransferEvent) error {
+	if event.Identity != expected.Identity || event.Amount.Cmp(expected.Amount) != 0 || event.AssetDecimals != expected.AssetDecimals || event.Status != domain.TransferFinalized {
+		return fmt.Errorf("%w: recovery transfer differs from the explicit target", domain.ErrStateConflict)
+	}
+	if (expected.AssetDecimals == 18 && (event.Kind != "native_top_level" || event.Identity.EventIndex != "native:0")) || (expected.AssetDecimals == 9 && event.Kind != "native_message") {
+		return fmt.Errorf("%w: recovery requires a canonical native transfer", domain.ErrStateConflict)
+	}
+	return nil
+}
+
+func (expected ExactRecoveryTarget) validateCandidates(event domain.TransferEvent, candidates []settlementCandidate) error {
+	if len(candidates) != 1 || candidates[0].IntentID != expected.IntentID || candidates[0].RouteID != expected.RouteID || candidates[0].Expected.Cmp(expected.Amount) != 0 {
+		return fmt.Errorf("%w: recovery no longer has the intended unique exact route", domain.ErrStateConflict)
+	}
+	if event.Confirmations < candidates[0].RequiredFinality {
+		return fmt.Errorf("%w: recovery does not satisfy route finality", domain.ErrStateConflict)
+	}
+	return nil
+}
+
+func (expected ExactRecoveryTarget) validateResult(result application.SettlementResult) error {
+	if result.Outcome != application.SettlementSettled || result.PaymentIntentID != expected.IntentID || result.PaymentRouteID != expected.RouteID {
+		return fmt.Errorf("%w: recovery did not settle the explicit target; rolling back", domain.ErrStateConflict)
+	}
+	return nil
+}
+
+func validateRecoveryNativeAsset(ctx context.Context, tx pgx.Tx, expected ExactRecoveryTarget, event domain.TransferEvent) error {
+	var valid bool
+	// These reads share the SERIALIZABLE snapshot with the locked candidate and
+	// every settlement write. A token asset cannot be relabelled as native by CLI.
+	err := tx.QueryRow(ctx, `SELECT EXISTS(
+SELECT 1 FROM payment_routes r JOIN assets a ON a.id=r.asset_id AND a.chain_id=r.chain_id
+WHERE r.id=$1 AND r.intent_id=$2 AND r.chain_id=$3 AND r.asset_id=$4
+AND a.kind='native' AND a.decimals=$5 AND r.asset_decimals=$5
+AND $6 BETWEEN r.starts_at AND r.expires_at)`, expected.RouteID, expected.IntentID, expected.Identity.ChainID, expected.Identity.AssetID, expected.AssetDecimals, event.OnChainTime).Scan(&valid)
+	if err != nil {
+		return fmt.Errorf("recovery native asset validation: %w", err)
+	}
+	if !valid {
+		return fmt.Errorf("%w: recovery native asset, route precision or payment window mismatch", domain.ErrStateConflict)
+	}
+	return nil
+}
+
 // IngestAndSettle is the financial transaction boundary used by chain workers.
 // The worker database role is intentionally separate from merchant API roles and
 // must have the narrowly scoped BYPASSRLS grants required for cross-tenant routing.
 func (s *Store) IngestAndSettle(ctx context.Context, event domain.TransferEvent) (result application.SettlementResult, err error) {
-	err = pgx.BeginTxFunc(ctx, s.db.pool, pgx.TxOptions{IsoLevel: pgx.Serializable}, func(tx pgx.Tx) error {
+	return s.ingestAndSettle(ctx, event, nil)
+}
+
+func (s *Store) ingestAndSettle(ctx context.Context, event domain.TransferEvent, expected *ExactRecoveryTarget) (result application.SettlementResult, err error) {
+	err = pgx.BeginTxFunc(ctx, s.db.pool, pgx.TxOptions{IsoLevel: pgx.Serializable}, func(tx pgx.Tx) (txErr error) {
+		// This executes before BeginTxFunc can commit, including on every early
+		// return below. A failed recovery never commits an unmatched/other order.
+		defer func() {
+			if expected != nil && txErr == nil {
+				txErr = expected.validateResult(result)
+			}
+		}()
+		if expected != nil {
+			if err := expected.validateEvent(event); err != nil {
+				return err
+			}
+			var exists bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM transfer_events WHERE chain_id=$1 AND transaction_id=$2 AND event_identity=$3 AND asset_id=$4 AND to_address=$5)`, event.Identity.ChainID, event.Identity.TransactionID, event.Identity.EventIndex, event.Identity.AssetID, event.Identity.ToAddress).Scan(&exists); err != nil {
+				return err
+			}
+			if exists {
+				return fmt.Errorf("%w: recovery transfer already exists", domain.ErrStateConflict)
+			}
+		}
 		actionable, eventID, canonical, err := insertCanonicalTransfer(ctx, tx, event)
 		if err != nil {
 			return err
@@ -45,12 +142,23 @@ func (s *Store) IngestAndSettle(ctx context.Context, event domain.TransferEvent)
 		event = canonical
 		result.TransferEventID = eventID
 		if !actionable {
+			if expected != nil {
+				return fmt.Errorf("%w: recovery transfer is a duplicate", domain.ErrStateConflict)
+			}
 			result.Outcome = application.SettlementDuplicate
 			return nil
 		}
 		candidates, err := findSettlementCandidates(ctx, tx, event)
 		if err != nil {
 			return err
+		}
+		if expected != nil {
+			if err := expected.validateCandidates(event, candidates); err != nil {
+				return err
+			}
+			if err := validateRecoveryNativeAsset(ctx, tx, *expected, event); err != nil {
+				return err
+			}
 		}
 		if event.Status != domain.TransferFinalized {
 			if len(candidates) == 1 {
@@ -69,6 +177,9 @@ func (s *Store) IngestAndSettle(ctx context.Context, event domain.TransferEvent)
 			return err
 		}
 		if alreadyClassified {
+			if expected != nil {
+				return fmt.Errorf("%w: recovery transfer is already classified", domain.ErrStateConflict)
+			}
 			result.Outcome = application.SettlementDuplicate
 			return nil
 		}

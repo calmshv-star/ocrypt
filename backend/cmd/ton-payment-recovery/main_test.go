@@ -11,7 +11,7 @@ import (
 )
 
 func fixture() (config, scanner.RangeBatch) {
-	c := config{endpoint: "https://toncenter.com", chain: "ton:mainnet", asset: "ton", wallet: "0:" + strings.Repeat("1", 64), transaction: strings.Repeat("a", 64), amount: "4087000000", intent: "01a07261-6962-7aff-9eca-cfb1c9bfc188", route: "01a07261-699c-7bb3-8807-6b550a7ff408", from: 100, to: 120}
+	c := config{endpoint: "https://toncenter.com", chain: "ton:mainnet", asset: "ton-ton", wallet: "0:" + strings.Repeat("1", 64), transaction: strings.Repeat("a", 64), amount: "4087000000", intent: "00000000-0000-7000-8000-000000000001", route: "00000000-0000-7000-8000-000000000002", from: 100, to: 120}
 	e := domain.TransferEvent{Identity: domain.EventIdentity{ChainID: c.chain, TransactionID: c.transaction, EventIndex: "message:0", AssetID: c.asset, ToAddress: c.wallet}, Kind: "native_message", Amount: money.MustParse(c.amount), AssetDecimals: 9, BlockHeight: 110, BlockHash: strings.Repeat("b", 64), OnChainTime: time.Unix(1700000000, 0), Status: domain.TransferFinalized}
 	b := scanner.RangeBatch{From: 100, To: 120, Events: []domain.TransferEvent{e}, Blocks: []scanner.Block{{Height: 110, Hash: e.BlockHash, Time: e.OnChainTime}}}
 	return c, b

@@ -335,6 +335,8 @@ type policySource struct {
 	now func() time.Time
 }
 
+func (s *policySource) ProviderID() string { return providers.ProviderIdentity(s.source) }
+
 func newPolicySource(source scanner.Source, head, scan providerops.Policy, initial time.Time) scanner.Source {
 	return &policySource{source: source, head: head, scan: scan, windows: make(map[providerops.Operation]struct {
 		started time.Time

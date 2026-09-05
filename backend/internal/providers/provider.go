@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -388,6 +389,88 @@ type QuorumSource struct {
 	quorum  int
 }
 
+// ProviderIdentity exposes an operator-facing label, never an RPC URL or key.
+// Wrappers may implement ProviderID to preserve this identity across admission.
+func ProviderIdentity(source scanner.Source) string {
+	if named, ok := source.(interface{ ProviderID() string }); ok {
+		return named.ProviderID()
+	}
+	switch source := source.(type) {
+	case *EVMSource:
+		return source.providerID
+	case *TRONSource:
+		return source.providerID
+	case *TONSource:
+		return source.providerID
+	case *SolanaSource:
+		return source.providerID
+	case *AptosSource:
+		return source.providerID
+	case *DestinationFilterSource:
+		return ProviderIdentity(source.source)
+	}
+	return ""
+}
+
+type providerCallFailure struct {
+	index int
+	id    string
+	err   error
+}
+
+type providerGroupFailure struct {
+	operation        string
+	quorum, matching int
+	failures         []providerCallFailure
+}
+
+func (e *providerGroupFailure) Error() string {
+	items := append([]providerCallFailure(nil), e.failures...)
+	sort.Slice(items, func(i, j int) bool { return items[i].index < items[j].index })
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		id := item.id
+		if len(id) == 0 || len(id) > 128 || strings.IndexFunc(id, func(r rune) bool {
+			return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.')
+		}) >= 0 {
+			id = fmt.Sprintf("provider-%d", item.index+1)
+		}
+		detail := "request failed"
+		var providerErr *ProviderError
+		if errors.As(item.err, &providerErr) {
+			// Do not copy Cause: transport errors may contain endpoint credentials.
+			detail = fmt.Sprintf("%s (%s", providerErr.Operation, providerErr.Kind)
+			if providerErr.StatusCode != 0 {
+				detail += fmt.Sprintf(", HTTP %d", providerErr.StatusCode)
+			}
+			detail += ")"
+		}
+		parts = append(parts, id+": "+detail)
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "providers returned different canonical responses")
+	}
+	return fmt.Sprintf("%s requires %d matching responses, received %d; %s", e.operation, e.quorum, e.matching, strings.Join(parts, "; "))
+}
+
+func (e *providerGroupFailure) Retryable() bool {
+	possible := e.matching
+	for _, item := range e.failures {
+		if scanner.Retryable(item.err) {
+			possible++
+		}
+	}
+	return possible >= e.quorum
+}
+
+func (e *providerGroupFailure) Unwrap() []error {
+	result := make([]error, 0, len(e.failures))
+	for _, item := range e.failures {
+		result = append(result, item.err)
+	}
+	return result
+}
+
 func NewQuorumSource(sources []scanner.Source, quorum int) (*QuorumSource, error) {
 	if quorum < 1 || len(sources) < quorum {
 		return nil, errors.New("direct source quorum requires enough sources")
@@ -405,17 +488,15 @@ func (q *QuorumSource) Heads(ctx context.Context) ([]scanner.ProviderHead, error
 	var wait sync.WaitGroup
 	var heads []scanner.ProviderHead
 	successfulSources := 0
-	var firstErr error
-	for _, source := range q.sources {
+	failures := &providerGroupFailure{operation: "head quorum", quorum: q.quorum}
+	for index, source := range q.sources {
 		wait.Add(1)
-		go func(source scanner.Source) {
+		go func(index int, source scanner.Source) {
 			defer wait.Done()
 			values, err := source.Heads(ctx)
 			if err != nil {
 				lock.Lock()
-				if firstErr == nil {
-					firstErr = err
-				}
+				failures.failures = append(failures.failures, providerCallFailure{index: index, id: ProviderIdentity(source), err: err})
 				lock.Unlock()
 				return
 			}
@@ -423,15 +504,12 @@ func (q *QuorumSource) Heads(ctx context.Context) ([]scanner.ProviderHead, error
 			heads = append(heads, values...)
 			successfulSources++
 			lock.Unlock()
-		}(source)
+		}(index, source)
 	}
 	wait.Wait()
 	if successfulSources < q.quorum {
-		cause := error(errors.New("insufficient provider responses"))
-		if firstErr != nil {
-			cause = fmt.Errorf("insufficient provider responses: %w", firstErr)
-		}
-		return nil, &ProviderError{Kind: ErrorDisagreement, Operation: "head quorum", Cause: cause}
+		failures.matching = successfulSources
+		return nil, &ProviderError{Kind: ErrorDisagreement, Operation: "head quorum", Cause: failures}
 	}
 	return heads, nil
 }
@@ -440,25 +518,24 @@ func (q *QuorumSource) ScanRange(ctx context.Context, from, to uint64) (scanner.
 	type result struct {
 		batch scanner.RangeBatch
 		err   error
+		index int
 	}
 	results := make(chan result, len(q.sources))
-	for _, source := range q.sources {
-		go func(source scanner.Source) {
+	for index, source := range q.sources {
+		go func(index int, source scanner.Source) {
 			batch, err := source.ScanRange(ctx, from, to)
-			results <- result{batch: batch, err: err}
-		}(source)
+			results <- result{batch: batch, err: err, index: index}
+		}(index, source)
 	}
 	agreements := make(map[string]struct {
 		count int
 		batch scanner.RangeBatch
 	})
-	var firstErr error
+	failures := &providerGroupFailure{operation: "range quorum", quorum: q.quorum}
 	for range q.sources {
 		result := <-results
 		if result.err != nil {
-			if firstErr == nil {
-				firstErr = result.err
-			}
+			failures.failures = append(failures.failures, providerCallFailure{index: result.index, id: ProviderIdentity(q.sources[result.index]), err: result.err})
 			continue
 		}
 		canonicalBatch := result.batch
@@ -488,52 +565,50 @@ func (q *QuorumSource) ScanRange(ctx context.Context, from, to uint64) (scanner.
 			}
 		}
 		agreement.count++
+		if agreement.count > failures.matching {
+			failures.matching = agreement.count
+		}
 		agreements[key] = agreement
 		if agreement.count >= q.quorum {
 			return agreement.batch, nil
 		}
 	}
-	if q.quorum == 1 && firstErr != nil {
-		return scanner.RangeBatch{}, firstErr
+	if q.quorum == 1 {
+		return scanner.RangeBatch{}, failures
 	}
-	cause := error(errors.New("providers returned different canonical ranges"))
-	if firstErr != nil {
-		cause = fmt.Errorf("providers did not reach canonical range quorum: %w", firstErr)
-	}
-	return scanner.RangeBatch{}, &ProviderError{Kind: ErrorDisagreement, Operation: "range quorum", Cause: cause}
+	return scanner.RangeBatch{}, &ProviderError{Kind: ErrorDisagreement, Operation: "range quorum", Cause: failures}
 }
 
 func (q *QuorumSource) LookupTransaction(ctx context.Context, chainID, transactionID string) ([]domain.TransferEvent, error) {
 	type result struct {
 		events []domain.TransferEvent
 		err    error
+		index  int
 	}
 	results := make(chan result, len(q.sources))
-	for _, source := range q.sources {
+	for index, source := range q.sources {
 		lookup, ok := source.(interface {
 			LookupTransaction(context.Context, string, string) ([]domain.TransferEvent, error)
 		})
 		if !ok {
 			return nil, &ProviderError{Kind: ErrorPermanent, Operation: "transaction quorum", Cause: errors.New("direct source does not support transaction lookup")}
 		}
-		go func(lookup interface {
+		go func(index int, lookup interface {
 			LookupTransaction(context.Context, string, string) ([]domain.TransferEvent, error)
 		}) {
 			events, err := lookup.LookupTransaction(ctx, chainID, transactionID)
-			results <- result{events: events, err: err}
-		}(lookup)
+			results <- result{events: events, err: err, index: index}
+		}(index, lookup)
 	}
 	agreements := make(map[string]struct {
 		count  int
 		events []domain.TransferEvent
 	})
-	var firstErr error
+	failures := &providerGroupFailure{operation: "transaction quorum", quorum: q.quorum}
 	for range q.sources {
 		result := <-results
 		if result.err != nil {
-			if firstErr == nil {
-				firstErr = result.err
-			}
+			failures.failures = append(failures.failures, providerCallFailure{index: result.index, id: ProviderIdentity(q.sources[result.index]), err: result.err})
 			continue
 		}
 		canonicalEvents := append([]domain.TransferEvent(nil), result.events...)
@@ -557,19 +632,18 @@ func (q *QuorumSource) LookupTransaction(ctx context.Context, chainID, transacti
 			}
 		}
 		agreement.count++
+		if agreement.count > failures.matching {
+			failures.matching = agreement.count
+		}
 		agreements[key] = agreement
 		if agreement.count >= q.quorum {
 			return agreement.events, nil
 		}
 	}
-	if q.quorum == 1 && firstErr != nil {
-		return nil, firstErr
+	if q.quorum == 1 {
+		return nil, failures
 	}
-	cause := error(errors.New("providers returned different canonical transactions"))
-	if firstErr != nil {
-		cause = fmt.Errorf("providers did not reach transaction quorum: %w", firstErr)
-	}
-	return nil, &ProviderError{Kind: ErrorDisagreement, Operation: "transaction quorum", Cause: cause}
+	return nil, &ProviderError{Kind: ErrorDisagreement, Operation: "transaction quorum", Cause: failures}
 }
 
 var _ scanner.Source = (*QuorumSource)(nil)
@@ -635,7 +709,7 @@ func (f *FailoverSource) selectProvider(index int) {
 }
 
 func (f *FailoverSource) Heads(ctx context.Context) ([]scanner.ProviderHead, error) {
-	var firstErr error
+	failures := &providerGroupFailure{operation: "head failover", quorum: 1}
 	for _, index := range f.order() {
 		heads, err := f.sources[index].Heads(ctx)
 		if err == nil && len(heads) > 0 {
@@ -645,38 +719,32 @@ func (f *FailoverSource) Heads(ctx context.Context) ([]scanner.ProviderHead, err
 		if err == nil {
 			err = &ProviderError{Kind: ErrorMalformed, Operation: "failover heads", Cause: errors.New("provider returned no heads")}
 		}
-		if firstErr == nil {
-			firstErr = err
-		}
+		failures.failures = append(failures.failures, providerCallFailure{index: index, id: ProviderIdentity(f.sources[index]), err: err})
 	}
-	return nil, firstErr
+	return nil, failures
 }
 
 func (f *FailoverSource) ScanRange(ctx context.Context, from, to uint64) (scanner.RangeBatch, error) {
-	var firstErr error
+	failures := &providerGroupFailure{operation: "range failover", quorum: 1}
 	for _, index := range f.order() {
 		batch, err := f.sources[index].ScanRange(ctx, from, to)
 		if err == nil {
 			f.selectProvider(index)
 			return batch, nil
 		}
-		if firstErr == nil {
-			firstErr = err
-		}
+		failures.failures = append(failures.failures, providerCallFailure{index: index, id: ProviderIdentity(f.sources[index]), err: err})
 	}
-	return scanner.RangeBatch{}, firstErr
+	return scanner.RangeBatch{}, failures
 }
 
 func (f *FailoverSource) LookupTransaction(ctx context.Context, chainID, transactionID string) ([]domain.TransferEvent, error) {
-	var firstErr error
+	failures := &providerGroupFailure{operation: "transaction failover", quorum: 1}
 	for _, index := range f.order() {
 		lookup, ok := f.sources[index].(interface {
 			LookupTransaction(context.Context, string, string) ([]domain.TransferEvent, error)
 		})
 		if !ok {
-			if firstErr == nil {
-				firstErr = &ProviderError{Kind: ErrorPermanent, Operation: "transaction failover", Cause: errors.New("direct source does not support transaction lookup")}
-			}
+			failures.failures = append(failures.failures, providerCallFailure{index: index, id: ProviderIdentity(f.sources[index]), err: &ProviderError{Kind: ErrorPermanent, Operation: "transaction lookup unsupported"}})
 			continue
 		}
 		events, err := lookup.LookupTransaction(ctx, chainID, transactionID)
@@ -684,11 +752,9 @@ func (f *FailoverSource) LookupTransaction(ctx context.Context, chainID, transac
 			f.selectProvider(index)
 			return events, nil
 		}
-		if firstErr == nil {
-			firstErr = err
-		}
+		failures.failures = append(failures.failures, providerCallFailure{index: index, id: ProviderIdentity(f.sources[index]), err: err})
 	}
-	return nil, firstErr
+	return nil, failures
 }
 
 var _ scanner.Source = (*FailoverSource)(nil)
