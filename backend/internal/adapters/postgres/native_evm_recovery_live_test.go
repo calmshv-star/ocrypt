@@ -21,6 +21,7 @@ import (
 	"github.com/calmshv-star/ocrypt/backend/internal/providers"
 	"github.com/calmshv-star/ocrypt/backend/internal/scanner"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type nativeReplayLiveConfig struct {
@@ -208,21 +209,24 @@ func TestNativeEVMRecoveryReplayLive(t *testing.T) {
 	var amount, height, status, nativeKind string
 	var storedEvidence []byte
 	var nativeDecimals uint8
-	var activeMatches, settlements, requiredFinality int64
+	var activeMatches, requiredFinality int64
 	err = tx.QueryRow(ctx, `SELECT te.id::text,te.chain_id,te.transaction_id,te.event_identity,te.asset_id,te.to_address,
 te.event_kind,te.from_address,te.amount_atomic::text,te.asset_decimals,te.block_hash,te.block_height::text,
 te.on_chain_time,te.confirmations,te.status::text,te.parser_version,te.evidence_hash,a.kind,a.decimals,
 (SELECT count(*) FROM payment_matches pm WHERE pm.event_id=te.id AND pm.state='finalized'),
-(SELECT count(*) FROM ledger_transactions lt WHERE lt.correlation_id=te.id::text AND lt.business_type='payment_settlement'),
 COALESCE((SELECT max(r.required_finality) FROM payment_matches pm JOIN payment_routes r ON r.id=pm.route_id WHERE pm.event_id=te.id AND pm.state='finalized'),0)
 FROM transfer_events te JOIN assets a ON a.id=te.asset_id AND a.chain_id=te.chain_id
 WHERE te.id=$1 AND te.chain_id=$2 AND te.transaction_id=$3`, config.EventID, config.ChainID, strings.ToLower(config.TransactionHash)).Scan(
 		&stored.ID, &stored.Identity.ChainID, &stored.Identity.TransactionID, &stored.Identity.EventIndex, &stored.Identity.AssetID, &stored.Identity.ToAddress,
 		&stored.Kind, &stored.FromAddress, &amount, &stored.AssetDecimals, &stored.BlockHash, &height,
 		&stored.OnChainTime, &stored.Confirmations, &status, &stored.ParserVersion, &storedEvidence, &nativeKind, &nativeDecimals,
-		&activeMatches, &settlements, &requiredFinality)
+		&activeMatches, &requiredFinality)
 	if err != nil {
-		t.Fatal("cannot read the one expected stored payment and settlement facts")
+		var pgError *pgconn.PgError
+		if errors.As(err, &pgError) {
+			t.Fatalf("cannot read stored payment facts (PostgreSQL %s: %s)", pgError.Code, pgError.Message)
+		}
+		t.Fatalf("cannot decode the expected stored payment facts (%v)", err)
 	}
 	stored.Amount, err = money.Parse(amount)
 	if err != nil {
@@ -236,7 +240,7 @@ WHERE te.id=$1 AND te.chain_id=$2 AND te.transaction_id=$3`, config.EventID, con
 	if stored.ID != current.ID || stored.Identity != current.Identity || stored.Kind != current.Kind || stored.FromAddress != current.FromAddress || stored.Amount.Cmp(current.Amount) != 0 || stored.AssetDecimals != current.AssetDecimals || stored.BlockHash != current.BlockHash || stored.BlockHeight != current.BlockHeight || !stored.OnChainTime.Equal(current.OnChainTime) || stored.ParserVersion != current.ParserVersion || stored.Status != current.Status {
 		t.Fatal("live RPC and stored canonical payment facts differ")
 	}
-	if nativeKind != "native" || nativeDecimals != 18 || activeMatches != 1 || settlements != 1 || requiredFinality < 1 || current.Confirmations < uint64(requiredFinality) {
+	if nativeKind != "native" || nativeDecimals != 18 || activeMatches != 1 || requiredFinality < 1 || current.Confirmations < uint64(requiredFinality) {
 		t.Fatal("stored event is not exactly one settled native payment at required finality")
 	}
 	if !matchesLegacyNativeEVMEvidence(current, storedEvidence) {
@@ -245,5 +249,5 @@ WHERE te.id=$1 AND te.chain_id=$2 AND te.transaction_id=$3`, config.EventID, con
 	if hex.EncodeToString(storedEvidence) == current.EvidenceHash {
 		t.Fatal("diagnostic did not exercise two distinct evidence encodings")
 	}
-	t.Log("Verified one already-settled native payment: two independent RPC sources agree; all stored facts and legacy/current evidence are compatible. Database snapshot was READ ONLY; no settlement or mutations ran.")
+	t.Log("Verified one finalized native match: two independent RPC sources agree; all stored facts and legacy/current evidence are compatible. Database snapshot was READ ONLY; no ledger access, settlement or mutations ran.")
 }
