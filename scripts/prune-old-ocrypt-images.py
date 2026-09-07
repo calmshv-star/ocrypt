@@ -18,13 +18,13 @@ def candidates():
     images = json.loads(docker('image', 'inspect', *sorted(set(ids)))) if ids else []
     containers = docker('ps', '-aq').split()
     used = {c['Image'] for c in json.loads(docker('inspect', *containers))} if containers else set()
-    repos = collections.defaultdict(list)
+    repos = collections.defaultdict(dict)
     for image in images:
         for tag in image.get('RepoTags') or []:
-            repos[tag.rsplit(':', 1)[0]].append(image)
+            repos[tag.rsplit(':', 1)[0]][image['Id']] = image
     retained = set(used)
     for group in repos.values():
-        retained.update(i['Id'] for i in sorted(group, key=lambda i: i['Created'], reverse=True)[:3])
+        retained.update(i['Id'] for i in sorted(group.values(), key=lambda i: i['Created'], reverse=True)[:3])
     from datetime import datetime, timezone
     cutoff = time.time() - 7 * 86400
     selected = []
