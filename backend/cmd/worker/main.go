@@ -81,7 +81,7 @@ func main() {
 			}
 			verifier = databaseThenDirectVerifier{database: store, direct: direct}
 		}
-		proofWorker = &application.ProofWorker{Verifier: verifier, Queue: store, Process: processor, Lease: 30 * time.Second, Limit: 20}
+		proofWorker = &application.ProofWorker{Verifier: verifier, Queue: store, Process: processor, Lease: 3 * time.Minute, Limit: 20}
 	}
 	var outboxWorker *outbox.Worker
 	var outboxReadiness readinessDependency
