@@ -13,7 +13,7 @@
   "dependencies": {
     "@merchant/i18n": "workspace:*",
     "@merchant/ui": "workspace:*",
-    "lucide-react": "^0.468.0",
+    "lucide-react": "^1.31.0",
     "qrcode": "^1.5.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
