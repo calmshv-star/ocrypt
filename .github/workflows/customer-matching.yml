@@ -1,0 +1,33 @@
+name: Customer payment matching regression
+on:
+  push:
+    branches: [main, 'fix/**', 'codex/**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  customer-payment-matching:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: merchant
+          POSTGRES_PASSWORD: isolated-ci-only
+          POSTGRES_DB: ocrypt_test_matching
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U merchant -d ocrypt_test_matching"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Check customer identity, amount, replay and worker revalidation
+        working-directory: backend
+        env:
+          OCRYPT_TEST_DATABASE_URL: postgres://merchant:isolated-ci-only@127.0.0.1:5432/ocrypt_test_matching?sslmode=disable
+        run: go test ./internal/application ./internal/adapters/postgres
