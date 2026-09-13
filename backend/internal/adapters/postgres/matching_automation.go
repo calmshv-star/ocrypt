@@ -260,6 +260,13 @@ ORDER BY te.on_chain_time,te.id FOR UPDATE OF te`, route.Route.ChainID, route.Ro
    -- windows still fail closed.
    AND (te.on_chain_time>=$8 OR te.on_chain_time BETWEEN other.starts_at AND other.expires_at)
 )`, route.Route.ChainID, route.Route.AssetID, route.Route.Address, route.Route.RequiredFinality, route.Route.StartsAt, route.Route.GraceEndsAt, route.RouteID, route.Route.ExpiresAt).Scan(&ambiguous)
+	if err == nil && ambiguous {
+		resolved, checkErr := sameCustomerOverlapResolved(ctx, tx, route, events, time.Now().UTC())
+		if checkErr != nil {
+			return nil, false, checkErr
+		}
+		ambiguous = !resolved
+	}
 	return events, ambiguous, err
 }
 

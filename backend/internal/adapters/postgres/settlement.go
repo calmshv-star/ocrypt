@@ -234,6 +234,13 @@ ON CONFLICT(event_id) DO NOTHING`, unmatchedID, eventID)
 				return err
 			}
 			if tenantID != "" {
+				automatic, autoEligible, err := automaticSettlementCandidate(ctx, tx, potential)
+				if err != nil {
+					return err
+				}
+				if autoEligible {
+					potential[0] = automatic
+				}
 				for rank, candidate := range potential {
 					candidateID, err := ids.New()
 					if err != nil {
@@ -248,7 +255,7 @@ ON CONFLICT(event_id) DO NOTHING`, unmatchedID, eventID)
 						return err
 					}
 				}
-				if automatic, ok := application.UniqueAutomaticCandidate(potential); ok {
+				if autoEligible {
 					if err := recordExceptionIntent(ctx, tx, tenantID, potential[0], event, s.now()); err != nil {
 						return err
 					}
