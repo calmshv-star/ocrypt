@@ -5,6 +5,7 @@ ARG BINARY
 ARG REVISION
 ARG VERSION
 COPY --chown=65532:65532 ${BINARY} /app/service
+USER 65532:65532
 LABEL org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.source="https://github.com/calmshv-star/ocrypt"
