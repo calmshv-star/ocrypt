@@ -2,12 +2,55 @@ package providers
 
 import (
 	"encoding/json"
-	"github.com/calmshv-star/ocrypt/backend/internal/scanner"
 	"net/http"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/calmshv-star/ocrypt/backend/internal/scanner"
 )
+
+func TestInternalEmptyCoverageCachesOnlyCompleteCanonicalRange(t *testing.T) {
+	calls := 0
+	missing := false
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		return 200, rpcResult(t, request, func(method string, _ []json.RawMessage) json.RawMessage {
+			if method != "trace_filter" {
+				t.Fatalf("unexpected method %s", method)
+			}
+			calls++
+			if missing {
+				return json.RawMessage(`null`)
+			}
+			return json.RawMessage(`[]`)
+		})
+	})
+	source, err := NewEVMSource(EVMConfig{HTTP: HTTPConfig{Endpoint: "https://fixture.example", Client: client}, ProviderID: "fixture", ChainID: "eip155:1", NativeAssetID: "eth", NativeDecimals: 18, IncludeInternal: true, AddressFiltered: true, WatchedAddresses: []string{"0x" + strings.Repeat("4", 40)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := map[uint64]scanner.Block{1: {Height: 1, Hash: "one"}}
+	scan := func(from, to, safe uint64, wantError bool, wantCalls int) {
+		t.Helper()
+		_, err := source.watchedInternalRange(t.Context(), from, to, blocks, safe)
+		if (err != nil) != wantError || calls != wantCalls {
+			t.Fatalf("err=%v calls=%d, want error=%v calls=%d", err, calls, wantError, wantCalls)
+		}
+	}
+	scan(1, 1, 1, false, 1)
+	scan(1, 1, 1, false, 1) // unchanged finalized coverage is reused
+	scan(1, 1, 2, false, 1) // a newer safe head does not change an empty old block
+	blocks[1] = scanner.Block{Height: 1, Hash: "reorg"}
+	scan(1, 1, 2, false, 2) // different canonical hash invalidates it
+	blocks[2] = scanner.Block{Height: 2, Hash: "two"}
+	missing = true
+	scan(1, 2, 2, true, 3)
+	scan(1, 2, 2, true, 4) // failed/missing responses are never cached
+	missing = false
+	scan(1, 2, 2, false, 5)
+	scan(1, 2, 2, false, 5)
+	scan(1, 2, 1, false, 6) // unfinalized coverage is not reused
+}
 
 func TestWatchedContractWithdrawalDiscoveryAndProof(t *testing.T) {
 	for _, mode := range []string{"ok", "disabled", "root_reverted", "parent_reverted", "callcode", "wrong_block", "wrong_receipt", "wrong_transaction", "wrong_root", "null_page", "pagination_overflow", "rate_limit", "top_level_only", "unwatched"} {

@@ -51,6 +51,13 @@ type evmFilteredTrace struct {
 }
 
 func (s *EVMSource) watchedInternalRange(ctx context.Context, from, to uint64, blocks map[uint64]scanner.Block, safeHeight uint64) ([]domain.TransferEvent, error) {
+	// Finalized heads often stay unchanged for several minutes. Do not repeat an
+	// expensive successful empty trace query on every idle scanner cycle. Each
+	// provider caches only its own last complete empty range, bound to all block
+	// hashes; a new range/hash or failed/incomplete response must be queried.
+	if to <= safeHeight && s.internalRangeKnownEmpty(from, to, blocks) {
+		return nil, nil
+	}
 	addresses := make([]string, 0, len(s.watched))
 	for address := range s.watched {
 		addresses = append(addresses, address)
@@ -119,10 +126,37 @@ func (s *EVMSource) watchedInternalRange(ctx context.Context, from, to uint64, b
 			events = append(events, internal...)
 		}
 		if len(page) < pageSize {
+			if len(events) == 0 && to <= safeHeight {
+				s.rememberEmptyInternalRange(from, to, blocks)
+			}
 			return events, nil
 		}
 	}
 	return nil, malformed("evm internal discovery", errors.New("trace pagination limit exceeded; range not committed"))
+}
+
+func (s *EVMSource) internalRangeKnownEmpty(from, to uint64, blocks map[uint64]scanner.Block) bool {
+	s.internalEmptyMu.Lock()
+	defer s.internalEmptyMu.Unlock()
+	if len(blocks) == 0 || len(s.internalEmptyHashes) != len(blocks) || from != s.internalEmptyFrom || to != s.internalEmptyTo {
+		return false
+	}
+	for height, block := range blocks {
+		if s.internalEmptyHashes[height] != block.Hash {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *EVMSource) rememberEmptyInternalRange(from, to uint64, blocks map[uint64]scanner.Block) {
+	hashes := make(map[uint64]string, len(blocks))
+	for height, block := range blocks {
+		hashes[height] = block.Hash
+	}
+	s.internalEmptyMu.Lock()
+	defer s.internalEmptyMu.Unlock()
+	s.internalEmptyFrom, s.internalEmptyTo, s.internalEmptyHashes = from, to, hashes
 }
 
 func (s *EVMSource) watchedInternalTransaction(ctx context.Context, transaction evmTransaction, receipt evmReceipt, block scanner.Block, safeHeight uint64) ([]domain.TransferEvent, error) {

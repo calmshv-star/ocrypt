@@ -61,6 +61,10 @@ type EVMSource struct {
 	identityReady         bool
 	genesisHash           string
 	configuredGenesisHash string
+	internalEmptyMu       sync.Mutex
+	internalEmptyFrom     uint64
+	internalEmptyTo       uint64
+	internalEmptyHashes   map[uint64]string
 }
 
 func NewEVMSource(config EVMConfig) (*EVMSource, error) {

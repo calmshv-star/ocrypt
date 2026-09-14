@@ -27,6 +27,16 @@ past unverified internal coverage. Existing retry/backoff and stale-cursor
 readiness checks remain active. A provider outage can delay detection; it must
 not silently classify unscanned blocks as complete.
 
+Use a modest idle poll interval (for example `SCANNER_POLL_INTERVAL=20s`)
+rather than repeatedly querying an unchanged finalized head. The source caches
+only its last successfully verified empty internal range, bound to every block
+hash. New ranges, changed hashes and failed/incomplete responses are not cached.
+Each independent source keeps its own cache. Test repeated scans from the actual
+container network: a single successful host-side lookup is not an admission test.
+Respect provider `Retry-After` cooldowns; do not keep restarting workers to retry
+before the deadline. Where a provider requires HTTP/1.1, `GODEBUG=http2client=0`
+can be set on that scanner/proof worker, without changing other services.
+
 Original call paths (`trace:1`, etc.) are stable across scan and direct proof.
 Reverted subtrees do not transfer funds. Top-level ETH and ERC-20 transfers retain
 their previous identities and evidence representation, avoiding duplicate credits.
