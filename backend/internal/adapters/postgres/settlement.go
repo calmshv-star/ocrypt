@@ -67,7 +67,18 @@ func (expected ExactRecoveryTarget) validateEvent(event domain.TransferEvent) er
 	if event.Identity != expected.Identity || event.Amount.Cmp(expected.Amount) != 0 || event.AssetDecimals != expected.AssetDecimals || event.Status != domain.TransferFinalized {
 		return fmt.Errorf("%w: recovery transfer differs from the explicit target", domain.ErrStateConflict)
 	}
-	if (expected.AssetDecimals == 18 && (event.Kind != "native_top_level" || event.Identity.EventIndex != "native:0")) || (expected.AssetDecimals == 9 && event.Kind != "native_message") {
+	canonicalNative := event.Kind == "native_top_level" && event.Identity.EventIndex == "native:0"
+	if event.Kind == "native_internal" && strings.HasPrefix(event.Identity.EventIndex, "trace:") {
+		canonicalNative = true
+		for _, part := range strings.Split(strings.TrimPrefix(event.Identity.EventIndex, "trace:"), ",") {
+			index, err := strconv.ParseUint(part, 10, 32)
+			if err != nil || strconv.FormatUint(index, 10) != part {
+				canonicalNative = false
+				break
+			}
+		}
+	}
+	if (expected.AssetDecimals == 18 && !canonicalNative) || (expected.AssetDecimals == 9 && event.Kind != "native_message") {
 		return fmt.Errorf("%w: recovery requires a canonical native transfer", domain.ErrStateConflict)
 	}
 	return nil

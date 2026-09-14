@@ -108,6 +108,18 @@ func TestExactRecoveryPrecommitGuardRejectsEveryNonTargetResult(t *testing.T) {
 	}
 }
 
+func TestExactRecoveryInternalNativeIdentity(t *testing.T) {
+	for _, path := range []string{"trace:1", "trace:0,2", "trace:", "trace:-1", "trace:01", "log:1", "native:0"} {
+		expected, event, _ := exactRecoveryFixture()
+		expected.Identity.EventIndex = path
+		event.Identity, event.Kind = expected.Identity, "native_internal"
+		want := path == "trace:1" || path == "trace:0,2"
+		if (expected.validateEvent(event) == nil) != want {
+			t.Fatalf("path %s", path)
+		}
+	}
+}
+
 type recoveryGuardRow struct {
 	valid bool
 	err   error

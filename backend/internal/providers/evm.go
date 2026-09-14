@@ -27,6 +27,7 @@ type EVMToken struct {
 
 type EVMConfig struct {
 	HTTP             HTTPConfig
+	TraceHTTP        HTTPConfig
 	ProviderID       string
 	ChainID          string
 	GenesisHash      string
@@ -44,6 +45,7 @@ type EVMConfig struct {
 
 type EVMSource struct {
 	http                  *endpointClient
+	traceHTTP             *endpointClient
 	providerID            string
 	chainID               string
 	headTag               string
@@ -59,12 +61,23 @@ type EVMSource struct {
 	identityReady         bool
 	genesisHash           string
 	configuredGenesisHash string
+	internalEmptyMu       sync.Mutex
+	internalEmptyFrom     uint64
+	internalEmptyTo       uint64
+	internalEmptyHashes   map[uint64]string
 }
 
 func NewEVMSource(config EVMConfig) (*EVMSource, error) {
 	client, err := newEndpointClient(config.HTTP)
 	if err != nil {
 		return nil, err
+	}
+	traceClient := client
+	if config.TraceHTTP.Endpoint != "" {
+		traceClient, err = newEndpointClient(config.TraceHTTP)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if strings.TrimSpace(config.ProviderID) == "" || strings.TrimSpace(config.ChainID) == "" || config.NativeDecimals > 36 || (strings.TrimSpace(config.NativeAssetID) == "" && len(config.Tokens) == 0) {
 		return nil, errors.New("invalid EVM provider identity or native asset")
@@ -109,7 +122,7 @@ func NewEVMSource(config EVMConfig) (*EVMSource, error) {
 	if overlap == 0 {
 		overlap = 1
 	}
-	return &EVMSource{http: client, providerID: config.ProviderID, chainID: config.ChainID, headTag: headTag, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, tokens: tokens, includeInternal: config.IncludeInternal, watched: watched, addressFiltered: config.AddressFiltered, overlap: overlap, configuredGenesisHash: configuredGenesisHash, blockBatchSize: blockBatchSize}, nil
+	return &EVMSource{http: client, traceHTTP: traceClient, providerID: config.ProviderID, chainID: config.ChainID, headTag: headTag, nativeAssetID: config.NativeAssetID, nativeDecimals: config.NativeDecimals, tokens: tokens, includeInternal: config.IncludeInternal, watched: watched, addressFiltered: config.AddressFiltered, overlap: overlap, configuredGenesisHash: configuredGenesisHash, blockBatchSize: blockBatchSize}, nil
 }
 
 type evmBlock struct {
@@ -219,7 +232,7 @@ func (s *EVMSource) ScanRange(ctx context.Context, from, to uint64) (scanner.Ran
 	if to < from || to-from > 2047 {
 		return scanner.RangeBatch{}, &ProviderError{Kind: ErrorPermanent, Operation: "evm scan range", Cause: errors.New("range must contain 1..2048 blocks")}
 	}
-	if s.addressFiltered && !s.includeInternal {
+	if s.addressFiltered {
 		return s.scanWatchedRange(ctx, from, to)
 	}
 	head, err := s.taggedBlock(ctx, s.headTag, false)
@@ -357,15 +370,33 @@ func (s *EVMSource) LookupTransaction(ctx context.Context, chainID, transactionI
 		return nil, malformed("evm transaction block", err)
 	}
 	blockHash, _ := canonicalEVMHash(block.Hash)
-	if s.addressFiltered && !s.includeInternal {
-		return s.normalizeWatchedLookup(transaction, receipt, scanner.Block{Height: height, Hash: blockHash, Time: blockTime}, safeHeight)
+	if s.addressFiltered {
+		canonical := scanner.Block{Height: height, Hash: blockHash, Time: blockTime}
+		events, err := s.normalizeWatchedLookup(transaction, receipt, canonical, safeHeight)
+		if err != nil {
+			return nil, err
+		}
+		if s.includeInternal && s.nativeAssetID != "" && receipt.Status == "0x1" {
+			internal, err := s.watchedInternalTransaction(ctx, transaction, receipt, canonical, safeHeight)
+			if err != nil {
+				return nil, err
+			}
+			events = append(events, internal...)
+		}
+		sort.Slice(events, func(i, j int) bool {
+			if events[i].Identity.EventIndex != events[j].Identity.EventIndex {
+				return events[i].Identity.EventIndex < events[j].Identity.EventIndex
+			}
+			return events[i].Identity.AssetID < events[j].Identity.AssetID
+		})
+		return events, nil
 	}
 	receipts := map[string]evmReceipt{txHash: receipt}
 	traces := make(map[string]evmTraceCall)
 	if s.includeInternal {
 		tracer := map[string]any{"tracer": "callTracer", "timeout": "10s"}
 		var trace evmTraceCall
-		if err := s.http.rpc(ctx, "evm transaction trace", "debug_traceTransaction", []any{txHash, tracer}, &trace); err != nil {
+		if err := s.traceHTTP.rpc(ctx, "evm transaction trace", "debug_traceTransaction", []any{txHash, tracer}, &trace); err != nil {
 			return nil, err
 		}
 		traces[txHash] = trace
@@ -568,6 +599,13 @@ func (s *EVMSource) scanWatchedRange(ctx context.Context, from, to uint64) (scan
 		}
 		seen[identity] = struct{}{}
 		batch.Events = append(batch.Events, events...)
+	}
+	if s.includeInternal && s.nativeAssetID != "" {
+		internal, err := s.watchedInternalRange(ctx, from, to, blocks, safeHeight)
+		if err != nil {
+			return scanner.RangeBatch{}, err
+		}
+		batch.Events = append(batch.Events, internal...)
 	}
 	sort.Slice(batch.Events, func(i, j int) bool {
 		left, right := batch.Events[i], batch.Events[j]
@@ -866,7 +904,7 @@ func (s *EVMSource) appendEVMTraces(receipt *chains.EVMReceipt, calls []evmTrace
 
 func evmTraceMovesValue(callType string) bool {
 	switch strings.ToUpper(callType) {
-	case "CALL", "CALLCODE", "CREATE", "CREATE2", "SELFDESTRUCT":
+	case "CALL", "CREATE", "CREATE2", "SELFDESTRUCT":
 		return true
 	default:
 		return false
