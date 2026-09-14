@@ -289,6 +289,7 @@ type scannerConfig struct {
 	pageSize                                                                         uint32
 	evmBlockBatchSize                                                                uint8
 	includeInternal                                                                  bool
+	evmTraceURLs                                                                     []string
 	pollInterval, leaseDuration, maxHeadAge, maxReadyAge, maxCursorAge               time.Duration
 	providerMinInterval                                                              time.Duration
 	staticConfig                                                                     bool
@@ -305,6 +306,7 @@ func loadScannerConfig() (scannerConfig, error) {
 		providerMode: env("SCANNER_PROVIDER_MODE", "quorum"),
 		providerURLs: splitNonempty(os.Getenv("SCANNER_PROVIDER_URLS")), providerIDs: splitNonempty(os.Getenv("SCANNER_PROVIDER_IDS")),
 		providerHeadTags: splitNonempty(os.Getenv("SCANNER_PROVIDER_HEAD_TAGS")),
+		evmTraceURLs:     splitNonempty(os.Getenv("SCANNER_EVM_TRACE_URLS")),
 		watchedAddresses: splitNonempty(os.Getenv("SCANNER_WATCHED_ADDRESSES")),
 		nativeAssetID:    os.Getenv("SCANNER_NATIVE_ASSET_ID"), gasFreeContracts: splitNonempty(os.Getenv("SCANNER_GASFREE_CONTRACTS")),
 		gasFreeFeeCollectors: splitNonempty(os.Getenv("SCANNER_GASFREE_FEE_COLLECTORS")),
@@ -361,8 +363,8 @@ func loadScannerConfig() (scannerConfig, error) {
 		return config, errors.New("SCANNER_EVM_BLOCK_BATCH_SIZE must be between 1 and 4")
 	}
 	config.evmBlockBatchSize = uint8(blockBatchSize)
-	if blockBatchSize > 1 && (!config.staticConfig || config.chainID != "eip155:1" || config.providerKind != "evm-jsonrpc" || !config.addressFiltered || config.includeInternal) {
-		return config, errors.New("EVM block batching is currently admitted only for the static address-filtered Ethereum scanner without internal traces")
+	if blockBatchSize > 1 && (!config.staticConfig || config.chainID != "eip155:1" || config.providerKind != "evm-jsonrpc" || !config.addressFiltered) {
+		return config, errors.New("EVM block batching is currently admitted only for the static address-filtered Ethereum scanner")
 	}
 	if config.quorum, err = positiveInt("SCANNER_QUORUM", 2); err != nil {
 		return config, err
@@ -408,6 +410,12 @@ func loadScannerConfig() (scannerConfig, error) {
 	if config.providerMode != "quorum" && config.providerMode != "failover" {
 		return config, errors.New("SCANNER_PROVIDER_MODE must be quorum or failover")
 	}
+	if err := providers.ValidateEVMTraceEndpoints(config.evmTraceURLs, len(config.providerURLs)); err != nil {
+		return config, err
+	}
+	if len(config.evmTraceURLs) > 0 && (config.providerKind != "evm-jsonrpc" || !config.includeInternal || !config.addressFiltered) {
+		return config, errors.New("EVM trace endpoints require address-filtered internal EVM scanning")
+	}
 	if config.providerMode == "failover" && config.quorum != 1 {
 		return config, errors.New("SCANNER_QUORUM must be 1 in failover mode")
 	}
@@ -431,6 +439,10 @@ func scannerSource(config scannerConfig) (scanner.Source, error) {
 		}
 	}
 	for index, endpoint := range config.providerURLs {
+		traceHTTP := providers.HTTPConfig{}
+		if len(config.evmTraceURLs) > 0 {
+			traceHTTP = providers.HTTPConfig{Endpoint: config.evmTraceURLs[index], Headers: http.Header{"User-Agent": []string{"Ocrypt/1.0"}}, Timeout: 20 * time.Second, MinInterval: config.providerMinInterval}
+		}
 		providerID := fmt.Sprintf("provider-%d", index+1)
 		if len(config.providerIDs) > 0 {
 			providerID = config.providerIDs[index]
@@ -445,7 +457,8 @@ func scannerSource(config scannerConfig) (scanner.Source, error) {
 		}
 		source, err := providers.NewSource(providers.Config{
 			Kind: providers.Kind(config.providerKind), HTTP: providers.HTTPConfig{Endpoint: endpoint, Headers: headers, Timeout: 20 * time.Second, MinInterval: config.providerMinInterval},
-			ProviderID: providerID, ChainID: config.chainID, HeadTag: headTag, GenesisHash: config.genesisHash, NativeAssetID: config.nativeAssetID, NativeDecimals: config.nativeDecimals,
+			EVMTraceHTTP: traceHTTP,
+			ProviderID:   providerID, ChainID: config.chainID, HeadTag: headTag, GenesisHash: config.genesisHash, NativeAssetID: config.nativeAssetID, NativeDecimals: config.nativeDecimals,
 			Assets: config.assets, IncludeInternal: config.includeInternal, GasFreeContracts: config.gasFreeContracts,
 			GasFreeFeeCollectors: config.gasFreeFeeCollectors, WatchedAddresses: config.watchedAddresses, AddressFiltered: config.addressFiltered, Overlap: config.overlap, PageSize: config.pageSize,
 			SolanaAddressIndex: solanaAddressIndex,

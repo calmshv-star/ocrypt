@@ -15,7 +15,7 @@ func TestEVMBlockBatchConfigOptInIsBoundedAndEthereumOnly(t *testing.T) {
 		{"other_chain_unchanged", "", "eip155:56", "true", "false", 1},
 		{"other_chain_not_admitted", "4", "eip155:56", "true", "false", 0},
 		{"full_scan_not_admitted", "4", "eip155:1", "false", "false", 0},
-		{"traces_not_admitted", "4", "eip155:1", "true", "true", 0},
+		{"indexed_traces_with_batch", "4", "eip155:1", "true", "true", 4},
 		{"zero", "0", "eip155:1", "true", "false", 0},
 		{"too_large", "5", "eip155:1", "true", "false", 0},
 	} {

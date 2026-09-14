@@ -26,8 +26,8 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - name: Check customer identity, amount, replay and worker revalidation
+      - name: Check payment discovery, customer identity, replay and settlement
         working-directory: backend
         env:
           OCRYPT_TEST_DATABASE_URL: postgres://merchant:isolated-ci-only@127.0.0.1:5432/ocrypt_test_matching?sslmode=disable
-        run: go test ./internal/application ./internal/adapters/postgres
+        run: go test ./internal/providers ./cmd/scanner ./cmd/worker ./internal/application ./internal/adapters/postgres

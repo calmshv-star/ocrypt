@@ -88,6 +88,13 @@ func directProofVerifier(chainID string) (application.TransactionVerifier, error
 	if err != nil {
 		return nil, err
 	}
+	traceURLs := splitNonempty(proofProviderEnv("EVM_TRACE_URLS"))
+	if err := providers.ValidateEVMTraceEndpoints(traceURLs, len(urls)); err != nil {
+		return nil, err
+	}
+	if len(traceURLs) > 0 && (kind != providers.KindEVMJSONRPC || !includeInternal) {
+		return nil, errors.New("EVM trace endpoints require internal EVM proofs")
+	}
 	addressFiltered, err := proofBool("ADDRESS_FILTERED", len(splitNonempty(proofProviderEnv("WATCHED_ADDRESSES"))) > 0)
 	if err != nil {
 		return nil, err
@@ -95,6 +102,10 @@ func directProofVerifier(chainID string) (application.TransactionVerifier, error
 	providerToken := proofProviderEnv("PROVIDER_TOKEN")
 	var sources []scanner.Source
 	for index, endpoint := range urls {
+		traceHTTP := providers.HTTPConfig{}
+		if len(traceURLs) > 0 {
+			traceHTTP = providers.HTTPConfig{Endpoint: traceURLs[index], Headers: http.Header{"User-Agent": []string{"Ocrypt/1.0"}}, Timeout: 20 * time.Second, MinInterval: minInterval}
+		}
 		providerID := fmt.Sprintf("proof-provider-%d", index+1)
 		if len(providerIDs) > 0 {
 			providerID = providerIDs[index]
@@ -109,7 +120,8 @@ func directProofVerifier(chainID string) (application.TransactionVerifier, error
 		}
 		source, err := providers.NewSource(providers.Config{
 			Kind: kind, HTTP: providers.HTTPConfig{Endpoint: endpoint, Headers: header, Timeout: 20 * time.Second, MinInterval: minInterval},
-			ProviderID: providerID, ChainID: chainID, HeadTag: headTag,
+			EVMTraceHTTP: traceHTTP,
+			ProviderID:   providerID, ChainID: chainID, HeadTag: headTag,
 			NativeAssetID: proofProviderEnv("NATIVE_ASSET_ID"), NativeDecimals: nativeDecimals, Assets: assets,
 			IncludeInternal: includeInternal, GasFreeContracts: splitNonempty(proofProviderEnv("GASFREE_CONTRACTS")),
 			GasFreeFeeCollectors: splitNonempty(proofProviderEnv("GASFREE_FEE_COLLECTORS")),
