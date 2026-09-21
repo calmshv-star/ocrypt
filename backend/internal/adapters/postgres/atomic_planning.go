@@ -120,13 +120,34 @@ func (s *Store) AllocateRouteInTx(ctx context.Context, tx pgx.Tx, p application.
 // custodial wallets. The same quantum is used for collision suffixes, keeping
 // a shared receiving address unambiguous without showing unusable decimals.
 func selectUnreservedAmount(ctx context.Context, tx pgx.Tx, tenantID, addressID, chainID, assetID, address string, base money.Amount, decimals uint8, startsAt, graceEndsAt time.Time) (money.Amount, error) {
-	rows, err := tx.Query(ctx, `SELECT q.crypto_amount_atomic::text
+	var rows pgx.Rows
+	var err error
+	if equivalentNativeETH(assetID) {
+		// The same controlled EVM address can receive ETH on several networks.
+		// Serialize quote issuance across those networks and reserve a distinct
+		// payer-facing amount before any alternate-network route is created.
+		if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "native-eth:"+tenantID+":"+strings.ToLower(address)); err != nil {
+			return money.Amount{}, err
+		}
+		rows, err = tx.Query(ctx, `SELECT q.crypto_amount_atomic::text
+FROM address_assignments aa JOIN addresses a ON a.id=aa.address_id AND a.tenant_id=aa.tenant_id
+JOIN rate_quotes q ON q.id=aa.quote_id AND q.tenant_id=aa.tenant_id
+WHERE aa.tenant_id=$1 AND lower(a.canonical_address)=lower($2) AND aa.status='leased'
+  AND aa.valid_until>$3 AND q.asset_id=ANY($4::text[])
+UNION
+SELECT ar.exact_amount_atomic::text FROM amount_reservations ar
+WHERE ar.tenant_id=$1 AND lower(ar.receiving_address)=lower($2)
+  AND ar.asset_id=ANY($4::text[]) AND ar.state='active'
+  AND ar.active_window&&tstzrange($3,$5,'[)')`, tenantID, address, startsAt, nativeETHAssetIDs, graceEndsAt)
+	} else {
+		rows, err = tx.Query(ctx, `SELECT q.crypto_amount_atomic::text
 FROM address_assignments aa JOIN rate_quotes q ON q.id=aa.quote_id AND q.tenant_id=aa.tenant_id
 WHERE aa.tenant_id=$1 AND aa.address_id=$2 AND aa.status='leased' AND aa.valid_until>$3 AND q.asset_id=$4
 UNION
 SELECT ar.exact_amount_atomic::text FROM amount_reservations ar
 WHERE ar.tenant_id=$1 AND ar.chain_id=$5 AND ar.receiving_address=$6 AND ar.asset_id=$4 AND ar.state='active'
   AND ar.active_window&&tstzrange($3,$7,'[)')`, tenantID, addressID, startsAt, assetID, chainID, address, graceEndsAt)
+	}
 	if err != nil {
 		return money.Amount{}, err
 	}
