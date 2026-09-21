@@ -94,6 +94,9 @@ FROM hosted_provider_create_attempts a WHERE a.tenant_id=$3 AND a.merchant_id=$4
 		if err != nil {
 			return route, classify(err)
 		}
+		if err = createNativeETHFallbackRoutes(ctx, tx, cmd, now); err != nil {
+			return route, classify(err)
+		}
 	}
 	newStatus := intent.Status
 	if intent.Status == domain.IntentAwaitingRouteSelection {
