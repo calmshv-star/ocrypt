@@ -189,7 +189,8 @@ func (s *Service) CreateRoute(ctx context.Context, cmd CreateRoute) (domain.Paym
 			AssetDecimals                                                                                                                                                 uint8
 			RequiredFinality                                                                                                                                              uint64
 			ExpiresAt, GraceEndsAt                                                                                                                                        time.Time
-		}{cmd.IntentID, cmd.Provider, cmd.ProviderID, cmd.ProviderOrderID, cmd.ProviderReference, cmd.PaymentURL, cmd.QuoteID, cmd.AddressAssignmentID, cmd.ChainID, cmd.AssetID, cmd.ExpectedAmount.String(), cmd.Address, cmd.Memo, cmd.AssetDecimals, cmd.RequiredFinality, cmd.ExpiresAt.UTC(), cmd.GraceEndsAt.UTC()})
+			AllowNativeETHFallback                                                                                                                                        bool `json:"allow_native_eth_fallback,omitempty"`
+		}{cmd.IntentID, cmd.Provider, cmd.ProviderID, cmd.ProviderOrderID, cmd.ProviderReference, cmd.PaymentURL, cmd.QuoteID, cmd.AddressAssignmentID, cmd.ChainID, cmd.AssetID, cmd.ExpectedAmount.String(), cmd.Address, cmd.Memo, cmd.AssetDecimals, cmd.RequiredFinality, cmd.ExpiresAt.UTC(), cmd.GraceEndsAt.UTC(), cmd.AllowNativeETHFallback})
 	}
 	if err != nil {
 		return domain.PaymentRoute{}, false, err

@@ -134,6 +134,7 @@ func (s *Server) createMerchantOrder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		command.IdempotencyKey, command.CorrelationID, command.RequestHash = routeKey, requestID, routeHash
+		command.AllowNativeETHFallback = true
 		_, routeReplay, err = s.service.CreateRoute(r.Context(), command)
 		if err != nil {
 			if releaser, supported := s.planner.(routePlanReleaser); supported {
@@ -207,8 +208,24 @@ func (s *Server) merchantResponse(intent domain.PaymentIntent, checkoutToken str
 		status = string(domain.IntentSettled)
 	}
 	result := merchantOrderResponse{PaymentID: intent.ID, OrderID: intent.MerchantOrderID, CustomerID: intent.CustomerReference, Status: status, StatusReason: intent.StatusReason, Amount: formatMinorAmount(intent.AmountMinor.String(), intent.CurrencyScale), Currency: intent.Currency, ExpiresAt: intent.ExpiresAt, UpdatedAt: intent.UpdatedAt, Version: intent.Version}
+	var selected *domain.PaymentRoute
 	if len(intent.Routes) == 1 {
-		route := intent.Routes[0]
+		selected = &intent.Routes[0]
+	} else {
+		for index := range intent.Routes {
+			route := &intent.Routes[index]
+			if route.QuoteID == "" || route.AddressAssignmentID == "" {
+				continue
+			}
+			if selected != nil {
+				selected = nil // Multiple payer-selected routes remain ambiguous.
+				break
+			}
+			selected = route
+		}
+	}
+	if selected != nil {
+		route := *selected
 		result.Payment = &merchantPayment{RouteID: route.ID, Network: route.ChainID, Asset: route.AssetID, Address: chains.DisplayAddress(route.ChainID, route.Address), Memo: route.Memo, Amount: route.DisplayAmount, ExpectedAmountAtomic: route.ExpectedAmount.String(), ReceivedAmount: route.ReceivedAmount, RemainingAmount: route.RemainingAmount, ExcessAmount: route.ExcessAmount, PaymentCount: route.PaymentCount, RequiredFinality: route.RequiredFinality, TopUpAllowed: intent.Status == domain.IntentPartiallyPaid && route.RemainingAmount != "" && route.RemainingAmount != "0" && time.Now().UTC().Before(route.ExpiresAt)}
 	}
 	if checkoutToken != "" {

@@ -137,6 +137,10 @@ LEFT JOIN LATERAL (
      LIMIT 1
 ) m ON true
 WHERE r.tenant_id=$1 AND r.intent_id=$2
+  AND (r.quote_id IS NOT NULL OR NOT EXISTS (
+    SELECT 1 FROM payment_routes selected
+    WHERE selected.tenant_id=r.tenant_id AND selected.intent_id=r.intent_id AND selected.quote_id IS NOT NULL
+  ))
 ORDER BY r.created_at,r.id`, tenantID, intentID)
 		if err != nil {
 			return err

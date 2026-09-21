@@ -35,28 +35,29 @@ type CreateIntent struct {
 }
 
 type CreateRoute struct {
-	Principal           Principal
-	IntentID            string
-	IdempotencyKey      string
-	Provider            string
-	ProviderID          string
-	ProviderOrderID     string
-	ProviderReference   string
-	PaymentURL          string
-	QuoteID             string
-	AddressAssignmentID string
-	ChainID             string
-	AssetID             string
-	ExpectedAmount      money.Amount
-	AssetDecimals       uint8
-	DisplayAmount       string
-	Address             string
-	Memo                string
-	RequiredFinality    uint64
-	ExpiresAt           time.Time
-	GraceEndsAt         time.Time
-	CorrelationID       string
-	RequestHash         string
+	Principal              Principal
+	IntentID               string
+	IdempotencyKey         string
+	Provider               string
+	ProviderID             string
+	ProviderOrderID        string
+	ProviderReference      string
+	PaymentURL             string
+	QuoteID                string
+	AddressAssignmentID    string
+	AllowNativeETHFallback bool
+	ChainID                string
+	AssetID                string
+	ExpectedAmount         money.Amount
+	AssetDecimals          uint8
+	DisplayAmount          string
+	Address                string
+	Memo                   string
+	RequiredFinality       uint64
+	ExpiresAt              time.Time
+	GraceEndsAt            time.Time
+	CorrelationID          string
+	RequestHash            string
 }
 
 type CancelIntent struct {

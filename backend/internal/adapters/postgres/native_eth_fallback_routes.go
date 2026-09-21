@@ -39,7 +39,7 @@ func equivalentNativeETH(assetID string) bool {
 // an admitted, active network. The create-route response still returns only
 // the payer-selected route.
 func createNativeETHFallbackRoutes(ctx context.Context, tx pgx.Tx, cmd application.CreateRoute, now time.Time) error {
-	if cmd.QuoteID == "" || !equivalentNativeETH(cmd.AssetID) || cmd.AssetDecimals != 18 {
+	if !cmd.AllowNativeETHFallback || cmd.QuoteID == "" || !equivalentNativeETH(cmd.AssetID) || cmd.AssetDecimals != 18 {
 		return nil
 	}
 	address := strings.ToLower(cmd.Address)

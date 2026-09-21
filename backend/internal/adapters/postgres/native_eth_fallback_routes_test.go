@@ -84,6 +84,7 @@ func TestNativeETHFallbackRoutesRequireQuotedSameAddressAndNoCollision(t *testin
 		ChainID: "eip155:1", AssetID: "eth-ethereum", ExpectedAmount: amount, AssetDecimals: 18,
 		DisplayAmount: "0.002174", Address: "0x2222222222222222222222222222222222222222",
 		ExpiresAt: now.Add(30 * time.Minute), GraceEndsAt: now.Add(24 * time.Hour),
+		AllowNativeETHFallback: true,
 	}
 	tx := &nativeETHFallbackTx{}
 	if err := createNativeETHFallbackRoutes(context.Background(), tx, cmd, now); err != nil {
@@ -100,5 +101,11 @@ func TestNativeETHFallbackRoutesRequireQuotedSameAddressAndNoCollision(t *testin
 	tx = &nativeETHFallbackTx{}
 	if err := createNativeETHFallbackRoutes(context.Background(), tx, cmd, now); err != nil || len(tx.queries) != 0 {
 		t.Fatal("unquoted route must not create fallback routes", err)
+	}
+	cmd.QuoteID = "44444444-4444-4444-8444-444444444444"
+	cmd.AllowNativeETHFallback = false
+	tx = &nativeETHFallbackTx{}
+	if err := createNativeETHFallbackRoutes(context.Background(), tx, cmd, now); err != nil || len(tx.queries) != 0 {
+		t.Fatal("non-merchant route must not create fallback routes", err)
 	}
 }

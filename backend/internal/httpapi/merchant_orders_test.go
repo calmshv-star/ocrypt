@@ -21,3 +21,20 @@ func TestMerchantFacadeTreatsFinalizedOverpaymentAsPaid(t *testing.T) {
 		t.Fatalf("overpayment fulfillment response lost paid or reconciliation evidence: %+v", response)
 	}
 }
+
+func TestMerchantFacadeKeepsPayerSelectedETHRouteWithFallbacks(t *testing.T) {
+	now := time.Now().UTC()
+	intent := domain.PaymentIntent{
+		ID: "payment", MerchantOrderID: "order", AmountMinor: money.MustParse("49900"), Currency: "RUB", CurrencyScale: 2,
+		Status: domain.IntentPending, ExpiresAt: now.Add(time.Hour), UpdatedAt: now,
+		Routes: []domain.PaymentRoute{
+			{ID: "arbitrum-fallback", ChainID: "eip155:42161", AssetID: "eth-arbitrum", DisplayAmount: "0.002174"},
+			{ID: "ethereum-selected", QuoteID: "quote", AddressAssignmentID: "assignment", ChainID: "eip155:1", AssetID: "eth-ethereum", Address: "0x2222222222222222222222222222222222222222", DisplayAmount: "0.002174"},
+			{ID: "base-fallback", ChainID: "eip155:8453", AssetID: "eth-base", DisplayAmount: "0.002174"},
+		},
+	}
+	response := (&Server{}).merchantResponse(intent, "")
+	if response.Payment == nil || response.Payment.RouteID != "ethereum-selected" || response.Payment.Network != "eip155:1" {
+		t.Fatalf("payer-selected route missing from merchant response: %+v", response.Payment)
+	}
+}
