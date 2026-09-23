@@ -188,7 +188,7 @@ func (s *Server) resolveMerchantAsset(ctx context.Context, principal application
 	}
 	var matches []domain.Asset
 	for _, candidate := range assets {
-		if candidate.ChainID == network && (candidate.Symbol == symbol || strings.EqualFold(candidate.ID, symbol)) {
+		if merchantAssetMatches(candidate, network, symbol) {
 			matches = append(matches, candidate)
 		}
 	}
@@ -196,6 +196,18 @@ func (s *Server) resolveMerchantAsset(ctx context.Context, principal application
 		return domain.Asset{}, fmt.Errorf("%w: network and asset must resolve to one active route", domain.ErrValidation)
 	}
 	return matches[0], nil
+}
+
+func merchantAssetMatches(candidate domain.Asset, network, symbol string) bool {
+	if candidate.ChainID != network {
+		return false
+	}
+	// TON is a legacy merchant request for the same native currency now shown
+	// as GRAM. Accept both during and after the display-name migration.
+	if network == "ton:mainnet" && candidate.ID == "ton-ton" && (symbol == "TON" || symbol == "GRAM") {
+		return true
+	}
+	return candidate.Symbol == symbol || strings.EqualFold(candidate.ID, symbol)
 }
 
 func (s *Server) merchantResponse(intent domain.PaymentIntent, checkoutToken string) merchantOrderResponse {

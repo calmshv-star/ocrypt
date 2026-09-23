@@ -111,7 +111,7 @@
         {"url": "https://ton-blockchain.github.io/global.config.json", "type": "lite", "purpose": "general"}
       ],
       "assets": [
-        {"id": "ton-ton", "symbol": "TON", "contract": "native", "decimals": 9},
+        {"id": "ton-ton", "symbol": "GRAM", "contract": "native", "decimals": 9},
         {"id": "usdt-ton", "symbol": "USDT", "contract": "0:b113a994b5024a16719f69139328eb759596c38a25f59028b146fecdc3621dfe", "decimals": 6}
       ]
     },

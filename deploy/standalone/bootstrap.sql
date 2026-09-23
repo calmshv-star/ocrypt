@@ -33,7 +33,7 @@ INSERT INTO assets(id,chain_id,symbol,name,kind,canonical_contract,decimals,stat
 VALUES
 ('eth-ethereum','eip155:1','ETH','Ether','native','native',18,'active',clock_timestamp(),clock_timestamp()),
 ('sol-solana','solana:mainnet','SOL','Solana','native','native',9,'active',clock_timestamp(),clock_timestamp()),
-('ton-ton','ton:mainnet','TON','Toncoin','native','native',9,'active',clock_timestamp(),clock_timestamp()),
+('ton-ton','ton:mainnet','GRAM','Gram','native','native',9,'active',clock_timestamp(),clock_timestamp()),
 ('trx-tron','tron:mainnet','TRX','TRON','native','native',6,'active',clock_timestamp(),clock_timestamp()),
 ('usdt-tron','tron:mainnet','USDT','Tether USD','fungible_token','TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',6,'active',clock_timestamp(),clock_timestamp())
 ON CONFLICT(id) DO NOTHING;
