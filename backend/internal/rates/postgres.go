@@ -265,7 +265,10 @@ func (s *PostgresStore) Fail(ctx context.Context, owner string, claim Claim, cod
 	if !validErrorCode(code) || claim.ClaimToken < 1 || claim.Attempts < 1 || maxAttempts < 1 || maxAttempts > 100 || nextAttempt.IsZero() {
 		return false, ErrInvalidConfig
 	}
-	dead := claim.Attempts >= maxAttempts
+	// A temporary provider outage must not permanently remove a payment
+	// currency from the rate queue. Keep terminal errors for operator review.
+	resetRetries := claim.Attempts >= maxAttempts && retryableRateFailure(code)
+	dead := claim.Attempts >= maxAttempts && !resetRetries
 	err := s.within(ctx, owner, claim.Target, func(tx pgx.Tx) error {
 		var attempts int
 		if err := tx.QueryRow(ctx, `SELECT attempts FROM rate_runtime_jobs WHERE scope_id=platform_scope_uuid(NULLIF($1,'')::uuid) AND policy_key=$2 AND status='active' AND lease_owner=$3 AND claim_token=$4 AND lease_until>=clock_timestamp() FOR UPDATE`, claim.Target.TenantID, claim.Target.PolicyKey, owner, claim.ClaimToken).Scan(&attempts); err != nil {
@@ -284,7 +287,11 @@ func (s *PostgresStore) Fail(ctx context.Context, owner string, claim Claim, cod
 			_, err := tx.Exec(ctx, `UPDATE rate_runtime_jobs SET status='dead_letter',lease_owner=NULL,lease_until=NULL,last_error_code=$5,dead_lettered_at=clock_timestamp(),updated_at=clock_timestamp() WHERE scope_id=platform_scope_uuid(NULLIF($1,'')::uuid) AND policy_key=$2 AND lease_owner=$3 AND claim_token=$4`, claim.Target.TenantID, claim.Target.PolicyKey, owner, claim.ClaimToken, code)
 			return err
 		}
-		command, err := tx.Exec(ctx, `UPDATE rate_runtime_jobs SET lease_owner=NULL,lease_until=NULL,next_attempt_at=GREATEST($5,clock_timestamp()+interval '1 second'),last_error_code=$6,updated_at=clock_timestamp() WHERE scope_id=platform_scope_uuid(NULLIF($1,'')::uuid) AND policy_key=$2 AND lease_owner=$3 AND claim_token=$4`, claim.Target.TenantID, claim.Target.PolicyKey, owner, claim.ClaimToken, nextAttempt.UTC(), code)
+		minimumDelay := time.Second
+		if resetRetries {
+			minimumDelay = 5 * time.Minute
+		}
+		command, err := tx.Exec(ctx, `UPDATE rate_runtime_jobs SET lease_owner=NULL,lease_until=NULL,attempts=CASE WHEN $7::boolean THEN 0 ELSE attempts END,next_attempt_at=GREATEST($5,clock_timestamp()+$8::bigint*interval '1 millisecond'),last_error_code=$6,updated_at=clock_timestamp() WHERE scope_id=platform_scope_uuid(NULLIF($1,'')::uuid) AND policy_key=$2 AND lease_owner=$3 AND claim_token=$4`, claim.Target.TenantID, claim.Target.PolicyKey, owner, claim.ClaimToken, nextAttempt.UTC(), code, resetRetries, minimumDelay.Milliseconds())
 		if err != nil {
 			return err
 		}
@@ -294,6 +301,15 @@ func (s *PostgresStore) Fail(ctx context.Context, owner string, claim Claim, cod
 		return nil
 	})
 	return dead, err
+}
+
+func retryableRateFailure(code string) bool {
+	switch code {
+	case "no_quorum", "stale", "future_timestamp", "divergent", "dependency_unavailable":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *PostgresStore) Health(ctx context.Context, owner string, targets []Target, maxReadyAge time.Duration) (Health, error) {
