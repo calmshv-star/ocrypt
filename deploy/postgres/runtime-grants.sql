@@ -412,6 +412,7 @@ GRANT SELECT,UPDATE ON webhook_endpoints TO merchant_settlement_worker;
 GRANT SELECT ON payment_route_policy_bindings TO merchant_settlement_worker;
 
 GRANT SELECT,UPDATE ON automated_matching_jobs,payment_intents,payment_routes,transfer_events,unmatched_payments TO merchant_matching_worker;
+GRANT SELECT ON match_candidates TO merchant_matching_worker;
 GRANT INSERT ON payment_intent_versions TO merchant_matching_worker;
 GRANT SELECT,INSERT,UPDATE ON payment_match_aggregates,payment_matches TO merchant_matching_worker;
 GRANT SELECT,INSERT ON ledger_accounts,ledger_entries,callback_events TO merchant_matching_worker;
