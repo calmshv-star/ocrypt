@@ -246,12 +246,33 @@ ORDER BY te.on_chain_time,te.id FOR UPDATE OF te`, route.Route.ChainID, route.Ro
 	if err := rows.Err(); err != nil {
 		return nil, false, err
 	}
+	rows.Close()
+	// A shared deposit address can have several invoices open at once. The
+	// scanner already recorded the ranked, immutable candidates for each
+	// transfer. An unambiguous winner belongs only to that route; it must not
+	// either inflate a neighbour's aggregate or be vetoed merely because the
+	// neighbour's time window overlaps.
+	owners := make(map[string]string, len(events))
+	for _, event := range events {
+		if event.Kind == "gasfree_fee" {
+			continue
+		}
+		owner, err := loadAutomaticEventOwner(ctx, tx, event.ID, route.TenantID)
+		if err != nil {
+			return nil, false, err
+		}
+		owners[event.ID] = owner
+	}
+	filtered, unknownEvents := filterAutomatedMatchingEvents(events, owners, route.RouteID)
+	if len(unknownEvents) == 0 {
+		return filtered, false, nil
+	}
 	var ambiguous bool
 	err = tx.QueryRow(ctx, `SELECT EXISTS(
  SELECT 1 FROM transfer_events te
  JOIN payment_routes other ON other.chain_id=te.chain_id AND other.asset_id=te.asset_id AND other.receiving_address=te.to_address
  JOIN payment_route_policy_bindings b ON b.route_id=other.id AND b.tenant_id=other.tenant_id
- WHERE te.chain_id=$1 AND te.asset_id=$2 AND te.to_address=$3 AND te.event_kind<>'gasfree_fee'
+ WHERE te.id=ANY($9::uuid[]) AND te.chain_id=$1 AND te.asset_id=$2 AND te.to_address=$3 AND te.event_kind<>'gasfree_fee'
    AND te.status='finalized' AND te.confirmations>=$4 AND te.on_chain_time BETWEEN $5 AND $6
    AND other.id<>$7 AND other.status IN ('active','expired') AND te.on_chain_time BETWEEN other.starts_at AND other.grace_ends_at
    -- A payment made inside this route's primary window must not be made
@@ -259,8 +280,68 @@ ORDER BY te.on_chain_time,te.id FOR UPDATE OF te`, route.Route.ChainID, route.Ro
    -- relevant when the payment itself is late, and simultaneous primary
    -- windows still fail closed.
    AND (te.on_chain_time>=$8 OR te.on_chain_time BETWEEN other.starts_at AND other.expires_at)
-)`, route.Route.ChainID, route.Route.AssetID, route.Route.Address, route.Route.RequiredFinality, route.Route.StartsAt, route.Route.GraceEndsAt, route.RouteID, route.Route.ExpiresAt).Scan(&ambiguous)
-	return events, ambiguous, err
+)`, route.Route.ChainID, route.Route.AssetID, route.Route.Address, route.Route.RequiredFinality, route.Route.StartsAt, route.Route.GraceEndsAt, route.RouteID, route.Route.ExpiresAt, unknownEvents).Scan(&ambiguous)
+	return filtered, ambiguous, err
+}
+
+func filterAutomatedMatchingEvents(events []domain.TransferEvent, owners map[string]string, routeID string) ([]domain.TransferEvent, []string) {
+	ownedTransactions := map[string]bool{}
+	unknownEvents := make([]string, 0, len(events))
+	filtered := make([]domain.TransferEvent, 0, len(events))
+	for _, event := range events {
+		if event.Kind == "gasfree_fee" {
+			continue
+		}
+		owner := owners[event.ID]
+		if owner != "" && owner != routeID {
+			continue
+		}
+		filtered = append(filtered, event)
+		ownedTransactions[event.Identity.TransactionID] = true
+		if owner == "" {
+			unknownEvents = append(unknownEvents, event.ID)
+		}
+	}
+	for _, event := range events {
+		if event.Kind == "gasfree_fee" && ownedTransactions[event.Identity.TransactionID] {
+			filtered = append(filtered, event)
+		}
+	}
+	return filtered, unknownEvents
+}
+
+func loadAutomaticEventOwner(ctx context.Context, tx pgx.Tx, eventID, tenantID string) (string, error) {
+	rows, err := tx.Query(ctx, `SELECT mc.route_id::text,mc.score,COALESCE(mc.evidence->>'class',''),
+ COALESCE(mc.evidence->'reason_codes','[]'::jsonb)::text
+FROM unmatched_payments up
+JOIN match_candidates mc ON mc.unmatched_id=up.id AND mc.tenant_id=up.tenant_id
+ AND mc.candidate_set_version=up.workflow_version
+WHERE up.event_id=$1 AND up.tenant_id=$2 AND up.status IN ('new','candidates_ready','bound')
+ORDER BY mc.rank LIMIT 2`, eventID, tenantID)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	var candidates []application.Candidate
+	for rows.Next() {
+		var candidate application.Candidate
+		var class, reasons string
+		if err := rows.Scan(&candidate.RouteID, &candidate.Score, &class, &reasons); err != nil {
+			return "", err
+		}
+		candidate.Class = application.ExceptionClass(class)
+		if err := json.Unmarshal([]byte(reasons), &candidate.Reasons); err != nil {
+			return "", err
+		}
+		candidates = append(candidates, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if winner, ok := application.UniqueAutomaticCandidate(candidates); ok {
+		return winner.RouteID, nil
+	}
+	return "", nil
 }
 
 func failClosedAmbiguousDecision(route automatedMatchingRoute, events []domain.TransferEvent) application.AutomatedMatchDecision {

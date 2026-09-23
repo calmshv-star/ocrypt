@@ -66,13 +66,16 @@ func TestAutomatedMatchingReorgAndRefundContractsFailClosed(t *testing.T) {
 	}
 }
 
-func TestAutomatedMatchingApproximateAmountRequiresOneOverlappingRoute(t *testing.T) {
+func TestAutomatedMatchingUnknownOwnerRetainsOverlapGuard(t *testing.T) {
 	matching, err := os.ReadFile("matching_automation.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	source := string(matching)
 	for _, check := range []string{
+		"filterAutomatedMatchingEvents(events, owners, route.RouteID)",
+		"application.UniqueAutomaticCandidate(candidates)",
+		"te.id=ANY($9::uuid[])",
 		"other.id<>$7",
 		"te.on_chain_time BETWEEN other.starts_at AND other.grace_ends_at",
 		"te.on_chain_time>=$8 OR te.on_chain_time BETWEEN other.starts_at AND other.expires_at",
@@ -80,7 +83,7 @@ func TestAutomatedMatchingApproximateAmountRequiresOneOverlappingRoute(t *testin
 		"multiple_policy_bound_routes_overlap",
 	} {
 		if !strings.Contains(source, check) {
-			t.Errorf("approximate-amount matching lost its unique overlapping-route guard %q", check)
+			t.Errorf("shared-address matching lost its candidate-owner or overlap guard %q", check)
 		}
 	}
 }
