@@ -40,19 +40,50 @@ func TestCandidatePolicyPrefersRouteOwningReusedAddressAtPaymentTime(t *testing.
 	}
 }
 
-func TestUniqueAutomaticCandidateRequiresStrictlyAboveEightyAndNoTie(t *testing.T) {
-	if _, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "eighty", Score: 80}}); ok {
-		t.Fatal("score equal to eighty was auto-matched")
+func TestUniqueAutomaticCandidateIncludesSeventyFiveButRejectsUnsafeRoutes(t *testing.T) {
+	if _, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "below", Score: 74, Class: ExceptionOverpaid, Reasons: []string{"within_payment_window"}}}); ok {
+		t.Fatal("score below seventy-five was auto-matched")
 	}
-	selected, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "winner", Score: 81}, {RouteID: "other", Score: 80}})
+	selected, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "winner", Score: 75, Class: ExceptionOverpaid, Reasons: []string{"within_payment_window"}}, {RouteID: "other", Score: 40, Class: ExceptionLate, Reasons: []string{"within_manual_late_grace"}}})
 	if !ok || selected.RouteID != "winner" {
-		t.Fatalf("unique score above eighty was not selected: %#v %v", selected, ok)
+		t.Fatalf("unique in-window score of seventy-five was not selected: %#v %v", selected, ok)
 	}
-	if _, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "a", Score: 95}, {RouteID: "b", Score: 95}}); ok {
+	if _, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "a", Score: 75, Class: ExceptionOverpaid, Reasons: []string{"within_payment_window"}}, {RouteID: "b", Score: 75, Class: ExceptionOverpaid, Reasons: []string{"within_payment_window"}}}); ok {
 		t.Fatal("equal high-score candidates were auto-matched")
 	}
-	if _, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "late", Score: 100, Class: ExceptionLate}}); ok {
+	if _, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "future", Score: 75, Class: ExceptionExact, Reasons: []string{"before_route_start", "exact_amount"}}}); ok {
+		t.Fatal("future route was auto-matched")
+	}
+	if _, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "partial", Score: 80, Class: ExceptionPartial, Reasons: []string{"within_payment_window", "below_expected_before_expiry"}}}); ok {
+		t.Fatal("unrelated large shortfall was auto-matched")
+	}
+	if _, ok := UniqueAutomaticCandidate([]Candidate{{RouteID: "late", Score: 100, Class: ExceptionLate, Reasons: []string{"within_manual_late_grace"}}}); ok {
 		t.Fatal("late candidate outside the automatic grace window was auto-matched")
+	}
+}
+
+func TestLargeOverpaymentSelectsCurrentInvoiceOnReusedAddressAtSeventyFive(t *testing.T) {
+	paidAt := time.Date(2026, 9, 26, 6, 27, 27, 0, time.UTC)
+	route := func(id, expected string, startsAt, expiresAt time.Time) domain.PaymentRoute {
+		return domain.PaymentRoute{
+			ID: id, IntentID: "intent-" + id, ChainID: "tron:mainnet", AssetID: "usdt-tron", Address: "TSW3ZVUt5jjuyiVgppBduZCtQeCKzR5Dv4",
+			ExpectedAmount: money.MustParse(expected), Status: domain.RouteActive,
+			StartsAt: startsAt, ExpiresAt: expiresAt, GraceEndsAt: expiresAt.Add(24 * time.Hour),
+		}
+	}
+	current := route("current", "35500000", paidAt.Add(-9*time.Minute), paidAt.Add(21*time.Minute))
+	old := route("old", "6020000", paidAt.Add(-3*time.Hour), paidAt.Add(-2*time.Hour-30*time.Minute))
+	event := domain.TransferEvent{
+		Identity: domain.EventIdentity{ChainID: current.ChainID, AssetID: current.AssetID, ToAddress: current.Address},
+		Amount:   money.MustParse("38813870"), OnChainTime: paidAt,
+	}
+	candidates := BuildCandidates(event, []domain.PaymentRoute{old, current}, paidAt.Add(time.Minute))
+	if len(candidates) != 2 || candidates[0].RouteID != current.ID || candidates[0].Score != 75 {
+		t.Fatalf("current large overpayment did not rank at the inclusive threshold: %#v", candidates)
+	}
+	selected, ok := UniqueAutomaticCandidate(candidates)
+	if !ok || selected.RouteID != current.ID {
+		t.Fatalf("current route was not selected: %#v %v", selected, ok)
 	}
 }
 
@@ -84,8 +115,11 @@ func TestCandidateRankingPrefersTheCurrentCloseAmountOverUnrelatedOpenOrders(t *
 	if candidates[0].Score <= AutomaticCandidateScoreThreshold || candidates[0].Class == ExceptionAmbiguous {
 		t.Fatalf("close current order did not cross the automatic threshold: %#v", candidates[0])
 	}
-	if candidates[2].RouteID != "medium" || candidates[2].Score > AutomaticCandidateScoreThreshold || candidates[3].RouteID != "large" || candidates[3].Score > AutomaticCandidateScoreThreshold {
+	if candidates[2].RouteID != "medium" || candidates[3].RouteID != "large" {
 		t.Fatalf("unrelated partial orders remained high-confidence candidates: %#v", candidates)
+	}
+	if _, ok := UniqueAutomaticCandidate([]Candidate{candidates[2]}); ok {
+		t.Fatalf("unrelated large shortfall became automatically eligible: %#v", candidates[2])
 	}
 	selected, ok := UniqueAutomaticCandidate(candidates)
 	if !ok || selected.RouteID != "current" {

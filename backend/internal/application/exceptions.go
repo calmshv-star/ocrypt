@@ -34,21 +34,26 @@ type Candidate struct {
 	Reasons     []string       `json:"reason_codes"`
 }
 
-const AutomaticCandidateScoreThreshold = 80
+const AutomaticCandidateScoreThreshold = 75
 
 const automaticLateGraceReason = "within_automatic_30_minute_grace"
 
 const candidateCloseAmountToleranceBPS uint32 = 500
 
 // UniqueAutomaticCandidate returns the only candidate that is safe to send to
-// deterministic settlement without an operator. The score is intentionally a
-// strict greater-than threshold; ties and ambiguous classifications fail
-// closed even when both candidates have high scores.
+// deterministic settlement without an operator. The threshold is inclusive,
+// but the winning route must own the payment time (or be inside the short
+// automatic late grace). Ties and ambiguous classifications still fail closed.
 func UniqueAutomaticCandidate(candidates []Candidate) (Candidate, bool) {
-	if len(candidates) == 0 || candidates[0].Score <= AutomaticCandidateScoreThreshold || candidates[0].Class == ExceptionAmbiguous {
+	if len(candidates) == 0 || candidates[0].Score < AutomaticCandidateScoreThreshold || candidates[0].Class == ExceptionAmbiguous {
 		return Candidate{}, false
 	}
-	if candidates[0].Class == ExceptionLate && !candidateHasReason(candidates[0], automaticLateGraceReason) {
+	if !candidateHasReason(candidates[0], "within_payment_window") &&
+		!(candidates[0].Class == ExceptionLate && candidateHasReason(candidates[0], automaticLateGraceReason)) {
+		return Candidate{}, false
+	}
+	if (candidates[0].Class == ExceptionPartial || candidates[0].Class == ExceptionUnderpaid) &&
+		!candidateHasReason(candidates[0], "underpayment_within_five_percent") {
 		return Candidate{}, false
 	}
 	if len(candidates) > 1 && candidates[1].Score == candidates[0].Score {
@@ -158,9 +163,9 @@ func BuildCandidates(event domain.TransferEvent, routes []domain.PaymentRoute, n
 			if !late {
 				c.Class = ExceptionOverpaid
 			}
-			// A large overpayment is weak amount evidence on a shared address. It
-			// remains below the automatic threshold unless this is the only route
-			// candidate for the transfer.
+			// A large overpayment is weak amount evidence on a shared address.
+			// Only a unique, in-window winner may pass the inclusive threshold;
+			// the bound policy still decides how to account for the excess.
 			c.Score += 5
 			c.Reasons = append(c.Reasons, "above_expected")
 		}

@@ -252,7 +252,7 @@ ON CONFLICT(event_id) DO NOTHING`, unmatchedID, eventID)
 					if err := recordExceptionIntent(ctx, tx, tenantID, potential[0], event, s.now()); err != nil {
 						return err
 					}
-					// A unique score above 80 enters deterministic settlement. The
+					// A unique score of at least 75 enters deterministic settlement. The
 					// reducer still enforces finality, identity, five-percent
 					// underpayment tolerance and excess-payment accounting.
 					if err := enqueueAutomatedMatchingCandidates(ctx, tx, tenantID, []application.Candidate{automatic}, s.now()); err != nil {
