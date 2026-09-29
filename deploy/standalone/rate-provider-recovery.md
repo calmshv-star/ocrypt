@@ -18,7 +18,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
 
 The script transactionally versions all 168 catalog policies and source
 snapshots, retains quorum 2 and the existing spread/freshness bounds, refreshes
-every 5 minutes, and wakes the already-active RUB jobs. It is also included in
+every 30 minutes, and wakes the already-active RUB jobs. It is also included in
 fresh bootstrap. The worker accepts two agreeing independent providers when
 the third is unavailable or an outlier; the same provider cannot count twice.
 Transient outages continue retrying after cooldown.
@@ -28,7 +28,7 @@ two distinct provider observations. Run `verify-showy-rate-readiness.sql` with
 read access to the active configuration and runtime tables: it fails unless
 the five Showy currencies have the three-source configuration, fresh admitted
 rates, and the exact active planner projection. Verify another automatic
-five-minute refresh as well as API/worker readiness.
+30-minute refresh as well as API/worker readiness.
 
 Invoice creation smoke checks belong in an isolated test environment with
 synthetic merchant/customer IDs and a test callback receiver; cancel them

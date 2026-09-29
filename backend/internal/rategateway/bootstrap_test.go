@@ -25,6 +25,11 @@ func TestStandaloneBootstrapAdmitsCatalogButRuntimeTargetsOnlyRUB(t *testing.T) 
 	if !strings.Contains(bootstrap, `\ir activate-coinmarketcap-rates.sql`) || !strings.Contains(publicGateway, "coinmarketcap") {
 		t.Fatal("standalone deployment does not activate the third rate provider")
 	}
+	activation := readFixture(t, filepath.Join(root, "deploy", "standalone", "activate-coinmarketcap-rates.sql"))
+	if !strings.Contains(bootstrap, "'poll_interval_seconds',1800") ||
+		!strings.Contains(activation, "'{poll_interval_seconds}','1800'::jsonb") {
+		t.Fatal("adding a third provider must retain the 30-minute collection cadence")
+	}
 	if strings.Contains(bootstrap, "api.pay.example.com") || !strings.Contains(bootstrap, ":'rate_gateway_origin'") {
 		t.Fatal("rate bootstrap is not bound to the installer's public HTTPS origin")
 	}

@@ -29,13 +29,13 @@ BEGIN
   END IF;
   SELECT * INTO STRICT old_snapshot FROM platform_config_snapshots WHERE id=prior_snapshot_id;
   IF (old_snapshot.payload->>'max_age_seconds')::integer=2100
-     AND (requested_kind<>'rate_policy' OR (old_snapshot.payload->>'poll_interval_seconds')::integer=300) THEN
+     AND (requested_kind<>'rate_policy' OR (old_snapshot.payload->>'poll_interval_seconds')::integer=1800) THEN
     RETURN old_snapshot.id;
   END IF;
 
   next_payload := jsonb_set(old_snapshot.payload,'{max_age_seconds}','2100'::jsonb,false);
   IF requested_kind='rate_policy' THEN
-    next_payload := jsonb_set(next_payload,'{poll_interval_seconds}','300'::jsonb,true);
+    next_payload := jsonb_set(next_payload,'{poll_interval_seconds}','1800'::jsonb,true);
   END IF;
   INSERT INTO platform_config_change_requests(
     id,scope_id,kind,logical_key,version,based_on_version,payload,payload_hash,status,reason,
@@ -43,7 +43,7 @@ BEGIN
     created_at,updated_at,row_version)
   VALUES(new_request_id,requested_scope,requested_kind,requested_key,old_snapshot.version+1,old_snapshot.version,
     next_payload,digest(next_payload::text,'sha256'),'active',
-    'Use a 30 minute collection cadence with a five minute expiry margin and quorum 2 of 2',
+    'Use a 30 minute collection cadence with a five minute expiry margin; preserve configured sources and quorum',
     requester,approver,approver,approver,now_at,now_at,now_at,now_at,now_at,now_at,4);
   INSERT INTO platform_config_snapshots(
     id,scope_id,change_request_id,kind,logical_key,version,payload,payload_hash,activated_by,activated_at)

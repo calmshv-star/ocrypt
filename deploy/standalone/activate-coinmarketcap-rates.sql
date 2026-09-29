@@ -131,7 +131,7 @@ SELECT pg_temp.reconcile_cmc_rate_snapshot(
     jsonb_build_array(p.asset_id||'-'||lower(p.currency)||'-coingecko',
                       p.asset_id||'-'||lower(p.currency)||'-coinpaprika',
                       p.asset_id||'-'||lower(p.currency)||'-coinmarketcap'),false),
-    '{poll_interval_seconds}','300'::jsonb,false)
+    '{poll_interval_seconds}','1800'::jsonb,false)
 ) FROM cmc_rate_pairs p
 JOIN platform_config_heads h ON h.scope_id=platform_scope_uuid(NULL)
   AND h.kind='rate_policy' AND h.logical_key='rate-'||p.asset_id||'-'||lower(p.currency)

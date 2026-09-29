@@ -30,7 +30,7 @@ The standalone bootstrap admits `RUB`, `USD`, `EUR`, `KZT`, `INR`, and `CNY`,
 but the supplied worker enables only the 26 RUB targets by default. Other
 currencies cause no background or upstream traffic until a deployment adds
 their policy keys to `RATE_TARGETS_JSON`. A successful pair is collected once
-per 5 minutes. Route creation immediately reuses a tick within its admitted
+per 30 minutes. Route creation immediately reuses a tick within its admitted
 maximum age; only a missing or stale pair queues one deduplicated on-demand
 collection. The API’s bounded normalized-rate gateway batches and
 caches the public upstream calls: CoinGecko, CoinPaprika, and CoinMarketCap

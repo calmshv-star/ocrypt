@@ -22,10 +22,10 @@ BEGIN
         AND s.payload->'sources'=jsonb_build_array(
           asset||'-rub-coingecko',asset||'-rub-coinpaprika',asset||'-rub-coinmarketcap')
         AND (s.payload->>'quorum')::integer=2
-        AND (s.payload->>'poll_interval_seconds')::integer BETWEEN 1 AND 300
-        AND j.status='active' AND j.last_success_at>clock_timestamp()-interval '10 minutes'
+        AND (s.payload->>'poll_interval_seconds')::integer=1800
+        AND j.status='active' AND j.last_success_at>clock_timestamp()-interval '35 minutes'
         AND t.base_asset=asset AND t.quote_asset='RUB'
-        AND t.admitted_at>clock_timestamp()-interval '10 minutes'
+        AND t.admitted_at>clock_timestamp()-interval '35 minutes'
         AND t.expires_at>clock_timestamp() AND t.quorum=2
         AND p.status='active' AND p.asset_id=asset AND p.fiat_currency='RUB'
         AND p.numerator=t.price_numerator AND p.denominator=t.price_denominator
