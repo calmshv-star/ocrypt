@@ -67,6 +67,7 @@ func (l *ConfigLoader) Load(ctx context.Context, target Target) (RuntimeConfig, 
 		seen[key] = struct{}{}
 	}
 	sources := make([]SourceConfig, 0, len(payload.Sources))
+	seenProviders := make(map[string]struct{}, len(payload.Sources))
 	for _, key := range payload.Sources {
 		snapshot, loadErr := l.reader.ActiveSnapshot(ctx, scope, platformadmin.KindRateSource, key)
 		if loadErr != nil {
@@ -87,6 +88,10 @@ func (l *ConfigLoader) Load(ctx context.Context, target Target) (RuntimeConfig, 
 		if source.TimeoutMS < 100 || source.TimeoutMS > 20000 || source.MaxResponseBytes < 256 || source.MaxResponseBytes > 1<<20 {
 			return RuntimeConfig{}, ErrInvalidConfig
 		}
+		if _, duplicate := seenProviders[source.ProviderRef]; duplicate {
+			return RuntimeConfig{}, ErrInvalidConfig
+		}
+		seenProviders[source.ProviderRef] = struct{}{}
 		sources = append(sources, SourceConfig{Key: key, ProviderRef: source.ProviderRef, Endpoint: source.Endpoint, BaseAsset: source.BaseAsset,
 			QuoteAsset: source.QuoteAsset, CredentialRef: source.CredentialRef, MaxAge: time.Duration(source.MaxAgeSeconds) * time.Second,
 			Timeout: time.Duration(source.TimeoutMS) * time.Millisecond, MaxResponseBytes: source.MaxResponseBytes,

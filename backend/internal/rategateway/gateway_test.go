@@ -3,6 +3,7 @@ package rategateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -132,6 +133,37 @@ func TestCoinPaprikaSharesOneUpstreamRequestAcrossChainAliases(t *testing.T) {
 	}
 	if base.BaseAsset != "usdc-base" || arbitrum.BaseAsset != "usdc-arbitrum" {
 		t.Fatalf("aliases lost their public IDs: %#v, %#v", base, arbitrum)
+	}
+}
+
+func TestCoinMarketCapUsesNativeGramIdentityAndOneBatch(t *testing.T) {
+	calls := 0
+	quoteTime := time.Now().Add(-2 * time.Minute).UTC().Truncate(time.Second)
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		if request.URL.Query().Get("convert") != "RUB" || request.Header.Get("X-CMC_PRO_API_KEY") != "" ||
+			request.URL.Path != "/public-api/v3/cryptocurrency/quotes/latest" ||
+			!strings.Contains(request.URL.Query().Get("id"), "11419") || strings.Contains(request.URL.Query().Get("id"), "39249") {
+			t.Fatalf("incorrect CoinMarketCap request: %s", request.URL)
+		}
+		entries := make([]string, 0, len(coinMarketCapIDs))
+		for _, id := range sortedCoinMarketCapIDs() {
+			entries = append(entries, fmt.Sprintf(`{"id":%s,"last_updated":%q,"quote":[{"symbol":"RUB","price":119.25,"last_updated":%q}]}`, id, quoteTime.Format(time.RFC3339), quoteTime.Format(time.RFC3339)))
+		}
+		body := fmt.Sprintf(`{"data":[%s],"status":{"timestamp":%q,"error_code":"0"}}`, strings.Join(entries, ","), time.Now().UTC().Format(time.RFC3339Nano))
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+	source := &upstream{client: client, coinMarketCapCache: make(map[string]map[string]rates.ProviderResult), coinMarketCapExpires: make(map[string]time.Time)}
+	gram, err := source.coinMarketCap(context.Background(), "RUB", assets["ton-ton"])
+	if err != nil || gram.BaseAsset != "ton-ton" || gram.PriceNumerator != "477" || gram.PriceDenominator != "4" {
+		t.Fatalf("wrong GRAM price: %+v, %v", gram, err)
+	}
+	if !gram.ObservedAt.Equal(quoteTime) {
+		t.Fatalf("response timestamp disguised the quote age: %s", gram.ObservedAt)
+	}
+	_, err = source.coinMarketCap(context.Background(), "RUB", assets["usdt-ton"])
+	if err != nil || calls != 1 {
+		t.Fatalf("batch was not reused: calls=%d err=%v", calls, err)
 	}
 }
 

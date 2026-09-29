@@ -101,6 +101,11 @@ func (w Worker) collect(ctx context.Context, claim Claim, config RuntimeConfig) 
 	if len(observations) < config.Policy.Quorum {
 		return Collection{}, ErrNoQuorum
 	}
+	selected, err := selectAgreeingObservations(observations, config.Policy.Quorum, config.Policy.MaxSpreadBPS)
+	if err != nil {
+		return Collection{}, err
+	}
+	observations = selected
 	sortObservations(observations)
 	prices := make([]Rational, len(observations))
 	oldestObserved := observations[0].ProviderObservedAt
@@ -135,6 +140,58 @@ func (w Worker) collect(ctx context.Context, claim Claim, config RuntimeConfig) 
 		SourceCount: len(observations), PolicySnapshotID: config.Policy.SnapshotID, PolicyFenceToken: config.Policy.FenceToken,
 		SourcesDigest: canonicalSourceDigest(observations)}
 	return Collection{Claim: claim, Config: config, Observations: observations, Tick: tick}, nil
+}
+
+// Use every provider when all agree. Otherwise admit only the tightest quorum;
+// an available but divergent third provider must not veto two agreeing ones.
+func selectAgreeingObservations(observations []Observation, quorum int, maxSpreadBPS int64) ([]Observation, error) {
+	if len(observations) < quorum || quorum < 2 {
+		return nil, ErrNoQuorum
+	}
+	prices := make([]Rational, len(observations))
+	for i, observation := range observations {
+		prices[i] = observation.Price
+	}
+	center, err := median(prices)
+	if err != nil {
+		return nil, err
+	}
+	_, allowed, err := spreadBPS(prices, center, maxSpreadBPS)
+	if err != nil {
+		return nil, err
+	}
+	if allowed {
+		return observations, nil
+	}
+	ordered := append([]Observation(nil), observations...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if comparison := ordered[i].Price.Cmp(ordered[j].Price); comparison != 0 {
+			return comparison < 0
+		}
+		return ordered[i].SourceKey < ordered[j].SourceKey
+	})
+	bestStart, bestSpread := -1, int64(0)
+	for start := 0; start+quorum <= len(ordered); start++ {
+		window := ordered[start : start+quorum]
+		for i, observation := range window {
+			prices[i] = observation.Price
+		}
+		candidateCenter, candidateErr := median(prices[:quorum])
+		if candidateErr != nil {
+			return nil, candidateErr
+		}
+		spread, candidateAllowed, candidateErr := spreadBPS(prices[:quorum], candidateCenter, maxSpreadBPS)
+		if candidateErr != nil {
+			return nil, candidateErr
+		}
+		if candidateAllowed && (bestStart < 0 || spread < bestSpread) {
+			bestStart, bestSpread = start, spread
+		}
+	}
+	if bestStart < 0 {
+		return nil, ErrDivergent
+	}
+	return ordered[bestStart : bestStart+quorum], nil
 }
 
 func sourceMaxAge(config RuntimeConfig, key string) time.Duration {

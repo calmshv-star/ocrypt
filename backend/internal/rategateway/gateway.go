@@ -15,6 +15,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -24,10 +25,12 @@ import (
 )
 
 const (
-	coinGeckoURL       = "https://api.coingecko.com/api/v3/simple/price?ids=%s&vs_currencies=%s&include_last_updated_at=true"
-	coinPaprikaURL     = "https://api.coinpaprika.com/v1/tickers/%s?quotes=%s"
-	kazakhstanRatesURL = "https://nationalbank.kz/rss/rates_all.xml"
-	coinPaprikaSpacing = 300 * time.Millisecond
+	coinGeckoURL          = "https://api.coingecko.com/api/v3/simple/price?ids=%s&vs_currencies=%s&include_last_updated_at=true"
+	coinPaprikaURL        = "https://api.coinpaprika.com/v1/tickers/%s?quotes=%s"
+	coinMarketCapURL      = "https://pro-api.coinmarketcap.com/public-api/v3/cryptocurrency/quotes/latest?id=%s&convert=%s"
+	coinMarketCapKeyedURL = "https://pro-api.coinmarketcap.com/v3/cryptocurrency/quotes/latest?id=%s&convert=%s"
+	kazakhstanRatesURL    = "https://nationalbank.kz/rss/rates_all.xml"
+	coinPaprikaSpacing    = 300 * time.Millisecond
 )
 
 // defaultFiatCurrencies is the closed, ready-to-use invoice-currency catalog.
@@ -79,6 +82,14 @@ var assets = map[string]asset{
 	"usdt-aptos":     {ID: "usdt-aptos", CoinGeckoID: "tether", CoinPaprikaID: "usdt-tether"},
 }
 
+// CoinMarketCap IDs avoid ticker collisions: TON is now GRAM (11419), while
+// a symbol lookup for TON currently resolves to an unrelated stock token.
+var coinMarketCapIDs = map[string]string{
+	"ethereum": "1027", "usd-coin": "3408", "tether": "825",
+	"solana": "5426", "the-open-network": "11419", "tron": "1958",
+	"avalanche-2": "5805", "polygon-ecosystem-token": "28321", "binancecoin": "1839",
+}
+
 type Fetcher interface {
 	Fetch(context.Context, string, string, asset) (rates.ProviderResult, error)
 }
@@ -110,10 +121,13 @@ func New() *Gateway {
 		return errors.New("rate source redirects are disabled")
 	}}
 	return NewWithFetcher(&upstream{
-		client:           client,
-		coinGeckoCache:   make(map[string]map[string]rates.ProviderResult),
-		coinGeckoExpires: make(map[string]time.Time),
-		coinPaprikaCache: make(map[string]upstreamQuote),
+		client:               client,
+		coinMarketCapKey:     os.Getenv("COINMARKETCAP_API_KEY"),
+		coinMarketCapCache:   make(map[string]map[string]rates.ProviderResult),
+		coinMarketCapExpires: make(map[string]time.Time),
+		coinGeckoCache:       make(map[string]map[string]rates.ProviderResult),
+		coinGeckoExpires:     make(map[string]time.Time),
+		coinPaprikaCache:     make(map[string]upstreamQuote),
 	}, func() time.Time { return time.Now().UTC() })
 }
 
@@ -138,7 +152,7 @@ func (g *Gateway) get(response http.ResponseWriter, request *http.Request) {
 		currency = "RUB"
 	}
 	_, currencyOK := supportedFiat[currency]
-	if !ok || !currencyOK || provider != "coingecko" && provider != "coinpaprika" || g.fetcher == nil || g.now == nil {
+	if !ok || !currencyOK || provider != "coingecko" && provider != "coinpaprika" && provider != "coinmarketcap" || g.fetcher == nil || g.now == nil {
 		http.NotFound(response, request)
 		return
 	}
@@ -176,6 +190,10 @@ func boundedUpstreamReason(err error) string {
 	}
 	message := err.Error()
 	switch {
+	case strings.Contains(message, "CoinMarketCap rate is missing"):
+		return "coinmarketcap_missing"
+	case strings.Contains(message, "invalid CoinMarketCap response"):
+		return "coinmarketcap_schema"
 	case strings.Contains(message, "invalid CoinPaprika response"):
 		return "coinpaprika_schema"
 	case strings.Contains(message, "CoinPaprika rate is missing"):
@@ -210,7 +228,11 @@ type upstreamQuote struct {
 }
 
 type upstream struct {
-	client *http.Client
+	client               *http.Client
+	coinMarketCapKey     string
+	coinMarketCapMu      sync.Mutex
+	coinMarketCapCache   map[string]map[string]rates.ProviderResult
+	coinMarketCapExpires map[string]time.Time
 
 	coinGeckoMu      sync.Mutex
 	coinGeckoCache   map[string]map[string]rates.ProviderResult
@@ -233,9 +255,101 @@ func (u *upstream) Fetch(ctx context.Context, provider, currency string, configu
 		return u.coinGecko(ctx, currency, configured)
 	case "coinpaprika":
 		return u.coinPaprika(ctx, currency, configured)
+	case "coinmarketcap":
+		return u.coinMarketCap(ctx, currency, configured)
 	default:
 		return rates.ProviderResult{}, errors.New("unknown rate provider")
 	}
+}
+
+func (u *upstream) coinMarketCap(ctx context.Context, currency string, configured asset) (rates.ProviderResult, error) {
+	u.coinMarketCapMu.Lock()
+	defer u.coinMarketCapMu.Unlock()
+	if batch, ok := u.coinMarketCapCache[currency]; ok && u.coinMarketCapExpires[currency].After(time.Now()) {
+		if value, found := batch[configured.ID]; found {
+			return value, nil
+		}
+	}
+	ids := sortedCoinMarketCapIDs()
+	endpoint := coinMarketCapURL
+	if u.coinMarketCapKey != "" {
+		endpoint = coinMarketCapKeyedURL
+	}
+	raw, err := u.getTypedWithKey(ctx, fmt.Sprintf(endpoint, strings.Join(ids, ","), currency), "application/json", u.coinMarketCapKey)
+	if err != nil {
+		return rates.ProviderResult{}, err
+	}
+	var envelope struct {
+		Data []struct {
+			ID          int    `json:"id"`
+			LastUpdated string `json:"last_updated"`
+			Quotes      []struct {
+				Symbol      string      `json:"symbol"`
+				Price       json.Number `json:"price"`
+				LastUpdated string      `json:"last_updated"`
+			} `json:"quote"`
+		} `json:"data"`
+		Status struct {
+			Timestamp string          `json:"timestamp"`
+			ErrorCode json.RawMessage `json:"error_code"`
+		} `json:"status"`
+	}
+	if json.Unmarshal(raw, &envelope) != nil || (string(envelope.Status.ErrorCode) != `"0"` && string(envelope.Status.ErrorCode) != "0") {
+		return rates.ProviderResult{}, errors.New("invalid CoinMarketCap response")
+	}
+	observedAt, err := time.Parse(time.RFC3339Nano, envelope.Status.Timestamp)
+	if err != nil || time.Since(observedAt) > 5*time.Minute || observedAt.After(time.Now().Add(time.Minute)) {
+		return rates.ProviderResult{}, errors.New("invalid CoinMarketCap response")
+	}
+	quotes := make(map[string]upstreamQuote, len(envelope.Data))
+	for _, item := range envelope.Data {
+		id := fmt.Sprint(item.ID)
+		if len(item.Quotes) != 1 || item.Quotes[0].Symbol != currency || quotes[id].Price != nil {
+			return rates.ProviderResult{}, errors.New("invalid CoinMarketCap response")
+		}
+		price, ok := new(big.Rat).SetString(item.Quotes[0].Price.String())
+		if !ok || price.Sign() <= 0 {
+			return rates.ProviderResult{}, errors.New("invalid CoinMarketCap response")
+		}
+		assetUpdated, assetErr := time.Parse(time.RFC3339Nano, item.LastUpdated)
+		quoteUpdated, quoteErr := time.Parse(time.RFC3339Nano, item.Quotes[0].LastUpdated)
+		if assetErr != nil || quoteErr != nil || assetUpdated.After(time.Now().Add(10*time.Second)) || quoteUpdated.After(time.Now().Add(10*time.Second)) {
+			return rates.ProviderResult{}, errors.New("invalid CoinMarketCap response")
+		}
+		if quoteUpdated.After(assetUpdated) {
+			quoteUpdated = assetUpdated
+		}
+		quotes[id] = upstreamQuote{Price: price, ObservedAt: quoteUpdated.UTC()}
+	}
+	batch := make(map[string]rates.ProviderResult, len(assets))
+	for _, candidate := range assets {
+		id := coinMarketCapIDs[candidate.CoinGeckoID]
+		quote, found := quotes[id]
+		if !found {
+			continue
+		}
+		value, normalizeErr := normalizedRational(candidate.ID, currency, "coinmarketcap", quote.Price, quote.ObservedAt, raw)
+		if normalizeErr != nil {
+			return rates.ProviderResult{}, normalizeErr
+		}
+		batch[candidate.ID] = value
+	}
+	u.coinMarketCapCache[currency] = batch
+	u.coinMarketCapExpires[currency] = time.Now().Add(time.Minute)
+	value, found := batch[configured.ID]
+	if !found {
+		return rates.ProviderResult{}, errors.New("CoinMarketCap rate is missing")
+	}
+	return value, nil
+}
+
+func sortedCoinMarketCapIDs() []string {
+	ids := make([]string, 0, len(coinMarketCapIDs))
+	for _, id := range coinMarketCapIDs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func (u *upstream) coinGecko(ctx context.Context, currency string, configured asset) (rates.ProviderResult, error) {
@@ -521,6 +635,10 @@ func (u *upstream) getXML(ctx context.Context, endpoint string) ([]byte, error) 
 }
 
 func (u *upstream) getTyped(ctx context.Context, endpoint, expectedType string) ([]byte, error) {
+	return u.getTypedWithKey(ctx, endpoint, expectedType, "")
+}
+
+func (u *upstream) getTypedWithKey(ctx context.Context, endpoint, expectedType, apiKey string) ([]byte, error) {
 	if u == nil || u.client == nil {
 		return nil, errors.New("rate HTTP client is missing")
 	}
@@ -530,6 +648,9 @@ func (u *upstream) getTyped(ctx context.Context, endpoint, expectedType string) 
 	}
 	request.Header.Set("Accept", expectedType)
 	request.Header.Set("User-Agent", "ocrypt-rate-gateway/1")
+	if apiKey != "" {
+		request.Header.Set("X-CMC_PRO_API_KEY", apiKey)
+	}
 	result, err := u.client.Do(request)
 	if err != nil {
 		return nil, err

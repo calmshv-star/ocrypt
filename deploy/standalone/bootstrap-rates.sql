@@ -113,3 +113,6 @@ SELECT pg_temp.activate_rate_snapshot(
   CROSS JOIN (VALUES('RUB'),('USD'),('EUR'),('KZT'),('INR'),('CNY')) AS currencies(currency);
 
 COMMIT;
+
+-- Keep fresh installs and upgraded deployments on the same 2-of-3 catalog.
+\ir activate-coinmarketcap-rates.sql

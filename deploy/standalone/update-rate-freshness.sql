@@ -29,13 +29,13 @@ BEGIN
   END IF;
   SELECT * INTO STRICT old_snapshot FROM platform_config_snapshots WHERE id=prior_snapshot_id;
   IF (old_snapshot.payload->>'max_age_seconds')::integer=2100
-     AND (requested_kind<>'rate_policy' OR (old_snapshot.payload->>'poll_interval_seconds')::integer=1800) THEN
+     AND (requested_kind<>'rate_policy' OR (old_snapshot.payload->>'poll_interval_seconds')::integer=300) THEN
     RETURN old_snapshot.id;
   END IF;
 
   next_payload := jsonb_set(old_snapshot.payload,'{max_age_seconds}','2100'::jsonb,false);
   IF requested_kind='rate_policy' THEN
-    next_payload := jsonb_set(next_payload,'{poll_interval_seconds}','1800'::jsonb,true);
+    next_payload := jsonb_set(next_payload,'{poll_interval_seconds}','300'::jsonb,true);
   END IF;
   INSERT INTO platform_config_change_requests(
     id,scope_id,kind,logical_key,version,based_on_version,payload,payload_hash,status,reason,

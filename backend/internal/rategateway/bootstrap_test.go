@@ -22,6 +22,9 @@ func TestStandaloneBootstrapAdmitsCatalogButRuntimeTargetsOnlyRUB(t *testing.T) 
 	if !strings.Contains(mainBootstrap, `\ir bootstrap-rates.sql`) {
 		t.Fatal("standalone bootstrap does not automatically admit default rates")
 	}
+	if !strings.Contains(bootstrap, `\ir activate-coinmarketcap-rates.sql`) || !strings.Contains(publicGateway, "coinmarketcap") {
+		t.Fatal("standalone deployment does not activate the third rate provider")
+	}
 	if strings.Contains(bootstrap, "api.pay.example.com") || !strings.Contains(bootstrap, ":'rate_gateway_origin'") {
 		t.Fatal("rate bootstrap is not bound to the installer's public HTTPS origin")
 	}

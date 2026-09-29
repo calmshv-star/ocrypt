@@ -119,6 +119,28 @@ func TestWorkerFailsClosedOnDivergence(t *testing.T) {
 	}
 }
 
+func TestWorkerAdmitsTwoAgreeingSourcesWhenThirdIsOutlier(t *testing.T) {
+	now := time.Now().UTC()
+	worker, store := workerFixture(t, map[string][2]string{"a": {"100", "1"}, "b": {"101", "1"}, "c": {"150", "1"}}, now)
+	success, err := worker.RunTarget(context.Background(), Target{PolicyKey: "eth-usd"})
+	if err != nil || !success || len(store.commits) != 1 {
+		t.Fatalf("success=%v err=%v commits=%d", success, err, len(store.commits))
+	}
+	collection := store.commits[0]
+	if collection.Tick.SourceCount != 2 || len(collection.Observations) != 2 || collection.Tick.Price.Numerator.String() != "100" {
+		t.Fatalf("outlier influenced admitted rate: %#v", collection.Tick)
+	}
+}
+
+func TestWorkerRejectsThreeDivergentSources(t *testing.T) {
+	now := time.Now().UTC()
+	worker, store := workerFixture(t, map[string][2]string{"a": {"100", "1"}, "b": {"110", "1"}, "c": {"120", "1"}}, now)
+	success, err := worker.RunTarget(context.Background(), Target{PolicyKey: "eth-usd"})
+	if success || err == nil || len(store.commits) != 0 || len(store.failures) != 1 || store.failures[0] != "divergent" {
+		t.Fatalf("divergent rates admitted: success=%v err=%v failures=%v", success, err, store.failures)
+	}
+}
+
 func TestWorkerExcludesStaleFutureAndUnavailableSources(t *testing.T) {
 	now := time.Now().UTC()
 	worker, store := workerFixture(t, map[string][2]string{"a": {"100", "1"}, "b": {"101", "1"}, "c": {"100", "1"}}, now)
