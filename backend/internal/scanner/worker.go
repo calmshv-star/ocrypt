@@ -81,6 +81,7 @@ type Lease struct {
 }
 type CursorStore interface {
 	Acquire(context.Context, string, string, string, time.Duration) (Lease, error)
+	Renew(context.Context, Lease, time.Duration) error
 	Commit(context.Context, Lease, RangeBatch) error
 	RewindReorg(context.Context, Lease, RangeBatch, ReorgError) error
 	Release(context.Context, Lease) error
@@ -132,13 +133,50 @@ func (w Worker) RunOnce(ctx context.Context) (RangeBatch, error) {
 	if err != nil {
 		return RangeBatch{}, err
 	}
+	workCtx, cancelWork := context.WithCancel(ctx)
+	renewDone := make(chan error, 1)
+	go func() {
+		interval := w.LeaseDuration / 3
+		if interval < time.Second {
+			interval = time.Second
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-workCtx.Done():
+				renewDone <- nil
+				return
+			case <-ticker.C:
+				if err := w.Store.Renew(workCtx, lease, w.LeaseDuration); err != nil {
+					if workCtx.Err() != nil {
+						renewDone <- nil
+					} else {
+						renewDone <- fmt.Errorf("renew scanner lease: %w", err)
+					}
+					cancelWork()
+					return
+				}
+			}
+		}
+	}()
+	renewStopped := false
+	stopRenewal := func() error {
+		if renewStopped {
+			return nil
+		}
+		renewStopped = true
+		cancelWork()
+		return <-renewDone
+	}
+	defer func() { _ = stopRenewal() }()
 	committed := false
 	defer func() {
 		if !committed {
 			_ = w.Store.Release(context.Background(), lease)
 		}
 	}()
-	heads, err := w.Source.Heads(ctx)
+	heads, err := w.Source.Heads(workCtx)
 	if err != nil {
 		return RangeBatch{}, err
 	}
@@ -167,6 +205,9 @@ func (w Worker) RunOnce(ctx context.Context) (RangeBatch, error) {
 		}
 	}
 	if safe < from {
+		if renewErr := stopRenewal(); renewErr != nil {
+			return RangeBatch{}, renewErr
+		}
 		committed = true
 		_ = w.Store.Release(ctx, lease)
 		return RangeBatch{}, nil
@@ -175,7 +216,10 @@ func (w Worker) RunOnce(ctx context.Context) (RangeBatch, error) {
 	if to > safe {
 		to = safe
 	}
-	batch, err := w.Source.ScanRange(ctx, from, to)
+	batch, err := w.Source.ScanRange(workCtx, from, to)
+	if renewErr := stopRenewal(); renewErr != nil {
+		return RangeBatch{}, renewErr
+	}
 	if err != nil {
 		if !Retryable(err) {
 			if gapErr := w.Store.RecordGap(ctx, w.ChainID, from, to, "provider_error"); gapErr == nil && w.Observer != nil {

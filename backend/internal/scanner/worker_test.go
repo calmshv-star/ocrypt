@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,6 +49,46 @@ func (observer *observerFixture) IncScannerReorg() { observer.reorgs++ }
 
 func (s *storeFixture) Acquire(context.Context, string, string, string, time.Duration) (Lease, error) {
 	return s.lease, nil
+}
+func (s *storeFixture) Renew(context.Context, Lease, time.Duration) error { return nil }
+
+type leaseRenewStore struct {
+	storeFixture
+	renewals atomic.Int32
+}
+
+func (s *leaseRenewStore) Renew(context.Context, Lease, time.Duration) error {
+	s.renewals.Add(1)
+	return nil
+}
+
+type slowSourceFixture struct {
+	sourceFixture
+	delay time.Duration
+}
+
+func (s slowSourceFixture) ScanRange(ctx context.Context, _, _ uint64) (RangeBatch, error) {
+	select {
+	case <-time.After(s.delay):
+		return s.batch, nil
+	case <-ctx.Done():
+		return RangeBatch{}, ctx.Err()
+	}
+}
+
+func TestScannerRenewsLeaseWhileProviderRangeIsSlow(t *testing.T) {
+	now := time.Now().UTC()
+	store := &leaseRenewStore{storeFixture: storeFixture{lease: Lease{Height: 0}}}
+	source := slowSourceFixture{sourceFixture: sourceFixture{
+		heads: []ProviderHead{{Provider: "a", ChainID: "chain", GenesisHash: "g", SafeHeight: 1, ObservedAt: now}},
+		batch: RangeBatch{From: 1, To: 1, Blocks: []Block{{Height: 1, Hash: "h1", Time: now}}},
+	}, delay: 1200 * time.Millisecond}
+	_, err := (Worker{ChainID: "chain", GenesisHash: "g", Source: source, Store: store,
+		Quorum: 1, Overlap: 1, RangeSize: 2, LeaseDuration: 1500 * time.Millisecond,
+		Now: func() time.Time { return now }}).RunOnce(context.Background())
+	if err != nil || store.renewals.Load() == 0 || store.commits != 1 {
+		t.Fatalf("renewals=%d commits=%d err=%v", store.renewals.Load(), store.commits, err)
+	}
 }
 func (s *storeFixture) Commit(_ context.Context, _ Lease, batch RangeBatch) error {
 	s.commits++

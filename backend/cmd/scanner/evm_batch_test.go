@@ -5,13 +5,14 @@ import (
 	"testing"
 )
 
-func TestEVMBlockBatchConfigOptInIsBoundedAndEthereumOnly(t *testing.T) {
+func TestEVMBlockBatchConfigOptInIsBoundedToEthereumAndBase(t *testing.T) {
 	for _, test := range []struct {
 		name, size, chain, filtered, internal string
 		want                                  uint8
 	}{
 		{"default", "", "eip155:1", "true", "false", 1},
 		{"batch_four", "4", "eip155:1", "true", "false", 4},
+		{"base_batch_four", "4", "eip155:8453", "true", "false", 4},
 		{"other_chain_unchanged", "", "eip155:56", "true", "false", 1},
 		{"other_chain_not_admitted", "4", "eip155:56", "true", "false", 0},
 		{"full_scan_not_admitted", "4", "eip155:1", "false", "false", 0},

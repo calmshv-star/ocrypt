@@ -279,6 +279,7 @@ type scannerConfig struct {
 	providerKind, providerMode, nativeAssetID                                        string
 	providerURLs, providerIDs                                                        []string
 	providerHeadTags                                                                 []string
+	evmInternalTraceURLs                                                             []string
 	watchedAddresses                                                                 []string
 	assets                                                                           map[string]providers.AssetConfig
 	providerHeaders                                                                  []http.Header
@@ -304,9 +305,10 @@ func loadScannerConfig() (scannerConfig, error) {
 		healthAddress: env("SCANNER_HEALTH_ADDRESS", ":9091"), providerKind: env("SCANNER_PROVIDER_KIND", "normalized-gateway"),
 		providerMode: env("SCANNER_PROVIDER_MODE", "quorum"),
 		providerURLs: splitNonempty(os.Getenv("SCANNER_PROVIDER_URLS")), providerIDs: splitNonempty(os.Getenv("SCANNER_PROVIDER_IDS")),
-		providerHeadTags: splitNonempty(os.Getenv("SCANNER_PROVIDER_HEAD_TAGS")),
-		watchedAddresses: splitNonempty(os.Getenv("SCANNER_WATCHED_ADDRESSES")),
-		nativeAssetID:    os.Getenv("SCANNER_NATIVE_ASSET_ID"), gasFreeContracts: splitNonempty(os.Getenv("SCANNER_GASFREE_CONTRACTS")),
+		providerHeadTags:     splitNonempty(os.Getenv("SCANNER_PROVIDER_HEAD_TAGS")),
+		evmInternalTraceURLs: splitNonempty(os.Getenv("SCANNER_EVM_INTERNAL_TRACE_URLS")),
+		watchedAddresses:     splitNonempty(os.Getenv("SCANNER_WATCHED_ADDRESSES")),
+		nativeAssetID:        os.Getenv("SCANNER_NATIVE_ASSET_ID"), gasFreeContracts: splitNonempty(os.Getenv("SCANNER_GASFREE_CONTRACTS")),
 		gasFreeFeeCollectors: splitNonempty(os.Getenv("SCANNER_GASFREE_FEE_COLLECTORS")),
 	}
 	var err error
@@ -361,8 +363,8 @@ func loadScannerConfig() (scannerConfig, error) {
 		return config, errors.New("SCANNER_EVM_BLOCK_BATCH_SIZE must be between 1 and 4")
 	}
 	config.evmBlockBatchSize = uint8(blockBatchSize)
-	if blockBatchSize > 1 && (!config.staticConfig || config.chainID != "eip155:1" || config.providerKind != "evm-jsonrpc" || !config.addressFiltered || config.includeInternal) {
-		return config, errors.New("EVM block batching is currently admitted only for the static address-filtered Ethereum scanner without internal traces")
+	if blockBatchSize > 1 && (!config.staticConfig || (config.chainID != "eip155:1" && config.chainID != "eip155:8453") || config.providerKind != "evm-jsonrpc" || !config.addressFiltered || config.includeInternal) {
+		return config, errors.New("EVM block batching is admitted only for static address-filtered Ethereum or Base scanning without block traces")
 	}
 	if config.quorum, err = positiveInt("SCANNER_QUORUM", 2); err != nil {
 		return config, err
@@ -407,6 +409,9 @@ func loadScannerConfig() (scannerConfig, error) {
 	}
 	if config.providerMode != "quorum" && config.providerMode != "failover" {
 		return config, errors.New("SCANNER_PROVIDER_MODE must be quorum or failover")
+	}
+	if len(config.evmInternalTraceURLs) != 0 && (len(config.evmInternalTraceURLs) != 2 || !config.staticConfig || config.providerKind != "evm-jsonrpc" || !config.addressFiltered || config.includeInternal || config.nativeAssetID == "") {
+		return config, errors.New("SCANNER_EVM_INTERNAL_TRACE_URLS requires exactly two independent EVM trace endpoints in static address-filtered mode")
 	}
 	if config.providerMode == "failover" && config.quorum != 1 {
 		return config, errors.New("SCANNER_QUORUM must be 1 in failover mode")
@@ -465,6 +470,25 @@ func scannerSource(config scannerConfig) (scanner.Source, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	if len(config.evmInternalTraceURLs) == 2 && len(config.watchedAddresses) > 0 {
+		var traceSources [2]*providers.EVMSource
+		for index, endpoint := range config.evmInternalTraceURLs {
+			traceSources[index], err = providers.NewEVMSource(providers.EVMConfig{
+				HTTP:       providers.HTTPConfig{Endpoint: endpoint, Timeout: 20 * time.Second, MinInterval: config.providerMinInterval},
+				ProviderID: fmt.Sprintf("internal-trace-%d", index+1), ChainID: config.chainID,
+				GenesisHash: config.genesisHash, HeadTag: "finalized",
+				NativeAssetID: config.nativeAssetID, NativeDecimals: config.nativeDecimals,
+				IncludeInternal: true, AddressFiltered: true, WatchedAddresses: config.watchedAddresses,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("initialize independent internal trace provider %d: %w", index+1, err)
+			}
+		}
+		source, err = providers.NewEVMInternalFilter(source, traceSources[0], traceSources[1], config.chainID, config.genesisHash, config.watchedAddresses)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if config.addressFiltered {
 		return providers.NewDestinationFilterSource(source, config.watchedAddresses)

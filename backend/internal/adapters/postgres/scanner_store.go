@@ -57,6 +57,22 @@ func (s *ScannerStore) Acquire(ctx context.Context, chainID, shard, owner string
 	return lease, err
 }
 
+// Renew extends the same fenced lease without changing its version. A slow
+// provider range must not lose ownership before its canonical batch commits.
+func (s *ScannerStore) Renew(ctx context.Context, lease scanner.Lease, duration time.Duration) error {
+	if duration <= 0 {
+		return errors.New("invalid scanner lease duration")
+	}
+	command, err := s.pool.Exec(ctx, `UPDATE scanner_cursors SET locked_until=clock_timestamp()+$1::double precision*interval '1 second',heartbeat_at=clock_timestamp() WHERE chain_id=$2 AND scanner_shard=$3 AND capability=$4 AND locked_by=$5 AND version=$6 AND locked_until>clock_timestamp()`, duration.Seconds(), lease.ChainID, lease.Shard, s.capability, lease.Owner, lease.Version)
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() != 1 {
+		return errors.New("scanner lease was lost")
+	}
+	return nil
+}
+
 func (s *ScannerStore) Commit(ctx context.Context, lease scanner.Lease, batch scanner.RangeBatch) error {
 	if lease.ChainID == "" || lease.Shard == "" || lease.Owner == "" || len(batch.Blocks) == 0 || batch.To < batch.From || batch.Blocks[0].Height != batch.From || batch.Blocks[len(batch.Blocks)-1].Height != batch.To {
 		return errors.New("invalid scanner commit")
