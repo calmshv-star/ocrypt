@@ -485,10 +485,23 @@ func scannerSource(config scannerConfig) (scanner.Source, error) {
 				return nil, fmt.Errorf("initialize independent internal trace provider %d: %w", index+1, err)
 			}
 		}
-		source, err = providers.NewEVMInternalFilter(source, traceSources[0], traceSources[1], config.chainID, config.genesisHash, config.watchedAddresses)
+		filter, filterErr := providers.NewEVMInternalFilter(source, traceSources[0], traceSources[1], config.chainID, config.genesisHash, config.watchedAddresses)
+		if filterErr != nil {
+			return nil, filterErr
+		}
+		if len(sources) < 2 {
+			return nil, errors.New("internal transfer detection requires two ordinary EVM balance providers")
+		}
+		firstProbe, firstOK := sources[0].(*providers.EVMSource)
+		secondProbe, secondOK := sources[1].(*providers.EVMSource)
+		if !firstOK || !secondOK {
+			return nil, errors.New("internal transfer balance providers are not EVM sources")
+		}
+		err = filter.WithBalanceProbes(firstProbe, secondProbe)
 		if err != nil {
 			return nil, err
 		}
+		source = filter
 	}
 	if config.addressFiltered {
 		return providers.NewDestinationFilterSource(source, config.watchedAddresses)

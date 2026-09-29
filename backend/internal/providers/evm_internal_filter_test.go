@@ -49,6 +49,9 @@ func TestEVMInternalFilterLiveBasePayment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := filter.WithBalanceProbes(makeSource("https://mainnet.base.org", "balance-a"), makeSource("https://base.gateway.tenderly.co", "balance-b")); err != nil {
+		t.Fatal(err)
+	}
 	batch, err := filter.ScanRange(t.Context(), 51925478, 51925478)
 	if err != nil {
 		t.Fatal(err)
@@ -58,12 +61,56 @@ func TestEVMInternalFilterLiveBasePayment(t *testing.T) {
 		batch.Events[0].Kind != "native_internal" {
 		t.Fatalf("real Base payment was not detected: %+v", batch.Events)
 	}
-	quorum, err := NewQuorumSource([]scanner.Source{filter.tracers[0], filter.tracers[1]}, 2)
+}
+
+// Opt-in end-to-end catch-up window: the ordinary scanner intentionally sees
+// no internal ETH, then balance bisection discovers the exact Base block.
+func TestEVMInternalFilterLiveBaseThirtyTwoBlockWindow(t *testing.T) {
+	firstURL, secondURL := os.Getenv("OCRYPT_TEST_BASE_TRACE_A"), os.Getenv("OCRYPT_TEST_BASE_TRACE_B")
+	if firstURL == "" || secondURL == "" {
+		t.Skip("two independent trace URLs are required")
+	}
+	const chainID = "eip155:8453"
+	const genesis = "0xf712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd"
+	const wallet = "0x8077444bed90f3ca9157ab8bf8d2c51103b2ce89"
+	const tx = "0xb97a0ea84adf64093246f3c1576e6f4534659d16c1f1778969c8ea55a9dd44fb"
+	makeSource := func(url, id string, internal bool) *EVMSource {
+		result, err := NewEVMSource(EVMConfig{HTTP: HTTPConfig{Endpoint: url, Timeout: 20 * time.Second},
+			ProviderID: id, ChainID: chainID, GenesisHash: genesis, HeadTag: "finalized",
+			NativeAssetID: "eth-base", NativeDecimals: 18, IncludeInternal: internal,
+			AddressFiltered: true, WatchedAddresses: []string{wallet}, Overlap: 2, BlockBatchSize: 4})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	firstProbe := makeSource("https://mainnet.base.org", "base-official", false)
+	secondProbe := makeSource("https://base.gateway.tenderly.co", "base-tenderly", false)
+	thirdProvider := makeSource("https://base-mainnet.g.alchemy.com/public", "base-alchemy", false)
+	base, err := NewQuorumSource([]scanner.Source{firstProbe, secondProbe, thirdProvider}, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := quorum.LookupTransaction(t.Context(), chainID, tx); err != nil {
-		t.Fatalf("proof fastlane cannot verify this transfer across providers: %v", err)
+	filter, err := NewEVMInternalFilter(base, makeSource(firstURL, "trace-a", true),
+		makeSource(secondURL, "trace-b", true), chainID, genesis, []string{wallet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := filter.WithBalanceProbes(firstProbe, secondProbe); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := filter.ScanRange(t.Context(), 51925456, 51925487)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var matches int
+	for _, event := range batch.Events {
+		if event.Identity.TransactionID == tx && event.Kind == "native_internal" && event.Amount.String() == "26354000000000000" {
+			matches++
+		}
+	}
+	if matches != 1 {
+		t.Fatalf("real 32-block Base scan detected %d matching internal transfers", matches)
 	}
 }
 func (s internalBaseFixture) ScanRange(context.Context, uint64, uint64) (scanner.RangeBatch, error) {
@@ -88,12 +135,25 @@ func TestEVMInternalFilterRequiresTwoMatchingTransactionProofs(t *testing.T) {
 		Height: 1, Hash: blockHash, ParentHash: genesis, Time: time.Unix(100, 0).UTC(),
 	}}}}
 	marshal := func(value any) json.RawMessage { data, _ := json.Marshal(value); return data }
-	source := func(endpoint string, traceValue string) *EVMSource {
+	source := func(endpoint, traceValue, endBalance string, traceCalls *int) *EVMSource {
 		client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
-			return 200, rpcResult(t, request, func(method string, _ []json.RawMessage) json.RawMessage {
+			return 200, rpcResult(t, request, func(method string, params []json.RawMessage) json.RawMessage {
 				switch method {
 				case "eth_chainId":
 					return marshal("0x1")
+				case "eth_getBalance":
+					var height string
+					if err := json.Unmarshal(params[1], &height); err != nil {
+						t.Fatal(err)
+					}
+					if height == "0x0" {
+						return marshal("0x0")
+					}
+					return marshal(endBalance)
+				case "eth_getTransactionCount":
+					return marshal("0x0")
+				case "eth_getCode":
+					return marshal("0x")
 				case "eth_getBlockByNumber":
 					return marshal(fixture.Block)
 				case "eth_getTransactionByHash":
@@ -103,6 +163,9 @@ func TestEVMInternalFilterRequiresTwoMatchingTransactionProofs(t *testing.T) {
 				case "debug_traceTransaction":
 					return marshal(fixture.Traces[0].Result)
 				case "trace_filter":
+					if traceCalls != nil {
+						*traceCalls++
+					}
 					return marshal([]any{map[string]any{
 						"action": map[string]any{"from": "0x2222222222222222222222222222222222222222",
 							"to": watched, "value": traceValue, "callType": "call"},
@@ -124,8 +187,9 @@ func TestEVMInternalFilterRequiresTwoMatchingTransactionProofs(t *testing.T) {
 		}
 		return result
 	}
-	first := source("https://trace-a.example", "0x5")
-	second := source("https://trace-b.example", "0x5")
+	firstCalls, secondCalls := 0, 0
+	first := source("https://trace-a.example", "0x5", "0x5", &firstCalls)
+	second := source("https://trace-b.example", "0x5", "0x5", &secondCalls)
 	filter, err := NewEVMInternalFilter(base, first, second, "eip155:1", genesis, []string{watched})
 	if err != nil {
 		t.Fatal(err)
@@ -138,11 +202,23 @@ func TestEVMInternalFilterRequiresTwoMatchingTransactionProofs(t *testing.T) {
 		batch.Events[0].Identity.EventIndex != "trace:0" || batch.Events[0].Amount.String() != "5" {
 		t.Fatalf("internal payment was not normalized: %+v", batch.Events)
 	}
-	disagree, err := NewEVMInternalFilter(base, first, source("https://trace-c.example", "0x6"), "eip155:1", genesis, []string{watched})
+	disagree, err := NewEVMInternalFilter(base, first, source("https://trace-c.example", "0x6", "0x5", nil), "eip155:1", genesis, []string{watched})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := disagree.ScanRange(context.Background(), 1, 1); err == nil {
 		t.Fatal("scanner advanced despite disagreement between trace providers")
+	}
+	if firstCalls == 0 || secondCalls == 0 {
+		t.Fatal("unexplained balance change did not trigger both trace providers")
+	}
+	noMovementCalls := 0
+	noMovement, err := NewEVMInternalFilter(base, source("https://trace-d.example", "0x0", "0x0", &noMovementCalls),
+		source("https://trace-e.example", "0x0", "0x0", &noMovementCalls), "eip155:1", genesis, []string{watched})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if batch, err := noMovement.ScanRange(context.Background(), 1, 1); err != nil || len(batch.Events) != 0 || noMovementCalls != 0 {
+		t.Fatalf("idle account used expensive tracing: events=%d trace_calls=%d err=%v", len(batch.Events), noMovementCalls, err)
 	}
 }
