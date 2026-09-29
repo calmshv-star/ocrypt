@@ -16,7 +16,7 @@ The rate worker is a fail-closed data plane. It never reads draft, approved, or 
 {"provider_ref":"normalized-coingecko","endpoint":"https://rates.example.net/v1/eth-usd","base_asset":"ETH","quote_asset":"USD","credential_ref":"coingecko/token","max_age_seconds":45,"timeout_ms":5000,"max_response_bytes":65536}
 ```
 
-`base_asset` and `quote_asset` are mandatory at runtime even though older control-plane payloads may omit them. Source keys must be distinct; quorum is 2–32 and cannot exceed the source count. Omitted future tolerance and polling interval default to 5 and 15 seconds. An explicit future tolerance of zero is strict zero. The endpoint must be HTTPS without credentials, query, or fragment. It is a normalized adapter endpoint, not an arbitrary exchange API.
+`base_asset` and `quote_asset` are mandatory at runtime even though older control-plane payloads may omit them. Source keys and provider references must be distinct; quorum is 2–32 and cannot exceed the source count. Omitted future tolerance and polling interval default to 5 and 15 seconds. An explicit future tolerance of zero is strict zero. The endpoint must be HTTPS without credentials, query, or fragment. It is a normalized adapter endpoint, not an arbitrary exchange API.
 
 The provider response is defined by `contracts/rate-provider-v1.schema.json`. Price is quote-fiat units per one whole base asset, encoded as a positive uint256-bounded numerator/denominator pair, never a JSON number or float. The planner computes `fiat / price` with both currency scales and rounds the asset atomic amount up. The worker checks the pair, source freshness, future timestamps, distinct-source quorum, and the exact maximum spread around a deterministic median. For an even source count it conservatively selects the lower observed median; it never averages, rounds, or synthesizes a price. Any missing configuration, stale/future observation, insufficient quorum, or excessive spread produces no tick.
 
@@ -27,16 +27,22 @@ Redirects, proxies, private/link-local/loopback/reserved IPs, and mixed public/p
 ## Deployment contract
 
 The standalone bootstrap admits `RUB`, `USD`, `EUR`, `KZT`, `INR`, and `CNY`,
-but the supplied worker enables only the 21 RUB targets by default. Other
+but the supplied worker enables only the 26 RUB targets by default. Other
 currencies cause no background or upstream traffic until a deployment adds
 their policy keys to `RATE_TARGETS_JSON`. A successful pair is collected once
-per 30 minutes. Route creation immediately reuses a tick younger than 30
-minutes; only a missing or stale pair queues one deduplicated on-demand
+per 5 minutes. Route creation immediately reuses a tick within its admitted
+maximum age; only a missing or stale pair queues one deduplicated on-demand
 collection. The API’s bounded normalized-rate gateway batches and
-caches the public upstream calls: CoinGecko and CoinPaprika remain the two
-crypto observations, while the official National Bank of Kazakhstan USD/KZT
-feed supplies the KZT cross-rate because neither crypto provider quotes KZT
-directly. The legacy two-segment gateway path remains a RUB alias for rolling
+caches the public upstream calls: CoinGecko, CoinPaprika, and CoinMarketCap
+are independent crypto observations. Any two fresh observations within the
+configured spread are sufficient. A missing source is excluded; if the full
+set diverges, the tightest agreeing quorum is selected. CoinMarketCap uses
+its keyless public API by default (an optional API key switches to its keyed
+endpoint), with stable coin IDs and original asset/quote timestamps. The
+official National Bank of Kazakhstan USD/KZT feed supplies the KZT cross-rate
+for CoinGecko and CoinPaprika; CoinMarketCap quotes KZT directly. See
+[rate-provider recovery](../../deploy/standalone/rate-provider-recovery.md) for activation
+and rollout checks. The legacy two-segment gateway path remains a RUB alias for rolling
 upgrades. `rate_gateway_origin` is mandatory during standalone bootstrap and
 must be the externally reachable HTTPS API origin.
 
@@ -46,6 +52,6 @@ Provision the NOLOGIN group role `rate_runtime_worker` before migration 000007 s
 
 `GET /healthz` checks database liveness. `GET /readyz` returns only bounded counts/timestamps and is ready only when every configured target has an unexpired recent tick and no target is dead-lettered. Use `/readyz` for traffic/readiness and alert on `dead_lettered_targets > 0` or sustained unready state.
 
-Jobs use fenced leases. Failures back off exponentially and move to immutable dead-letter history at the configured attempt limit. Reset a dead-letter only after an authorized operator fixes/activates configuration or provider service and records the incident reference; never edit/delete immutable observations, ticks, joins, or dead-letter rows.
+Jobs use fenced leases. Failures back off exponentially. Transient provider, freshness, and quorum failures reset their attempt budget with a minimum five-minute cooldown at the configured limit, so a temporary outage does not permanently disable a currency. Non-retryable failures move to immutable dead-letter history at the attempt limit. Reset a dead-letter only after an authorized operator fixes/activates configuration or provider service and records the incident reference; never edit/delete immutable observations, ticks, joins, or dead-letter rows.
 
 Each successful serializable transaction writes source observations, one immutable `admitted_rate_ticks` row, its joins, exact rational values, raw-response SHA-256 hashes, source/policy snapshot IDs, and fence tokens. The same transaction supersedes the previous active row and projects the admitted tick into the migration-000001 `asset_rate_ticks` contract actually read by `PersistedPlanner`; a partial unique index permits one active row per asset/fiat pair. A stable pair binding prevents two policy keys from oscillating the same pair. A stale or failed admission rolls back both supersede and projection, then the job lease is released/backed off.

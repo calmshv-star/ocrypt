@@ -141,6 +141,29 @@ func TestWorkerRejectsThreeDivergentSources(t *testing.T) {
 	}
 }
 
+func TestWorkerAdmitsTwoSourcesWhenAnyThirdIsUnavailable(t *testing.T) {
+	for _, unavailable := range []string{"a", "b", "c"} {
+		t.Run(unavailable, func(t *testing.T) {
+			now := time.Now().UTC()
+			worker, store := workerFixture(t, map[string][2]string{"a": {"100", "1"}, "b": {"101", "1"}, "c": {"100", "1"}}, now)
+			worker.Fetcher.(*mapFetcher).errors[unavailable] = ErrUnavailable
+			success, err := worker.RunTarget(context.Background(), Target{PolicyKey: "eth-usd"})
+			if err != nil || !success || len(store.commits) != 1 || len(store.failures) != 0 {
+				t.Fatalf("success=%v err=%v commits=%d failures=%v", success, err, len(store.commits), store.failures)
+			}
+			collection := store.commits[0]
+			if collection.Tick.SourceCount != 2 || len(collection.Observations) != 2 {
+				t.Fatalf("expected two independent observations: %#v", collection.Tick)
+			}
+			for _, observation := range collection.Observations {
+				if observation.SourceKey == unavailable {
+					t.Fatal("unavailable source counted toward quorum")
+				}
+			}
+		})
+	}
+}
+
 func TestWorkerExcludesStaleFutureAndUnavailableSources(t *testing.T) {
 	now := time.Now().UTC()
 	worker, store := workerFixture(t, map[string][2]string{"a": {"100", "1"}, "b": {"101", "1"}, "c": {"100", "1"}}, now)

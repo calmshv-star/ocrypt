@@ -23,10 +23,19 @@ fresh bootstrap. The worker accepts two agreeing independent providers when
 the third is unavailable or an outlier; the same provider cannot count twice.
 Transient outages continue retrying after cooldown.
 
-Verify unexpired admitted ticks for every configured target, their joins to
-two distinct provider observations, and creation of unpaid smoke invoices for
-USDT, TRX, SOL, GRAM and ETH. Keep smoke customer IDs separate from real users,
-and cancel the unpaid smoke invoices afterwards. Do not declare recovery based
-only on the API health endpoint or a successful direct provider request.
+Verify unexpired admitted ticks for every configured target and their joins to
+two distinct provider observations. Run `verify-showy-rate-readiness.sql` with
+read access to the active configuration and runtime tables: it fails unless
+the five Showy currencies have the three-source configuration, fresh admitted
+rates, and the exact active planner projection. Verify another automatic
+five-minute refresh as well as API/worker readiness.
+
+Invoice creation smoke checks belong in an isolated test environment with
+synthetic merchant/customer IDs and a test callback receiver; cancel them
+afterwards. Showy production acceptance must remain read-only: live merchant
+smoke invoices create lifecycle callbacks and can pollute the payment queue.
+Do not declare end-to-end checkout tested when only rates were checked, and do
+not declare rate recovery based only on an API health endpoint or a successful
+direct provider request.
 
 Provider reference: https://coinmarketcap.com/api/documentation/pro-api-reference/keyless-public-api
