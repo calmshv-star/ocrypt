@@ -5,6 +5,7 @@ workers return evidence instead of concurrently editing coordination files.
 
 | Task | Scope | Plan |
 | --- | --- | --- |
+| scanner-recovery-20260930 | Repair scanner readiness, verify payment recovery, audit outstanding fixes | [Plan](docs/tasks/scanner-recovery-20260930/PLAN.md) |
 | release-20260930-workflow | Publish workflow source/tooling to GitHub and server | [Plan](docs/tasks/release-20260930-workflow/PLAN.md) |
 | agent-workflow-setup | Adopt the five-stage agent development workflow | [Plan](docs/tasks/agent-workflow-setup/PLAN.md) |
 

@@ -243,3 +243,52 @@ Production admission still requires live PostgreSQL serializable/failover
 testing, independent provider replay, deployed outbox destination and callback
 fault injection, and reconciliation of actual ledger rows. Offline success must
 not be promoted as evidence for those live gates.
+
+## 10. Disposable PostgreSQL payment recovery acceptance
+
+`scripts/test-payment-fault-recovery.sh` runs the real PostgreSQL Store,
+ScannerStore, CallbackStore, OutboxStore and webhook Worker, with actual schema
+migrations and production capability-role grants. A caller must provision a
+fresh database on an isolated throwaway PostgreSQL instance. Both safeguards
+are mandatory before any schema/data mutation:
+
+- database name matches `ocrypt_fault_test_[a-z0-9_]+`;
+- database comment is exactly `ocrypt-payment-fault-recovery-disposable-v1`.
+
+The public schema must contain no tables. Tests refuse reused databases and
+never create the safety marker or fall back to `DATABASE_URL`. Bootstrap roles
+are cluster-wide, so use a dedicated disposable PostgreSQL **instance**, not a
+new database inside a production cluster. The caller owns container lifecycle,
+network isolation and teardown. Do not mount production configuration, backups,
+credentials or data. For example, provision a synthetic empty database and its
+comment in the private test instance, then run with a synthetic connection URL:
+
+```sh
+OCRYPT_RUN_PAYMENT_FAULT_TESTS=1 \
+OCRYPT_PAYMENT_FAULT_DATABASE_URL='postgres://fixture:fixture@fault-postgres:5432/ocrypt_fault_test_run01?sslmode=disable' \
+scripts/test-payment-fault-recovery.sh
+```
+
+The suite exercises lost successful settlement responses, closed/reopened
+repository connections, concurrent canonical transfer replay, publisher lease
+recovery and fencing, scanner worker death after financial commit, lost callback
+acknowledgement after receiver business commit, persisted callback retries and
+expired delivery leases, and actual scanner reorg compensation/reinclusion.
+Assertions inspect canonical transfer uniqueness, active and reversed matches,
+exact 18-decimal integer ledger amounts, balanced transactions, immutable
+original entries and opposite reversal legs, callbacks/deliveries/attempts,
+outbox/history rows, and one persisted receiver inbox/business effect. Negative
+checks cover insufficient finality, changed canonical amounts, stale leases,
+signed changed-body receiver conflicts, API capability permissions and tenant
+isolation. Worker pools assume the real narrowly granted roles rather than
+running financial paths as the schema superuser.
+
+The synthetic idempotent receiver stores inbox/business effects transactionally
+in PostgreSQL and verifies the Worker's actual signature. Its transport injects
+an acknowledgement loss; no public callback or chain RPC is contacted. This
+proves PostgreSQL persistence and worker retry/fencing, not external-provider
+replay, real HTTP delivery, broker durability, database process failover, or
+production behavior. A missing opt-in skips the Go integration test; that skip
+is never passing acceptance evidence. The shell runner refuses missing opt-in
+instead of silently producing a green skipped result. Each run needs a fresh
+disposable database, including after a failing behavioral regression.

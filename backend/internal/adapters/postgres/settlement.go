@@ -475,6 +475,21 @@ func insertCanonicalTransfer(ctx context.Context, tx pgx.Tx, event domain.Transf
 		if event.Status != domain.TransferObserved && event.Status != domain.TransferConfirmed && event.Status != domain.TransferFinalized {
 			return false, "", domain.TransferEvent{}, fmt.Errorf("%w: re-included transfer has invalid finality", domain.ErrStateConflict)
 		}
+		// A stale queue/proof process can replay its previously finalized event
+		// after compensation. Its finality flag is not current chain evidence.
+		// Require the scanner's exact admitted inclusion in this same SERIALIZABLE
+		// transaction before restoring any observation, match or money. Reorg
+		// writes both this block history and the transfer rows, so concurrent
+		// invalidation either serializes after settlement (and compensates it) or
+		// aborts a transaction. A predicate read avoids reversing the reorg's
+		// chain-block-before-transfer lock order and needs no block write grants.
+		var canonicalInclusion bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM chain_blocks WHERE chain_id=$1 AND height=$2::numeric AND block_hash=$3 AND canonical_status IN ('canonical','safe','finalized'))`, event.Identity.ChainID, strconv.FormatUint(event.BlockHeight, 10), event.BlockHash).Scan(&canonicalInclusion); err != nil {
+			return false, "", domain.TransferEvent{}, err
+		}
+		if !canonicalInclusion {
+			return false, "", domain.TransferEvent{}, fmt.Errorf("%w: re-included transfer lacks current canonical block evidence", domain.ErrStateConflict)
+		}
 		command, err := tx.Exec(ctx, `UPDATE transfer_events SET block_hash=$1,block_height=$2::numeric,on_chain_time=$3,confirmations=$4,status=$5,evidence_hash=$6,updated_at=clock_timestamp(),version=version+1 WHERE id=$7 AND status='reorged'`, event.BlockHash, fmt.Sprintf("%d", event.BlockHeight), event.OnChainTime, event.Confirmations, event.Status, evidence, existingID)
 		if err != nil {
 			return false, "", domain.TransferEvent{}, err

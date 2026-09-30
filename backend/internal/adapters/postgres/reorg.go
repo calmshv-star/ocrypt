@@ -153,7 +153,7 @@ func (s *ScannerStore) RewindReorg(ctx context.Context, lease scanner.Lease, bat
 			if _, err := tx.Exec(ctx, `UPDATE transfer_events SET status='reorged',updated_at=clock_timestamp(),version=version+1 WHERE id=ANY($1::uuid[]) AND status<>'reorged'`, eventIDs); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, `UPDATE scanner_transfer_queue SET status='reorged',locked_by=NULL,locked_until=NULL,last_error='canonical_block_replaced',updated_at=clock_timestamp() WHERE event_id=ANY($1::uuid[]) AND status<>'reorged'`, eventIDs); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE scanner_transfer_queue SET status='reorged',locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error='canonical_block_replaced',updated_at=clock_timestamp() WHERE event_id=ANY($1::uuid[]) AND status<>'reorged'`, eventIDs); err != nil {
 				return err
 			}
 		}
