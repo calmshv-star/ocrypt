@@ -11,3 +11,12 @@
   that the scanner is broken. Plasma readiness503 requires diagnosis.
 - Financial failure tests run against disposable PostgreSQL with synthetic data;
   production observations are read-only and never financial test fixtures.
+
+- Actual tests identified leased job starvation, same-worker/reorg token ABA,
+  missing narrow reorg permissions, and stale orphan financial replay. Repair
+  these inside requested recovery scope, with behavioral red/green evidence.
+- Provider83c866d already contains current probe fixes; no speculative upgrade.
+  Thirdweb logs fail and dRPC free plan rejects Plasma. New controlled provider
+  admission needs actual independently verified provider and authorized actors.
+- Do not merge audited PR97/100/101 blindly; each is divergent/partlysuperseded.
+  Audit is complete; remaining feature work stays explicitly outside this task.

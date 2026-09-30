@@ -37,7 +37,7 @@ read-only; report exact findings before any justified integration.
 | S3 | Plasma cause repaired without missing blocks | Redacted diagnostic evidence; independent providers where relevant; repeated commits and head-lag observations |
 | F1 | Retry/restart cannot double-credit | Actual Store + isolated PostgreSQL; exact ledger/match/callback/outbox counts |
 | F2 | Lost delivery acknowledgement is recoverable | Actual persisted callback retry with idempotent synthetic consumer; one business effect |
-| F3 | Reorg reverses, reinclusion restores exactly once | Actual reorg persistence and immutable compensating ledger assertions |
+| F3 | Reorg reverses, reinclusion restores exactly once | Actual reorg persistence, immutable compensation, stale orphan rejection before genuine canonical reinclusion |
 | G1 | Open financial/recovery fixes classified | PR-head/main diff and actual corresponding source/tests; written audit |
 | V1 | Integrated repair reviewed and validated | Independent review, targeted checks, full required CI before merge/publication |
 
