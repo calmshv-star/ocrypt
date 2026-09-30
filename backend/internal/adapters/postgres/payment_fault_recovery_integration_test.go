@@ -593,6 +593,22 @@ func (f *faultDatabase) reorg(t *testing.T) {
 	f.expectCount(t, 1, `SELECT count(*) FROM callback_events WHERE intent_id=$1 AND event_type='payment.reorged'`, p.intent)
 	f.expectCount(t, 1, `SELECT count(*) FROM outbox_events WHERE aggregate_id=$1 AND event_type='payment.reorged'`, p.intent)
 	f.expectCount(t, 1, `SELECT count(*) FROM payment_intents WHERE id=$1 AND status='reorg_review'`, p.intent)
+	// Transport acknowledgement fencing is too late to protect money: a stale
+	// process invokes settlement before acknowledging its old claimed job.
+	// Until ScannerStore commits genuine canonical reinclusion, replaying the
+	// orphaned finalized event must fail inside the financial transaction.
+	staleResult, staleErr := s.IngestAndSettle(f.ctx, oldClaims[0].Event)
+	if staleErr == nil {
+		t.Errorf("orphaned claimed event admitted before canonical reinclusion: outcome=%s", staleResult.Outcome)
+	}
+	f.balance(t, p, "0")
+	f.expectCount(t, 1, `SELECT count(*) FROM transfer_events WHERE id=$1 AND status='reorged'`, p.event.ID)
+	f.expectCount(t, 1, `SELECT count(*) FROM payment_intents WHERE id=$1 AND status='reorg_review'`, p.intent)
+	f.expectCount(t, 1, `SELECT count(*) FROM ledger_transactions WHERE tenant_id=$1 AND business_type='payment_settlement'`, p.tenant)
+	f.expectCount(t, 1, `SELECT count(*) FROM ledger_transactions WHERE tenant_id=$1 AND business_type='payment_settlement.reversal'`, p.tenant)
+	f.expectCount(t, 1, `SELECT count(*) FROM callback_events WHERE intent_id=$1 AND event_type='payment.settled'`, p.intent)
+	f.expectCount(t, 1, `SELECT count(*) FROM outbox_events WHERE aggregate_id=$1 AND event_type='payment.settled'`, p.intent)
+	f.expectCount(t, 0, `SELECT count(*) FROM payment_matches WHERE intent_id=$1 AND state='finalized'`, p.intent)
 	if err = sc.RewindReorg(f.ctx, lease, replacement, incident); err == nil {
 		t.Fatal("same reorg lease compensated twice")
 	}
