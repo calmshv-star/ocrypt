@@ -24,6 +24,8 @@ Each localized guide contains three views of the same product:
 
 Additional engineering material:
 
+- [Agent development workflow](agent-workflow/README.md)
+- [Development task index](../PLAN.md)
 - [Integration examples](../examples/README.md)
 - [Framework inbox/order/outbox skeletons](../examples/frameworks/README.md)
 - [Official SDKs and shared signing vectors](../sdk/README.md)

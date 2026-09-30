@@ -13,6 +13,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  agent-workflow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Validate agent workflow behavior and role configurations
+        run: python scripts/agent_workflow.py check workflow
+
   backend:
     runs-on: ubuntu-latest
     env:
@@ -910,6 +920,7 @@ jobs:
   release-gate:
     if: always()
     needs:
+      - agent-workflow
       - backend
       - schema
       - deployment
