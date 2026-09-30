@@ -393,6 +393,9 @@ GRANT SELECT,UPDATE ON
 TO merchant_scanner_worker;
 GRANT INSERT ON payment_intent_versions TO merchant_scanner_worker;
 GRANT UPDATE ON unmatched_payments TO merchant_scanner_worker;
+-- Reorg queries read only merchant environment/identity and unmatched predicates.
+GRANT SELECT(id,tenant_id,environment) ON merchants TO merchant_scanner_worker;
+GRANT SELECT(event_id,status,version) ON unmatched_payments TO merchant_scanner_worker;
 GRANT SELECT,INSERT,UPDATE ON automated_matching_jobs TO merchant_scanner_worker;
 GRANT SELECT,INSERT,UPDATE ON ledger_transactions TO merchant_scanner_worker;
 GRANT SELECT,INSERT ON ledger_entries,callback_events TO merchant_scanner_worker;

@@ -54,8 +54,9 @@ LEFT JOIN management_webhook_signing_keys k
   ON k.endpoint_id=w.id AND k.tenant_id=w.tenant_id AND k.merchant_id=w.merchant_id
  AND k.key_id=d.signing_key_id
  AND (k.status='current' OR (k.status='overlap' AND k.valid_until>$1))
-WHERE d.status IN ('pending','retry') AND d.next_attempt_at<=$1
-  AND (d.locked_until IS NULL OR d.locked_until<$1) AND w.status='active'
+WHERE ((d.status IN ('pending','retry') AND d.next_attempt_at<=$1
+  AND (d.locked_until IS NULL OR d.locked_until<=$1)) OR (d.status='leased' AND d.locked_until<=$1))
+  AND w.status='active'
 ORDER BY d.next_attempt_at,d.id LIMIT $2 FOR UPDATE OF d SKIP LOCKED`
 
 func (s *CallbackStore) Claim(ctx context.Context, workerID string, now time.Time, lease time.Duration, limit int) (jobs []webhook.Job, err error) {
@@ -92,7 +93,7 @@ func (s *CallbackStore) Claim(ctx context.Context, workerID string, now time.Tim
 				return err
 			}
 			claimed[i].job.ClaimToken = claimToken
-			command, err := tx.Exec(ctx, `UPDATE callback_deliveries SET status='leased',locked_by=$1,locked_until=$2,lease_token=$3,attempt_count=attempt_count+1,updated_at=$4,version=version+1 WHERE id=$5 AND status IN ('pending','retry')`, workerID, now.Add(lease), claimToken, now, claimed[i].job.DeliveryID)
+			command, err := tx.Exec(ctx, `UPDATE callback_deliveries SET status='leased',locked_by=$1,locked_until=$2,lease_token=$3,attempt_count=attempt_count+1,updated_at=$4,version=version+1 WHERE id=$5 AND ((status IN ('pending','retry') AND next_attempt_at<=$4 AND (locked_until IS NULL OR locked_until<=$4)) OR (status='leased' AND locked_until<=$4))`, workerID, now.Add(lease), claimToken, now, claimed[i].job.DeliveryID)
 			if err != nil {
 				return err
 			}
