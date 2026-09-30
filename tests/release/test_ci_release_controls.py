@@ -10,6 +10,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 def test_ci_keeps_every_functional_release_gate() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     required_jobs = {
+        "agent-workflow": "Validate agent workflow behavior and role configurations",
         "backend": "go test ./...",
         "schema": "Apply all migrations in order",
         "api-contract": "Run core black-box contract",
@@ -32,6 +33,7 @@ def test_release_gate_waits_for_functionality_not_only_builds() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     release_gate = workflow.split("\n  release-gate:\n", 1)[1]
     required_dependencies = (
+        "agent-workflow",
         "backend",
         "schema",
         "api-contract",
