@@ -598,8 +598,8 @@ func (f *faultDatabase) reorg(t *testing.T) {
 	// Until ScannerStore commits genuine canonical reinclusion, replaying the
 	// orphaned finalized event must fail inside the financial transaction.
 	staleResult, staleErr := s.IngestAndSettle(f.ctx, oldClaims[0].Event)
-	if staleErr == nil {
-		t.Errorf("orphaned claimed event admitted before canonical reinclusion: outcome=%s", staleResult.Outcome)
+	if !errors.Is(staleErr, domain.ErrStateConflict) {
+		t.Errorf("orphaned claimed event must fail canonical admission: outcome=%s err=%v", staleResult.Outcome, staleErr)
 	}
 	f.balance(t, p, "0")
 	f.expectCount(t, 1, `SELECT count(*) FROM transfer_events WHERE id=$1 AND status='reorged'`, p.event.ID)
@@ -629,6 +629,30 @@ func (f *faultDatabase) reorg(t *testing.T) {
 	if err = sc.Commit(f.ctx, lease, replacement); err != nil {
 		t.Fatal(err)
 	}
+	// A header for another height or an uncommitted/noncanonical header cannot
+	// authorize money. Exercise the shared boundary using the proof role too.
+	proofStore := f.store(t, f.pool(t, "merchant_proof_worker"))
+	for _, check := range []struct {
+		name   string
+		change func(*domain.TransferEvent)
+	}{
+		{"missing canonical block", func(event *domain.TransferEvent) { event.BlockHash = "fault-missing-block" }},
+		{"wrong canonical height", func(event *domain.TransferEvent) { event.BlockHeight++ }},
+	} {
+		bad := p.event
+		check.change(&bad)
+		if _, err = proofStore.IngestAndSettle(f.ctx, bad); !errors.Is(err, domain.ErrStateConflict) {
+			t.Fatalf("%s must fail canonical admission: %v", check.name, err)
+		}
+		f.balance(t, p, "0")
+	}
+	faultExec(t, f.ctx, f.admin, `UPDATE chain_blocks SET canonical_status='observed' WHERE chain_id=$1 AND block_hash=$2`, p.chain, p.event.BlockHash)
+	_, err = proofStore.IngestAndSettle(f.ctx, p.event)
+	faultExec(t, f.ctx, f.admin, `UPDATE chain_blocks SET canonical_status='safe' WHERE chain_id=$1 AND block_hash=$2`, p.chain, p.event.BlockHash)
+	if !errors.Is(err, domain.ErrStateConflict) {
+		t.Fatalf("observed-only block must fail canonical admission: %v", err)
+	}
+	f.balance(t, p, "0")
 	// Commit resets retry accounting on reinclusion; attempt_count therefore
 	// cannot fence an old process: both incarnations have attempt number one.
 	newClaims, err := queue.ClaimTransfers(f.ctx, "settler-reorg-stable", time.Now().UTC(), time.Minute, 500)
