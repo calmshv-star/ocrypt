@@ -12,14 +12,14 @@ Source baseline: `779d8ed` (2026-09-30).
 - [x] Implement durable task context, isolated writer allocation, role profiles,
   and local check profiles.
 - [x] Validate behavior and configuration, independently review, and fix findings.
-- [ ] Integrate/install the workflow in the user's active project context.
-- [ ] Record the final revision, executed checks, and remaining limitations.
+- [x] Integrate/install the workflow in the user's active project context.
+- [x] Record the implemented revision, executed checks, and remaining limitations.
 
 ## Assignments
 
 | Agent | Ownership | Result |
 | --- | --- | --- |
-| Primary orchestrator | Workflow files, helper, integration, skill installation | In progress |
+| Primary orchestrator | Workflow files, helper, integration, skill installation | Installed in the existing checkout and projectless chat context |
 | `ocrypt_test_map` | Read-only map of existing checks and financial boundaries | Complete; live opt-ins and actual local commands identified |
 | `ocrypt_workflow_review` | Integrated workflow and realistic assignment scenarios | Two findings fixed; repeat review found no remaining actionable defects |
 
@@ -40,6 +40,19 @@ implemented the test-author-to-implementation handoff within the same task ID.
   and workflow skill. Role TOMLs parse and match the current documented schema;
   this debug surface does not expose custom-role loading, so that is not claimed.
 
-The next step is to install the reviewed revision in the existing project
-checkout and personal skill discovery path, then repeat checks there.
+Implemented source revision: `dee40df`. The existing checkout was fast-forwarded
+to that reviewed revision. The projectless chat now has scoped workspace routing
+instructions; personal skill discovery links to the repository's skill source.
+The installed client's prompt-input check confirms that routing and skill are
+visible from the existing chat directory.
+
+Repeated checks in the installed checkout: 13 workflow checks and 83 existing
+offline Python checks pass on a clean source tree. Local `.agent-evidence/`
+reports retain the exact revision and clean-state flag. This final plan update
+changes documentation only.
+
+Go, frontend builds, and live payment/deployment checks were not run for this
+tooling-only change; their runnable profiles and prerequisites are documented.
+Custom-role host invocation was not exercised; project TOMLs are validated and
+the skill provides an explicit-instruction fallback for projectless chats.
 No production access, product changes, or live tests are part of this setup.
