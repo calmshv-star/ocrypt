@@ -356,7 +356,7 @@ func (f *faultDatabase) scannerRestart(t *testing.T) {
 	pool := f.pool(t, "merchant_settlement_worker")
 	sc := f.scanner(t, pool)
 	now := time.Now().UTC()
-	jobs, err := sc.ClaimTransfers(f.ctx, "settler-crashed", now, time.Second, 500)
+	jobs, err := sc.ClaimTransfers(f.ctx, "settler-stable", now, time.Second, 500)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +373,7 @@ func (f *faultDatabase) scannerRestart(t *testing.T) {
 	pool.Close()
 	pool = f.pool(t, "merchant_settlement_worker")
 	sc = f.scanner(t, pool)
-	jobs, err = sc.ClaimTransfers(f.ctx, "settler-restarted", now.Add(2*time.Second), time.Minute, 500)
+	jobs, err = sc.ClaimTransfers(f.ctx, "settler-stable", now.Add(2*time.Second), time.Minute, 500)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,10 +383,16 @@ func (f *faultDatabase) scannerRestart(t *testing.T) {
 	if r := f.ingest(t, f.store(t, pool), p); r.Outcome != application.SettlementDuplicate {
 		t.Fatal("recovered transfer double-settled")
 	}
-	if err = sc.CompleteTransfer(f.ctx, "settler-crashed", p.event.ID); err == nil {
-		t.Fatal("stale worker acknowledged replacement lease")
+	// A restarted process may reuse its configured worker identity. The old
+	// process must not mutate the new lease even though owner/event are equal.
+	if err = sc.RetryTransfer(f.ctx, "settler-stable", p.event.ID, "stale-process", now.Add(time.Hour), true); err == nil {
+		t.Fatal("stale process retried replacement lease with the same worker identity")
 	}
-	if err = sc.CompleteTransfer(f.ctx, "settler-restarted", p.event.ID); err != nil {
+	if err = sc.CompleteTransfer(f.ctx, "settler-stable", p.event.ID); err == nil {
+		t.Fatal("stale process acknowledged replacement lease with the same worker identity")
+	}
+	f.expectCount(t, 1, `SELECT count(*) FROM scanner_transfer_queue WHERE event_id=$1 AND status='leased' AND locked_by='settler-stable' AND attempt_count=2 AND last_error IS NULL`, p.event.ID)
+	if err = sc.CompleteTransfer(f.ctx, "settler-stable", p.event.ID); err != nil {
 		t.Fatal(err)
 	}
 	f.expectCount(t, 0, `SELECT count(*) FROM scanner_transfer_queue WHERE event_id=$1`, p.event.ID)
@@ -542,6 +548,12 @@ func (f *faultDatabase) callbackRestart(t *testing.T) {
 func (f *faultDatabase) reorg(t *testing.T) {
 	p := f.seed(t)
 	sc := f.stage(t, p)
+	queue := f.scanner(t, f.pool(t, "merchant_settlement_worker"))
+	faultExec(t, f.ctx, f.admin, `UPDATE scanner_transfer_queue SET next_attempt_at=clock_timestamp()+interval '1 day' WHERE event_id<>$1 AND status IN ('pending','retry')`, p.event.ID)
+	oldClaims, err := queue.ClaimTransfers(f.ctx, "settler-reorg-stable", time.Now().UTC(), time.Minute, 500)
+	if err != nil || len(oldClaims) != 1 || oldClaims[0].Attempt != 1 {
+		t.Fatalf("initial reorg transport claim: jobs=%d err=%v", len(oldClaims), err)
+	}
 	s := f.store(t, f.pool(t, "merchant_settlement_worker"))
 	first := f.ingest(t, s, p)
 	if first.Outcome != application.SettlementSettled {
@@ -593,8 +605,24 @@ func (f *faultDatabase) reorg(t *testing.T) {
 	if err = sc.Commit(f.ctx, lease, replacement); err != nil {
 		t.Fatal(err)
 	}
+	// Commit resets retry accounting on reinclusion; attempt_count therefore
+	// cannot fence an old process: both incarnations have attempt number one.
+	newClaims, err := queue.ClaimTransfers(f.ctx, "settler-reorg-stable", time.Now().UTC(), time.Minute, 500)
+	if err != nil || len(newClaims) != 1 || newClaims[0].Attempt != oldClaims[0].Attempt {
+		t.Fatalf("reinclusion transport accounting: jobs=%d err=%v", len(newClaims), err)
+	}
+	if err = queue.RetryTransfer(f.ctx, "settler-reorg-stable", p.event.ID, "old-inclusion", time.Now().Add(time.Hour), true); err == nil {
+		t.Fatal("old inclusion process retried replacement lease after attempt counter reset")
+	}
+	if err = queue.CompleteTransfer(f.ctx, "settler-reorg-stable", p.event.ID); err == nil {
+		t.Fatal("old inclusion process completed replacement lease after attempt counter reset")
+	}
+	f.expectCount(t, 1, `SELECT count(*) FROM scanner_transfer_queue WHERE event_id=$1 AND status='leased' AND attempt_count=1 AND last_error IS NULL`, p.event.ID)
 	if r := f.ingest(t, s, p); r.Outcome != application.SettlementSettled {
 		t.Fatalf("reinclusion did not restore settlement: %s", r.Outcome)
+	}
+	if err = queue.CompleteTransfer(f.ctx, "settler-reorg-stable", p.event.ID); err != nil {
+		t.Fatal(err)
 	}
 	if r := f.ingest(t, s, p); r.Outcome != application.SettlementDuplicate {
 		t.Fatal("reinclusion replay credited twice")
