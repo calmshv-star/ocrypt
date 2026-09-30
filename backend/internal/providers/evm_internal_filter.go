@@ -129,9 +129,9 @@ func (s *EVMInternalFilter) ScanRange(ctx context.Context, from, to uint64) (sca
 			return scanner.RangeBatch{}, pathErr
 		}
 		evidence, _ := json.Marshal(struct {
-			Trace                internalTraceCandidate `json:"trace"`
-			TraceProviders       [2]string              `json:"trace_providers"`
-			ReceiptProviders     [2]string              `json:"receipt_providers"`
+			Trace               internalTraceCandidate `json:"trace"`
+			TraceProviders      [2]string              `json:"trace_providers"`
+			ReceiptProviders    [2]string              `json:"receipt_providers"`
 			IndependentReceipts bool                   `json:"independent_receipts"`
 		}{candidate, [2]string{s.tracers[0].providerID, s.tracers[1].providerID},
 			[2]string{s.probes[0].providerID, s.probes[1].providerID}, true})
