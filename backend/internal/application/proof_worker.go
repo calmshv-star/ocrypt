@@ -44,9 +44,12 @@ func (w ProofWorker) RunBatch(ctx context.Context, workerID, chainID string, lim
 	}
 	lease := w.Lease
 	if lease <= 0 {
-		lease = 30 * time.Second
+		lease = 3 * time.Minute
 	}
-	jobs, err := w.Queue.ClaimProofs(ctx, workerID, chainID, now, lease, limit)
+	// Claim only work we can start immediately. Reserving a batch gives its
+	// last job the same expiry as its first job, before verification even starts.
+	started := time.Now()
+	jobs, err := w.Queue.ClaimProofs(ctx, workerID, chainID, now, lease, 1)
 	if err != nil {
 		return 0, err
 	}
@@ -56,13 +59,16 @@ func (w ProofWorker) RunBatch(ctx context.Context, workerID, chainID string, lim
 	}
 	var failures []error
 	for _, job := range jobs {
-		events, verifyErr := w.Verifier.LookupTransaction(ctx, job.Proof.ChainID, job.Proof.TransactionID)
+		// Leave part of the lease for recording the result or scheduling a retry.
+		jobCtx, cancel := context.WithDeadline(ctx, started.Add(lease-lease/5))
+		defer cancel()
+		events, verifyErr := w.Verifier.LookupTransaction(jobCtx, job.Proof.ChainID, job.Proof.TransactionID)
 		if verifyErr == nil && len(events) == 0 {
 			status := domain.ProofQueued
 			if job.Attempt >= maxAttempts {
 				status = domain.ProofNotFound
 			}
-			next := now.Add(time.Duration(job.Attempt*job.Attempt) * time.Second)
+			next := w.currentTime().Add(proofRetryDelay(job.Attempt))
 			if retryErr := w.Queue.RetryProof(ctx, job, next, "transaction contains no supported transfer events", status); retryErr != nil {
 				failures = append(failures, fmt.Errorf("proof %s not-found acknowledgement: %w", job.Proof.ID, retryErr))
 			}
@@ -71,7 +77,7 @@ func (w ProofWorker) RunBatch(ctx context.Context, workerID, chainID string, lim
 		var eventIDs []string
 		if verifyErr == nil {
 			for _, event := range events {
-				if _, err := w.Process.Process(ctx, event); err != nil {
+				if _, err := w.Process.Process(jobCtx, event); err != nil {
 					verifyErr = err
 					break
 				}
@@ -79,7 +85,7 @@ func (w ProofWorker) RunBatch(ctx context.Context, workerID, chainID string, lim
 			}
 		}
 		if verifyErr == nil {
-			if err := w.Queue.CompleteProof(ctx, job, eventIDs, now); err != nil {
+			if err := w.Queue.CompleteProof(jobCtx, job, eventIDs, w.currentTime()); err != nil {
 				verifyErr = err
 			}
 		}
@@ -90,16 +96,31 @@ func (w ProofWorker) RunBatch(ctx context.Context, workerID, chainID string, lim
 		if len(reason) > 512 {
 			reason = reason[:512]
 		}
-		terminal := domain.ProofQueued
-		if job.Attempt >= maxAttempts {
-			terminal = domain.ProofInvalid
-		}
-		next := now.Add(time.Duration(job.Attempt*job.Attempt) * time.Second)
-		if retryErr := w.Queue.RetryProof(ctx, job, next, reason, terminal); retryErr != nil {
+		// Provider, database and fencing errors are not evidence of an invalid
+		// customer payment. Keep it retryable, with bounded load during outages.
+		next := w.currentTime().Add(proofRetryDelay(job.Attempt))
+		if retryErr := w.Queue.RetryProof(ctx, job, next, reason, domain.ProofQueued); retryErr != nil {
 			failures = append(failures, fmt.Errorf("proof %s: %v; retry: %w", job.Proof.ID, verifyErr, retryErr))
 			continue
 		}
 		failures = append(failures, fmt.Errorf("proof %s: %w", job.Proof.ID, verifyErr))
 	}
 	return len(jobs), errors.Join(failures...)
+}
+
+func (w ProofWorker) currentTime() time.Time {
+	if w.Clock != nil {
+		return w.Clock().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func proofRetryDelay(attempt int) time.Duration {
+	if attempt >= 18 {
+		return 5 * time.Minute
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	return time.Duration(attempt*attempt) * time.Second
 }

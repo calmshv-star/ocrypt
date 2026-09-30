@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -17,17 +18,43 @@ func (v proofVerifierFixture) LookupTransaction(context.Context, string, string)
 }
 
 type proofQueueFixture struct {
-	jobs      []ProofJob
-	completed []string
-	retried   []domain.ProofStatus
+	jobs       []ProofJob
+	completed  []string
+	retried    []domain.ProofStatus
+	claimLimit int
 }
 
-func (q *proofQueueFixture) ClaimProofs(context.Context, string, string, time.Time, time.Duration, int) ([]ProofJob, error) {
+func (q *proofQueueFixture) ClaimProofs(_ context.Context, _ string, _ string, _ time.Time, _ time.Duration, limit int) ([]ProofJob, error) {
+	q.claimLimit = limit
 	return q.jobs, nil
 }
 func (q *proofQueueFixture) CompleteProof(_ context.Context, _ ProofJob, ids []string, _ time.Time) error {
 	q.completed = append(q.completed, ids...)
 	return nil
+}
+
+type unavailableProofVerifier struct{ timeout bool }
+
+func (v unavailableProofVerifier) LookupTransaction(ctx context.Context, _, _ string) ([]domain.TransferEvent, error) {
+	if v.timeout {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return nil, errors.New("provider unavailable")
+}
+
+func TestProofWorkerOutageDoesNotInvalidatePayment(t *testing.T) {
+	for _, timeout := range []bool{false, true} {
+		queue := &proofQueueFixture{jobs: []ProofJob{{Proof: domain.PaymentProof{ID: "proof"}, Attempt: 1000000}}}
+		worker := ProofWorker{Verifier: unavailableProofVerifier{timeout}, Queue: queue, Process: NewTransferProcessor(&settlementFixture{}), Lease: 25 * time.Millisecond}
+		count, err := worker.RunBatch(t.Context(), "worker", "eip155:1", 100)
+		if err == nil || count != 1 || queue.claimLimit != 1 || len(queue.retried) != 1 || queue.retried[0] != domain.ProofQueued {
+			t.Fatalf("timeout=%t count=%d err=%v queue=%+v", timeout, count, err, queue)
+		}
+	}
+	if proofRetryDelay(1000000) != 5*time.Minute || proofRetryDelay(0) != time.Second {
+		t.Fatal("retry delay must stay bounded without integer overflow")
+	}
 }
 func (q *proofQueueFixture) RetryProof(_ context.Context, _ ProofJob, _ time.Time, _ string, status domain.ProofStatus) error {
 	q.retried = append(q.retried, status)

@@ -39,6 +39,8 @@ func TestEVMWatchedLookupMatchesNativeAndERC20ScanEvidence(t *testing.T) {
 				return 200, rpcResult(t, request, func(method string, _ []json.RawMessage) json.RawMessage {
 					calls[method]++
 					switch method {
+					case "eth_chainId":
+						return marshal("0x1")
 					case "eth_getBlockByNumber":
 						return marshal(fixture.Block)
 					case "eth_getTransactionByHash":
@@ -62,7 +64,7 @@ func TestEVMWatchedLookupMatchesNativeAndERC20ScanEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if calls["eth_getTransactionReceipt"] != 1 || calls["eth_getBlockByNumber"] != 2 || calls["eth_getTransactionByHash"] != 1 || calls["eth_getLogs"] != 0 {
+			if calls["eth_chainId"] != 1 || calls["eth_getTransactionReceipt"] != 1 || calls["eth_getBlockByNumber"] != 3 || calls["eth_getTransactionByHash"] != 1 || calls["eth_getLogs"] != 0 {
 				t.Fatalf("lookup repeated receipt/range requests: %+v", calls)
 			}
 			batch, err := source.ScanRange(context.Background(), 1, 1)
@@ -142,6 +144,8 @@ func TestEVMWatchedLookupKeepsDestinationAndReceiptGuards(t *testing.T) {
 				return 200, rpcResult(t, request, func(method string, _ []json.RawMessage) json.RawMessage {
 					var value any
 					switch method {
+					case "eth_chainId":
+						value = "0x1"
 					case "eth_getBlockByNumber":
 						value = fixture.Block
 					case "eth_getTransactionByHash":
