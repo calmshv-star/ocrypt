@@ -47,6 +47,40 @@ jobs:
       - name: Race test
         run: go test -race ./...
 
+  payment-fault-recovery:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: ocrypt_fault_test_ci
+          POSTGRES_USER: faultadmin
+          POSTGRES_PASSWORD: fault-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U faultadmin -d ocrypt_fault_test_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      GOFLAGS: -mod=readonly
+      OCRYPT_RUN_PAYMENT_FAULT_TESTS: "1"
+      OCRYPT_PAYMENT_FAULT_DATABASE_URL: postgres://faultadmin:fault-ci-only@127.0.0.1:5432/ocrypt_fault_test_ci?sslmode=disable
+      PGPASSWORD: fault-ci-only
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Mark the isolated disposable database
+        run: >-
+          psql -h 127.0.0.1 -U faultadmin -d ocrypt_fault_test_ci -v ON_ERROR_STOP=1
+          -c "COMMENT ON DATABASE ocrypt_fault_test_ci IS 'ocrypt-payment-fault-recovery-disposable-v1'"
+      - name: Verify payment fault recovery under actual runtime roles
+        run: sh scripts/test-payment-fault-recovery.sh
+
   schema:
     runs-on: ubuntu-latest
     services:
@@ -923,6 +957,7 @@ jobs:
       - agent-workflow
       - backend
       - schema
+      - payment-fault-recovery
       - deployment
       - container-images
       - api-contract
