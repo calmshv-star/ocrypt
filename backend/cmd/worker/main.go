@@ -287,7 +287,7 @@ func runSettlements(ctx context.Context, queue *postgres.ScannerStore, processor
 	for _, item := range items {
 		_, err := processor.Process(ctx, item.Event)
 		if err == nil {
-			err = queue.CompleteTransfer(ctx, workerID, item.Event.ID)
+			err = queue.CompleteTransfer(ctx, workerID, item.Event.ID, item.ClaimToken)
 		}
 		if err == nil {
 			continue
@@ -298,7 +298,7 @@ func runSettlements(ctx context.Context, queue *postgres.ScannerStore, processor
 		}
 		dead := item.Attempt >= 20
 		next := now.Add(time.Duration(item.Attempt*item.Attempt) * time.Second)
-		if retryErr := queue.RetryTransfer(ctx, workerID, item.Event.ID, reason, next, dead); retryErr != nil {
+		if retryErr := queue.RetryTransfer(ctx, workerID, item.Event.ID, item.ClaimToken, reason, next, dead); retryErr != nil {
 			healthy = false
 			slog.Error("transfer retry fencing failed", "event_id", item.Event.ID, "error", retryErr)
 		}

@@ -356,13 +356,14 @@ func (f *faultDatabase) scannerRestart(t *testing.T) {
 	pool := f.pool(t, "merchant_settlement_worker")
 	sc := f.scanner(t, pool)
 	now := time.Now().UTC()
-	jobs, err := sc.ClaimTransfers(f.ctx, "settler-crashed", now, time.Second, 500)
+	jobs, err := sc.ClaimTransfers(f.ctx, "settler-stable", now, time.Second, 500)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(jobs) != 1 || jobs[0].Event.ID != p.event.ID {
+	if len(jobs) != 1 || jobs[0].Event.ID != p.event.ID || !ids.Valid(jobs[0].ClaimToken) {
 		t.Fatal("expected durable queued transfer")
 	}
+	old := jobs[0]
 	stolen, err := sc.ClaimTransfers(f.ctx, "settler-contender", now.Add(100*time.Millisecond), time.Minute, 500)
 	if err != nil || len(stolen) != 0 {
 		t.Fatalf("unexpired scanner lease stolen: jobs=%d err=%v", len(stolen), err)
@@ -373,20 +374,26 @@ func (f *faultDatabase) scannerRestart(t *testing.T) {
 	pool.Close()
 	pool = f.pool(t, "merchant_settlement_worker")
 	sc = f.scanner(t, pool)
-	jobs, err = sc.ClaimTransfers(f.ctx, "settler-restarted", now.Add(2*time.Second), time.Minute, 500)
+	jobs, err = sc.ClaimTransfers(f.ctx, "settler-stable", now.Add(2*time.Second), time.Minute, 500)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(jobs) != 1 || jobs[0].Event.ID != p.event.ID || jobs[0].Attempt != 2 {
+	if len(jobs) != 1 || jobs[0].Event.ID != p.event.ID || jobs[0].Attempt != 2 || !ids.Valid(jobs[0].ClaimToken) || jobs[0].ClaimToken == old.ClaimToken {
 		t.Fatalf("expired scanner delivery lease was not recovered after committed settlement: jobs=%d", len(jobs))
 	}
 	if r := f.ingest(t, f.store(t, pool), p); r.Outcome != application.SettlementDuplicate {
 		t.Fatal("recovered transfer double-settled")
 	}
-	if err = sc.CompleteTransfer(f.ctx, "settler-crashed", p.event.ID); err == nil {
-		t.Fatal("stale worker acknowledged replacement lease")
+	// A restarted process may reuse its configured worker identity. The old
+	// process must not mutate the new lease even though owner/event are equal.
+	if err = sc.RetryTransfer(f.ctx, "settler-stable", p.event.ID, old.ClaimToken, "stale-process", now.Add(time.Hour), true); err == nil {
+		t.Fatal("stale process retried replacement lease with the same worker identity")
 	}
-	if err = sc.CompleteTransfer(f.ctx, "settler-restarted", p.event.ID); err != nil {
+	if err = sc.CompleteTransfer(f.ctx, "settler-stable", p.event.ID, old.ClaimToken); err == nil {
+		t.Fatal("stale process acknowledged replacement lease with the same worker identity")
+	}
+	f.expectCount(t, 1, `SELECT count(*) FROM scanner_transfer_queue WHERE event_id=$1 AND status='leased' AND locked_by='settler-stable' AND attempt_count=2 AND last_error IS NULL AND lease_token=$2`, p.event.ID, jobs[0].ClaimToken)
+	if err = sc.CompleteTransfer(f.ctx, "settler-stable", p.event.ID, jobs[0].ClaimToken); err != nil {
 		t.Fatal(err)
 	}
 	f.expectCount(t, 0, `SELECT count(*) FROM scanner_transfer_queue WHERE event_id=$1`, p.event.ID)
@@ -504,7 +511,7 @@ func (f *faultDatabase) callbackRestart(t *testing.T) {
 	pool := f.pool(t, "merchant_callback_worker")
 	store := f.callback(t, pool)
 	now := time.Now().UTC()
-	jobs, err := store.Claim(f.ctx, "callback-dead", now, time.Second, 10)
+	jobs, err := store.Claim(f.ctx, "callback-stable", now, time.Second, 10)
 	if err != nil || len(jobs) != 1 {
 		t.Fatalf("claim fixture: %v jobs=%d", err, len(jobs))
 	}
@@ -516,16 +523,23 @@ func (f *faultDatabase) callbackRestart(t *testing.T) {
 	pool.Close()
 	pool = f.pool(t, "merchant_callback_worker")
 	store = f.callback(t, pool)
-	jobs, err = store.Claim(f.ctx, "callback-restarted", now.Add(2*time.Second), time.Minute, 10)
+	jobs, err = store.Claim(f.ctx, "callback-stable", now.Add(2*time.Second), time.Minute, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(jobs) != 1 || jobs[0].EventID != old.EventID || jobs[0].Attempt != 2 || jobs[0].ClaimToken == old.ClaimToken {
+	if len(jobs) != 1 || jobs[0].EventID != old.EventID || jobs[0].Attempt != 2 || !ids.Valid(old.ClaimToken) || !ids.Valid(jobs[0].ClaimToken) || jobs[0].ClaimToken == old.ClaimToken {
 		t.Fatalf("expired callback lease not reclaimed/fenced: jobs=%d", len(jobs))
 	}
 	if err = store.Acknowledge(f.ctx, old.DeliveryID, old.ClaimToken, 200, []byte(`{}`)); err == nil {
 		t.Fatal("stale callback claim token accepted")
 	}
+	if err = store.ScheduleRetry(f.ctx, old.DeliveryID, old.ClaimToken, now.Add(time.Hour), "stale-process"); err == nil {
+		t.Fatal("stale callback process scheduled retry on replacement lease")
+	}
+	if err = store.MoveToDeadLetter(f.ctx, old.DeliveryID, old.ClaimToken, "stale-process"); err == nil {
+		t.Fatal("stale callback process dead-lettered replacement lease")
+	}
+	f.expectCount(t, 1, `SELECT count(*) FROM callback_deliveries WHERE id=$1 AND status='leased' AND locked_by='callback-stable' AND attempt_count=2 AND lease_token=$2 AND last_error_category IS NULL`, old.DeliveryID, jobs[0].ClaimToken)
 	receiver := &faultReceiver{db: f}
 	job := jobs[0]
 	sig := webhook.Sign(job.SigningSecret, job.SigningKeyID, job.EventID, time.Now().UTC(), job.CanonicalBody)
@@ -542,6 +556,12 @@ func (f *faultDatabase) callbackRestart(t *testing.T) {
 func (f *faultDatabase) reorg(t *testing.T) {
 	p := f.seed(t)
 	sc := f.stage(t, p)
+	queue := f.scanner(t, f.pool(t, "merchant_settlement_worker"))
+	faultExec(t, f.ctx, f.admin, `UPDATE scanner_transfer_queue SET next_attempt_at=clock_timestamp()+interval '1 day' WHERE event_id<>$1 AND status IN ('pending','retry')`, p.event.ID)
+	oldClaims, err := queue.ClaimTransfers(f.ctx, "settler-reorg-stable", time.Now().UTC(), time.Minute, 500)
+	if err != nil || len(oldClaims) != 1 || oldClaims[0].Attempt != 1 || !ids.Valid(oldClaims[0].ClaimToken) {
+		t.Fatalf("initial reorg transport claim: jobs=%d err=%v", len(oldClaims), err)
+	}
 	s := f.store(t, f.pool(t, "merchant_settlement_worker"))
 	first := f.ingest(t, s, p)
 	if first.Outcome != application.SettlementSettled {
@@ -573,6 +593,22 @@ func (f *faultDatabase) reorg(t *testing.T) {
 	f.expectCount(t, 1, `SELECT count(*) FROM callback_events WHERE intent_id=$1 AND event_type='payment.reorged'`, p.intent)
 	f.expectCount(t, 1, `SELECT count(*) FROM outbox_events WHERE aggregate_id=$1 AND event_type='payment.reorged'`, p.intent)
 	f.expectCount(t, 1, `SELECT count(*) FROM payment_intents WHERE id=$1 AND status='reorg_review'`, p.intent)
+	// Transport acknowledgement fencing is too late to protect money: a stale
+	// process invokes settlement before acknowledging its old claimed job.
+	// Until ScannerStore commits genuine canonical reinclusion, replaying the
+	// orphaned finalized event must fail inside the financial transaction.
+	staleResult, staleErr := s.IngestAndSettle(f.ctx, oldClaims[0].Event)
+	if !errors.Is(staleErr, domain.ErrStateConflict) {
+		t.Errorf("orphaned claimed event must fail canonical admission: outcome=%s err=%v", staleResult.Outcome, staleErr)
+	}
+	f.balance(t, p, "0")
+	f.expectCount(t, 1, `SELECT count(*) FROM transfer_events WHERE id=$1 AND status='reorged'`, p.event.ID)
+	f.expectCount(t, 1, `SELECT count(*) FROM payment_intents WHERE id=$1 AND status='reorg_review'`, p.intent)
+	f.expectCount(t, 1, `SELECT count(*) FROM ledger_transactions WHERE tenant_id=$1 AND business_type='payment_settlement'`, p.tenant)
+	f.expectCount(t, 1, `SELECT count(*) FROM ledger_transactions WHERE tenant_id=$1 AND business_type='payment_settlement.reversal'`, p.tenant)
+	f.expectCount(t, 1, `SELECT count(*) FROM callback_events WHERE intent_id=$1 AND event_type='payment.settled'`, p.intent)
+	f.expectCount(t, 1, `SELECT count(*) FROM outbox_events WHERE aggregate_id=$1 AND event_type='payment.settled'`, p.intent)
+	f.expectCount(t, 0, `SELECT count(*) FROM payment_matches WHERE intent_id=$1 AND state='finalized'`, p.intent)
 	if err = sc.RewindReorg(f.ctx, lease, replacement, incident); err == nil {
 		t.Fatal("same reorg lease compensated twice")
 	}
@@ -593,8 +629,48 @@ func (f *faultDatabase) reorg(t *testing.T) {
 	if err = sc.Commit(f.ctx, lease, replacement); err != nil {
 		t.Fatal(err)
 	}
+	// A header for another height or an uncommitted/noncanonical header cannot
+	// authorize money. Exercise the shared boundary using the proof role too.
+	proofStore := f.store(t, f.pool(t, "merchant_proof_worker"))
+	for _, check := range []struct {
+		name   string
+		change func(*domain.TransferEvent)
+	}{
+		{"missing canonical block", func(event *domain.TransferEvent) { event.BlockHash = "fault-missing-block" }},
+		{"wrong canonical height", func(event *domain.TransferEvent) { event.BlockHeight++ }},
+	} {
+		bad := p.event
+		check.change(&bad)
+		if _, err = proofStore.IngestAndSettle(f.ctx, bad); !errors.Is(err, domain.ErrStateConflict) {
+			t.Fatalf("%s must fail canonical admission: %v", check.name, err)
+		}
+		f.balance(t, p, "0")
+	}
+	faultExec(t, f.ctx, f.admin, `UPDATE chain_blocks SET canonical_status='observed' WHERE chain_id=$1 AND block_hash=$2`, p.chain, p.event.BlockHash)
+	_, err = proofStore.IngestAndSettle(f.ctx, p.event)
+	faultExec(t, f.ctx, f.admin, `UPDATE chain_blocks SET canonical_status='safe' WHERE chain_id=$1 AND block_hash=$2`, p.chain, p.event.BlockHash)
+	if !errors.Is(err, domain.ErrStateConflict) {
+		t.Fatalf("observed-only block must fail canonical admission: %v", err)
+	}
+	f.balance(t, p, "0")
+	// Commit resets retry accounting on reinclusion; attempt_count therefore
+	// cannot fence an old process: both incarnations have attempt number one.
+	newClaims, err := queue.ClaimTransfers(f.ctx, "settler-reorg-stable", time.Now().UTC(), time.Minute, 500)
+	if err != nil || len(newClaims) != 1 || newClaims[0].Attempt != oldClaims[0].Attempt || !ids.Valid(newClaims[0].ClaimToken) || newClaims[0].ClaimToken == oldClaims[0].ClaimToken {
+		t.Fatalf("reinclusion transport accounting: jobs=%d err=%v", len(newClaims), err)
+	}
+	if err = queue.RetryTransfer(f.ctx, "settler-reorg-stable", p.event.ID, oldClaims[0].ClaimToken, "old-inclusion", time.Now().Add(time.Hour), true); err == nil {
+		t.Fatal("old inclusion process retried replacement lease after attempt counter reset")
+	}
+	if err = queue.CompleteTransfer(f.ctx, "settler-reorg-stable", p.event.ID, oldClaims[0].ClaimToken); err == nil {
+		t.Fatal("old inclusion process completed replacement lease after attempt counter reset")
+	}
+	f.expectCount(t, 1, `SELECT count(*) FROM scanner_transfer_queue WHERE event_id=$1 AND status='leased' AND locked_by='settler-reorg-stable' AND attempt_count=1 AND last_error IS NULL AND lease_token=$2`, p.event.ID, newClaims[0].ClaimToken)
 	if r := f.ingest(t, s, p); r.Outcome != application.SettlementSettled {
 		t.Fatalf("reinclusion did not restore settlement: %s", r.Outcome)
+	}
+	if err = queue.CompleteTransfer(f.ctx, "settler-reorg-stable", p.event.ID, newClaims[0].ClaimToken); err != nil {
+		t.Fatal(err)
 	}
 	if r := f.ingest(t, s, p); r.Outcome != application.SettlementDuplicate {
 		t.Fatal("reinclusion replay credited twice")

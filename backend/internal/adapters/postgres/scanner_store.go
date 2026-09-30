@@ -115,7 +115,7 @@ func (s *ScannerStore) Commit(ctx context.Context, lease scanner.Lease, batch sc
 				if err != nil {
 					return err
 				}
-				_, err = tx.Exec(ctx, `INSERT INTO scanner_transfer_queue (event_id,chain_id,identity_key,canonical_event,status,attempt_count,next_attempt_at,created_at,updated_at) VALUES ($1,$2,$3,$4::jsonb,'pending',0,clock_timestamp(),clock_timestamp(),clock_timestamp()) ON CONFLICT (chain_id,identity_key) DO UPDATE SET canonical_event=EXCLUDED.canonical_event,status='pending',attempt_count=0,next_attempt_at=clock_timestamp(),locked_by=NULL,locked_until=NULL,last_error=NULL,updated_at=clock_timestamp() WHERE scanner_transfer_queue.status='reorged'`, event.ID, lease.ChainID, identityKey, payload)
+				_, err = tx.Exec(ctx, `INSERT INTO scanner_transfer_queue (event_id,chain_id,identity_key,canonical_event,status,attempt_count,next_attempt_at,created_at,updated_at) VALUES ($1,$2,$3,$4::jsonb,'pending',0,clock_timestamp(),clock_timestamp(),clock_timestamp()) ON CONFLICT (chain_id,identity_key) DO UPDATE SET canonical_event=EXCLUDED.canonical_event,status='pending',attempt_count=0,next_attempt_at=clock_timestamp(),locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error=NULL,updated_at=clock_timestamp() WHERE scanner_transfer_queue.status='reorged'`, event.ID, lease.ChainID, identityKey, payload)
 				if err != nil {
 					return err
 				}
@@ -215,8 +215,9 @@ func (s *ScannerStore) HealGap(ctx context.Context, chainID string, from, to uin
 }
 
 type ClaimedTransfer struct {
-	Event   domain.TransferEvent
-	Attempt int
+	Event      domain.TransferEvent
+	Attempt    int
+	ClaimToken string
 }
 
 func (s *ScannerStore) ClaimTransfers(ctx context.Context, worker string, now time.Time, lease time.Duration, limit int) (claimed []ClaimedTransfer, err error) {
@@ -224,7 +225,7 @@ func (s *ScannerStore) ClaimTransfers(ctx context.Context, worker string, now ti
 		return nil, errors.New("invalid transfer claim")
 	}
 	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT event_id::text,canonical_event::text,attempt_count+1 FROM scanner_transfer_queue WHERE status IN ('pending','retry') AND next_attempt_at<=$1 AND (locked_until IS NULL OR locked_until<$1) ORDER BY next_attempt_at,event_id LIMIT $2 FOR UPDATE SKIP LOCKED`, now.UTC(), limit)
+		rows, err := tx.Query(ctx, `SELECT event_id::text,canonical_event::text,attempt_count+1 FROM scanner_transfer_queue WHERE (status IN ('pending','retry') AND next_attempt_at<=$1 AND (locked_until IS NULL OR locked_until<=$1)) OR (status='leased' AND locked_until<=$1) ORDER BY next_attempt_at,event_id LIMIT $2 FOR UPDATE SKIP LOCKED`, now.UTC(), limit)
 		if err != nil {
 			return err
 		}
@@ -251,26 +252,33 @@ func (s *ScannerStore) ClaimTransfers(ctx context.Context, worker string, now ti
 			if err := json.Unmarshal([]byte(item.payload), &event); err != nil {
 				return fmt.Errorf("decode staged transfer %s: %w", item.id, err)
 			}
-			command, err := tx.Exec(ctx, `UPDATE scanner_transfer_queue SET status='leased',locked_by=$1,locked_until=$2,attempt_count=attempt_count+1,updated_at=$3 WHERE event_id=$4 AND status IN ('pending','retry')`, worker, now.Add(lease), now, item.id)
+			claimToken, err := ids.New()
+			if err != nil {
+				return err
+			}
+			command, err := tx.Exec(ctx, `UPDATE scanner_transfer_queue SET status='leased',locked_by=$1,locked_until=$2,attempt_count=attempt_count+1,updated_at=$3,lease_token=$5 WHERE event_id=$4 AND ((status IN ('pending','retry') AND next_attempt_at<=$3 AND (locked_until IS NULL OR locked_until<=$3)) OR (status='leased' AND locked_until<=$3))`, worker, now.Add(lease), now, item.id, claimToken)
 			if err != nil {
 				return err
 			}
 			if command.RowsAffected() != 1 {
 				return domain.ErrVersionConflict
 			}
-			claimed = append(claimed, ClaimedTransfer{Event: event, Attempt: item.attempt})
+			claimed = append(claimed, ClaimedTransfer{Event: event, Attempt: item.attempt, ClaimToken: claimToken})
 		}
 		return nil
 	})
 	return claimed, err
 }
 
-func (s *ScannerStore) CompleteTransfer(ctx context.Context, worker, eventID string) error {
+func (s *ScannerStore) CompleteTransfer(ctx context.Context, worker, eventID, claimToken string) error {
+	if claimToken == "" {
+		return domain.ErrVersionConflict
+	}
 	// The queue is transport state, not financial evidence. The canonical
 	// transfer and all settlement evidence live in their dedicated immutable
 	// tables, so retaining a second JSON copy after acknowledgement only causes
 	// unbounded storage growth.
-	command, err := s.pool.Exec(ctx, `DELETE FROM scanner_transfer_queue WHERE event_id=$1 AND status='leased' AND locked_by=$2`, eventID, worker)
+	command, err := s.pool.Exec(ctx, `DELETE FROM scanner_transfer_queue WHERE event_id=$1 AND status='leased' AND locked_by=$2 AND lease_token=$3`, eventID, worker, claimToken)
 	if err != nil {
 		return err
 	}
@@ -280,12 +288,15 @@ func (s *ScannerStore) CompleteTransfer(ctx context.Context, worker, eventID str
 	return nil
 }
 
-func (s *ScannerStore) RetryTransfer(ctx context.Context, worker, eventID, reason string, next time.Time, deadLetter bool) error {
+func (s *ScannerStore) RetryTransfer(ctx context.Context, worker, eventID, claimToken, reason string, next time.Time, deadLetter bool) error {
+	if claimToken == "" {
+		return domain.ErrVersionConflict
+	}
 	status := "retry"
 	if deadLetter {
 		status = "dead_letter"
 	}
-	command, err := s.pool.Exec(ctx, `UPDATE scanner_transfer_queue SET status=$1,locked_by=NULL,locked_until=NULL,last_error=$2,next_attempt_at=$3,updated_at=clock_timestamp() WHERE event_id=$4 AND status='leased' AND locked_by=$5`, status, reason, next.UTC(), eventID, worker)
+	command, err := s.pool.Exec(ctx, `UPDATE scanner_transfer_queue SET status=$1,locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error=$2,next_attempt_at=$3,updated_at=clock_timestamp() WHERE event_id=$4 AND status='leased' AND locked_by=$5 AND lease_token=$6`, status, reason, next.UTC(), eventID, worker, claimToken)
 	if err != nil {
 		return err
 	}
