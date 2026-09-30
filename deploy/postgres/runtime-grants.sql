@@ -401,6 +401,11 @@ GRANT SELECT,INSERT,UPDATE ON ledger_transactions TO merchant_scanner_worker;
 GRANT SELECT,INSERT ON ledger_entries,callback_events TO merchant_scanner_worker;
 GRANT INSERT ON callback_deliveries,outbox_events TO merchant_scanner_worker;
 
+-- Only genuine scanner-admitted canonical reinclusion can restore a reorged
+-- transfer. Both scanner delivery and proof ingestion share this boundary.
+GRANT SELECT(chain_id,height,block_hash,canonical_status) ON chain_blocks TO
+  merchant_settlement_worker,merchant_proof_worker;
+
 -- The staged settlement worker owns canonical transfer ingestion and the full
 -- deterministic settlement transaction, including exception job enqueueing.
 GRANT SELECT,UPDATE ON scanner_transfer_queue,payment_intents,payment_routes TO merchant_settlement_worker;
