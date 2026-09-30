@@ -52,6 +52,56 @@ class Docker:
             connection.close()
 
 
+def inspect_optional(docker, identity):
+    try:
+        return docker.request("GET", "/containers/" + quote(identity, safe="") + "/json")
+    except RuntimeError as error:
+        if str(error) == "Docker request failed: HTTP 404":
+            return None
+        raise
+
+
+def restore_original(docker, original, container, backup, replacement_id=None):
+    """Reconcile actual daemon state, including mutations with lost responses."""
+    errors = []
+
+    def attempt(method, path):
+        try:
+            docker.request(method, path)
+        except (RuntimeError, OSError):
+            errors.append(method + " recovery request failed")
+
+    current = inspect_optional(docker, replacement_id or container)
+    if current and current["Id"] != original["Id"]:
+        if current["Id"] != replacement_id and (current["Image"] != original["Image"] or current["Config"].get("Env") != original["Config"].get("Env")):
+            raise RuntimeError("Rollback blocked by an unexpected container identity")
+        replacement = current["Id"]
+        attempt("POST", "/containers/" + replacement + "/stop?t=25")
+        # Deletion is independent of stop acknowledgement. Force applies only
+        # to the identified task-owned replacement, never the retained original.
+        attempt("DELETE", "/containers/" + replacement + "?force=true")
+        remaining = inspect_optional(docker, replacement)
+        if remaining:
+            if remaining["State"].get("Running"):
+                raise RuntimeError("Rollback cannot start the original while replacement is running")
+            if remaining["Name"].lstrip("/") == container:
+                attempt("POST", "/containers/" + replacement + "/rename?name=" + quote(backup + "-failed", safe=""))
+    old = inspect_optional(docker, original["Id"])
+    if not old:
+        raise RuntimeError("Retained original container is missing")
+    if old["Name"].lstrip("/") != container:
+        attempt("POST", "/containers/" + original["Id"] + "/rename?name=" + quote(container, safe=""))
+    # A failed cleanup or rename must not suppress this independent restart.
+    # At this point the replacement was verified absent or stopped.
+    old = inspect_optional(docker, original["Id"])
+    if old and not old["State"].get("Running"):
+        attempt("POST", "/containers/" + original["Id"] + "/start")
+    final = inspect_optional(docker, original["Id"])
+    if not final or not final["State"].get("Running"):
+        raise RuntimeError("Rollback did not restore the original scanner")
+    return {"running": True, "name_restored": final["Name"].lstrip("/") == container, "recovery_errors": len(errors)}
+
+
 def repair(docker, container, backup, apply=False, wait_seconds=180):
     if not re.fullmatch(r"ocrypt-scanner-[a-z0-9-]+", container) or not re.fullmatch(r"ocrypt-scanner-[a-z0-9-]+", backup) or container == backup:
         raise ValueError("Use distinct ocrypt scanner and backup names")
@@ -65,21 +115,13 @@ def repair(docker, container, backup, apply=False, wait_seconds=180):
         return result
     # Preflight the name before stopping anything. HTTP 404 is the only accepted
     # absence; permissions/connectivity failures must not be treated as absence.
-    try:
-        docker.request("GET", "/containers/" + quote(backup, safe="") + "/json")
-    except RuntimeError as error:
-        if str(error) != "Docker request failed: HTTP 404":
-            raise
-    else:
+    if inspect_optional(docker, backup):
         raise ValueError("Backup name exists; inspect it before another repair")
     old_id = original["Id"]
     new_id = None
-    stopped = renamed = False
     try:
         docker.request("POST", "/containers/" + old_id + "/stop?t=25")
-        stopped = True
         docker.request("POST", "/containers/" + old_id + "/rename?name=" + quote(backup, safe=""))
-        renamed = True
         created = docker.request("POST", "/containers/create?name=" + quote(container, safe=""), plan)
         new_id = created["Id"]
         actual = docker.request("GET", "/containers/" + new_id + "/json")
@@ -96,15 +138,10 @@ def repair(docker, container, backup, apply=False, wait_seconds=180):
                 return result
             time.sleep(2)
         raise RuntimeError("Replacement scanner readiness was not established")
-    except Exception:
-        if new_id:
-            docker.request("POST", "/containers/" + new_id + "/stop?t=25")
-            docker.request("DELETE", "/containers/" + new_id)
-        if renamed:
-            docker.request("POST", "/containers/" + old_id + "/rename?name=" + quote(container, safe=""))
-        if stopped:
-            docker.request("POST", "/containers/" + old_id + "/start")
-        raise
+    except Exception as error:
+        restored = restore_original(docker, original, container, backup, new_id)
+        description = "original scanner restored" if restored["name_restored"] else "original scanner running under retained name"
+        raise RuntimeError("Repair failed; " + description) from error
 
 
 def main():
