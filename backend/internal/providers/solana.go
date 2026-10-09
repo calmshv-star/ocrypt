@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -485,31 +486,45 @@ func (s *SolanaSource) normalizeSolanaTransaction(transaction solanaTransaction,
 		accountKeys[i] = key
 	}
 	tokenAccounts := map[string]solanaTokenBalance{}
-	for _, balance := range append(append([]solanaTokenBalance(nil), transaction.Meta.PreTokenBalances...), transaction.Meta.PostTokenBalances...) {
-		if int(balance.AccountIndex) >= len(accountKeys) || !validBase58Length(balance.Mint, 32) || !validBase58Length(balance.Owner, 32) {
-			return nil, malformed("solana token balance", errors.New("invalid token account metadata"))
+	if len(s.assets) > 0 {
+		for _, balance := range append(append([]solanaTokenBalance(nil), transaction.Meta.PreTokenBalances...), transaction.Meta.PostTokenBalances...) {
+			if int(balance.AccountIndex) >= len(accountKeys) || !validBase58Length(balance.Mint, 32) || !validBase58Length(balance.Owner, 32) {
+				return nil, malformed("solana token balance", errors.New("invalid token account metadata"))
+			}
+			if err := mergeSolanaTokenAccount(tokenAccounts, accountKeys[balance.AccountIndex], balance); err != nil {
+				return nil, err
+			}
 		}
-		tokenAccounts[accountKeys[balance.AccountIndex]] = balance
 	}
 	success := len(transaction.Meta.Err) == 0 || string(transaction.Meta.Err) == "null"
 	parsed := chains.SolanaTransaction{Signature: signature, Slot: slot, BlockHash: blockHash, BlockTime: blockTime, Success: success, Finalized: true, Confirmations: safe - slot + 1}
 	if success {
+		sort.Slice(transaction.Meta.InnerInstructions, func(i, j int) bool {
+			return transaction.Meta.InnerInstructions[i].Index < transaction.Meta.InnerInstructions[j].Index
+		})
+		innerByOuter := make(map[uint32][]solanaInstruction, len(transaction.Meta.InnerInstructions))
+		for _, group := range transaction.Meta.InnerInstructions {
+			if uint64(group.Index) >= uint64(len(transaction.Transaction.Message.Instructions)) {
+				return nil, malformed("solana inner instructions", errors.New("out-of-range outer instruction index"))
+			}
+			if _, exists := innerByOuter[group.Index]; exists {
+				return nil, malformed("solana inner instructions", errors.New("duplicate outer instruction index"))
+			}
+			innerByOuter[group.Index] = group.Instructions
+		}
 		for outer, instruction := range transaction.Transaction.Message.Instructions {
-			transfer, ok, err := s.parseSolanaInstruction(instruction, tokenAccounts, uint32(outer), nil)
+			transfer, ok, err := s.parseSolanaInstruction(instruction, tokenAccounts, accountKeys, uint32(outer), nil)
 			if err != nil {
 				return nil, err
 			}
 			if ok {
 				parsed.Transfers = append(parsed.Transfers, transfer)
 			}
-		}
-		sort.Slice(transaction.Meta.InnerInstructions, func(i, j int) bool {
-			return transaction.Meta.InnerInstructions[i].Index < transaction.Meta.InnerInstructions[j].Index
-		})
-		for _, group := range transaction.Meta.InnerInstructions {
-			for inner, instruction := range group.Instructions {
+			// Inner instructions execute before the next outer instruction, so
+			// a later transfer can use an account initialized by an earlier CPI.
+			for inner, instruction := range innerByOuter[uint32(outer)] {
 				index := uint32(inner)
-				transfer, ok, err := s.parseSolanaInstruction(instruction, tokenAccounts, group.Index, &index)
+				transfer, ok, err := s.parseSolanaInstruction(instruction, tokenAccounts, accountKeys, uint32(outer), &index)
 				if err != nil {
 					return nil, err
 				}
@@ -524,7 +539,7 @@ func (s *SolanaSource) normalizeSolanaTransaction(transaction solanaTransaction,
 	return adapter.Normalize(context.Background(), signature)
 }
 
-func (s *SolanaSource) parseSolanaInstruction(instruction solanaInstruction, tokenAccounts map[string]solanaTokenBalance, outer uint32, inner *uint32) (chains.SolanaTransfer, bool, error) {
+func (s *SolanaSource) parseSolanaInstruction(instruction solanaInstruction, tokenAccounts map[string]solanaTokenBalance, accountKeys []string, outer uint32, inner *uint32) (chains.SolanaTransfer, bool, error) {
 	if len(instruction.Parsed) == 0 || string(instruction.Parsed) == "null" {
 		return chains.SolanaTransfer{}, false, nil
 	}
@@ -556,10 +571,10 @@ func (s *SolanaSource) parseSolanaInstruction(instruction solanaInstruction, tok
 		return chains.SolanaTransfer{OuterIndex: outer, InnerIndex: inner, Program: "system", From: from, To: to, AssetID: s.nativeAssetID, Amount: amount, Decimals: s.nativeDecimals, Native: true}, true, nil
 	}
 	programID := instruction.ProgramID
-	if programID == "" && instruction.Program == "spl-token" {
-		programID = solanaTokenProgram
-	}
 	if programID != solanaTokenProgram && programID != solanaToken2022Program {
+		if programID == "" && instruction.Program == "spl-token" && len(s.assets) > 0 && (parsed.Type == "transfer" || parsed.Type == "transferChecked" || parsed.Type == "initializeAccount") {
+			return chains.SolanaTransfer{}, false, malformed("solana token instruction", errors.New("missing token program"))
+		}
 		return chains.SolanaTransfer{}, false, nil
 	}
 	if len(s.assets) == 0 {
@@ -567,24 +582,49 @@ func (s *SolanaSource) parseSolanaInstruction(instruction solanaInstruction, tok
 		// validating metadata for unrelated SPL-token traffic.
 		return chains.SolanaTransfer{}, false, nil
 	}
+	if parsed.Type == "initializeAccount" {
+		account, accountOK := stringValue(info["account"])
+		mint, mintOK := stringValue(info["mint"])
+		owner, ownerOK := stringValue(info["owner"])
+		if !accountOK || !mintOK || !ownerOK || !slices.Contains(accountKeys, account) || !validBase58Length(mint, 32) || !validBase58Length(owner, 32) {
+			return chains.SolanaTransfer{}, false, malformed("solana token instruction", errors.New("invalid token account initialization"))
+		}
+		// Accounts created and closed in one transaction have no balance entry.
+		// Recognized initialization evidence binds their mint and owner without
+		// guessing from the transfer destination or replacing conflicting data.
+		err := mergeSolanaTokenAccount(tokenAccounts, account, solanaTokenBalance{Mint: mint, Owner: owner, ProgramID: programID})
+		return chains.SolanaTransfer{}, false, err
+	}
 	if parsed.Type != "transfer" && parsed.Type != "transferChecked" {
 		return chains.SolanaTransfer{}, false, nil
 	}
 	sourceAccount, sourceOK := stringValue(info["source"])
 	destinationAccount, destinationOK := stringValue(info["destination"])
-	if !sourceOK || !destinationOK {
+	if !sourceOK || !destinationOK || !validBase58Length(sourceAccount, 32) || !validBase58Length(destinationAccount, 32) {
 		return chains.SolanaTransfer{}, false, malformed("solana token instruction", errors.New("missing token accounts"))
 	}
 	sourceMetadata, sourceFound := tokenAccounts[sourceAccount]
 	destinationMetadata, destinationFound := tokenAccounts[destinationAccount]
+	if rawMint, present := info["mint"]; present {
+		mint, mintOK := stringValue(rawMint)
+		if !mintOK || !validBase58Length(mint, 32) {
+			return chains.SolanaTransfer{}, false, malformed("solana token instruction", errors.New("invalid parsed mint"))
+		}
+		if (sourceFound && (sourceMetadata.Mint != mint || sourceMetadata.ProgramID != programID)) ||
+			(destinationFound && (destinationMetadata.Mint != mint || destinationMetadata.ProgramID != programID)) {
+			return chains.SolanaTransfer{}, false, malformed("solana token instruction", errors.New("parsed mint or program mismatch"))
+		}
+		if _, supported := s.assets[mint]; !supported && parsed.Type == "transferChecked" {
+			// Explicit mint evidence can identify unrelated transferChecked
+			// traffic even when a temporary account has no balance metadata.
+			return chains.SolanaTransfer{}, false, nil
+		}
+	}
 	if !sourceFound || !destinationFound || sourceMetadata.Mint != destinationMetadata.Mint {
 		return chains.SolanaTransfer{}, false, malformed("solana token instruction", errors.New("token account owner or mint unavailable"))
 	}
 	if sourceMetadata.ProgramID != programID || destinationMetadata.ProgramID != programID {
 		return chains.SolanaTransfer{}, false, malformed("solana token instruction", errors.New("token program ownership mismatch"))
-	}
-	if mint, exists := stringValue(info["mint"]); exists && mint != sourceMetadata.Mint {
-		return chains.SolanaTransfer{}, false, malformed("solana token instruction", errors.New("parsed mint mismatch"))
 	}
 	asset, supported := s.assets[sourceMetadata.Mint]
 	if !supported {
@@ -604,6 +644,14 @@ func (s *SolanaSource) parseSolanaInstruction(instruction solanaInstruction, tok
 		program = "spl-token-2022"
 	}
 	return chains.SolanaTransfer{OuterIndex: outer, InnerIndex: inner, Program: program, From: sourceMetadata.Owner, To: destinationMetadata.Owner, AssetID: asset.AssetID, Amount: amount, Decimals: asset.Decimals}, true, nil
+}
+
+func mergeSolanaTokenAccount(accounts map[string]solanaTokenBalance, account string, metadata solanaTokenBalance) error {
+	if previous, exists := accounts[account]; exists && (previous.Mint != metadata.Mint || previous.Owner != metadata.Owner || previous.ProgramID != metadata.ProgramID) {
+		return malformed("solana token balance", errors.New("conflicting token account metadata"))
+	}
+	accounts[account] = metadata
+	return nil
 }
 
 type fixedSolanaTransaction struct{ value chains.SolanaTransaction }
