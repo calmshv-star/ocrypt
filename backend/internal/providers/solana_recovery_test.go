@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"reflect"
 	"testing"
@@ -185,6 +186,8 @@ func TestSolanaConfiguredAssetsHandleUnsupportedTemporaryTokenAccount(t *testing
 	for _, fault := range []string{"none", "missing initialization mint", "missing initialization owner", "invalid initialization owner", "conflicting destination mint"} {
 		t.Run(fault, func(t *testing.T) {
 			transaction := solanaRecoveryTransaction(t)
+			// The inner lifecycle belongs to the second outer instruction.
+			transaction.Transaction.Message.Instructions = append(transaction.Transaction.Message.Instructions, solanaInstruction{})
 			initialization := map[string]any{"account": solanaTokenProgram, "mint": solanaRecoveryTo, "owner": solanaRecoveryFrom, "rentSysvar": "SysvarRent111111111111111111111111111111111"}
 			transaction.Meta.PostTokenBalances = []solanaTokenBalance{{AccountIndex: 3, Mint: solanaRecoveryTo, Owner: solanaRecoveryTo, ProgramID: solanaTokenProgram}}
 			switch fault {
@@ -298,6 +301,84 @@ func TestSolanaTemporaryTokenInitializationRequiresAccountKey(t *testing.T) {
 	var providerError *ProviderError
 	if !errors.As(err, &providerError) || providerError.Kind != ErrorMalformed || len(events) != 0 {
 		t.Fatalf("initialization outside message account keys authorized token filtering: events=%+v err=%v", events, err)
+	}
+}
+
+func TestSolanaTemporaryTokenLifecycleFollowsExecutionOrder(t *testing.T) {
+	for _, supported := range []bool{false, true} {
+		for _, fault := range []string{"none", "late initialization", "conflicting destination mint", "missing initialization owner"} {
+			t.Run(fmt.Sprintf("supported=%t/%s", supported, fault), func(t *testing.T) {
+				transaction := solanaRecoveryTransaction(t)
+				initialization := map[string]any{"account": solanaTokenProgram, "mint": solanaRecoveryTo, "owner": solanaRecoveryFrom}
+				transaction.Meta.PostTokenBalances = []solanaTokenBalance{{AccountIndex: 3, Mint: solanaRecoveryTo, Owner: solanaRecoveryTo, ProgramID: solanaTokenProgram}}
+				if fault == "conflicting destination mint" {
+					transaction.Meta.PostTokenBalances[0].Mint = solanaRecoveryFrom
+				}
+				if fault == "missing initialization owner" {
+					delete(initialization, "owner")
+				}
+				parsed, err := json.Marshal(map[string]any{"type": "initializeAccount", "info": initialization})
+				if err != nil {
+					t.Fatal(err)
+				}
+				transaction.Transaction.Message.Instructions = append(transaction.Transaction.Message.Instructions,
+					solanaInstruction{}, // Outer1 invokes the inner initialization.
+					solanaInstruction{Program: "spl-token", ProgramID: solanaTokenProgram, Parsed: json.RawMessage(`{"type":"transfer","info":{"source":"` + solanaTokenProgram + `","destination":"` + solanaToken2022Program + `","amount":"` + solanaRecoveryAmount + `"}}`)},
+					solanaInstruction{Program: "spl-token", ProgramID: solanaTokenProgram, Parsed: json.RawMessage(`{"type":"closeAccount","info":{"account":"` + solanaTokenProgram + `","destination":"` + solanaRecoveryFrom + `","owner":"` + solanaRecoveryFrom + `"}}`)},
+				)
+				groupIndex := uint32(1)
+				if fault == "late initialization" {
+					groupIndex = 3
+				}
+				transaction.Meta.InnerInstructions = []solanaInnerGroup{{Index: groupIndex, Instructions: []solanaInstruction{{Program: "spl-token", ProgramID: solanaTokenProgram, Parsed: parsed}}}}
+				assets := map[string]SolanaAsset{solanaRecoveryFrom: {AssetID: "other-token", Decimals: 6}}
+				if supported {
+					assets[solanaRecoveryTo] = SolanaAsset{AssetID: "configured-token", Decimals: 6}
+				}
+				events, err := solanaRecoverySource(assets).normalizeSolanaTransaction(transaction, 7, solanaRecoveryTo, time.Unix(100, 0).UTC(), 9)
+				if fault != "none" {
+					var providerError *ProviderError
+					if !errors.As(err, &providerError) || providerError.Kind != ErrorMalformed || len(events) != 0 {
+						t.Fatalf("incomplete, late or conflicting token evidence did not fail closed: events=%+v err=%v", events, err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("earlier inner initialization was unavailable to later outer transfer: %v", err)
+				}
+				if !supported {
+					assertSolanaRecoveryNative(t, events)
+					return
+				}
+				if len(events) != 2 {
+					t.Fatalf("expected native and configured token, got %+v", events)
+				}
+				assertSolanaRecoveryNative(t, events[:1])
+				if event := events[1]; event.Identity.EventIndex != "instruction:2" || event.Identity.AssetID != "configured-token" || event.Identity.TransactionID != solanaRecoverySignature || event.Identity.ToAddress != solanaRecoveryTo || event.FromAddress != solanaRecoveryFrom || event.Amount.String() != solanaRecoveryAmount || event.AssetDecimals != 6 || event.Status != domain.TransferFinalized {
+					t.Fatalf("cross-outer token identity or exact money changed: %+v", event)
+				}
+			})
+		}
+	}
+}
+
+func TestSolanaRejectsAmbiguousInnerInstructionGroups(t *testing.T) {
+	for _, fault := range []string{"duplicate index", "out of range index"} {
+		t.Run(fault, func(t *testing.T) {
+			transaction := solanaRecoveryTransaction(t)
+			group := solanaInnerGroup{Index: 0, Instructions: []solanaInstruction{transaction.Transaction.Message.Instructions[0]}}
+			transaction.Meta.InnerInstructions = []solanaInnerGroup{group}
+			if fault == "duplicate index" {
+				transaction.Meta.InnerInstructions = append(transaction.Meta.InnerInstructions, group)
+			} else {
+				transaction.Meta.InnerInstructions[0].Index = 1
+			}
+			events, err := solanaRecoverySource(nil).normalizeSolanaTransaction(transaction, 7, solanaRecoveryTo, time.Unix(100, 0).UTC(), 9)
+			var providerError *ProviderError
+			if !errors.As(err, &providerError) || providerError.Kind != ErrorMalformed || len(events) != 0 {
+				t.Fatalf("ambiguous inner group could be dropped or duplicated: events=%+v err=%v", events, err)
+			}
+		})
 	}
 }
 

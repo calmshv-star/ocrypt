@@ -499,6 +499,19 @@ func (s *SolanaSource) normalizeSolanaTransaction(transaction solanaTransaction,
 	success := len(transaction.Meta.Err) == 0 || string(transaction.Meta.Err) == "null"
 	parsed := chains.SolanaTransaction{Signature: signature, Slot: slot, BlockHash: blockHash, BlockTime: blockTime, Success: success, Finalized: true, Confirmations: safe - slot + 1}
 	if success {
+		sort.Slice(transaction.Meta.InnerInstructions, func(i, j int) bool {
+			return transaction.Meta.InnerInstructions[i].Index < transaction.Meta.InnerInstructions[j].Index
+		})
+		innerByOuter := make(map[uint32][]solanaInstruction, len(transaction.Meta.InnerInstructions))
+		for _, group := range transaction.Meta.InnerInstructions {
+			if uint64(group.Index) >= uint64(len(transaction.Transaction.Message.Instructions)) {
+				return nil, malformed("solana inner instructions", errors.New("out-of-range outer instruction index"))
+			}
+			if _, exists := innerByOuter[group.Index]; exists {
+				return nil, malformed("solana inner instructions", errors.New("duplicate outer instruction index"))
+			}
+			innerByOuter[group.Index] = group.Instructions
+		}
 		for outer, instruction := range transaction.Transaction.Message.Instructions {
 			transfer, ok, err := s.parseSolanaInstruction(instruction, tokenAccounts, accountKeys, uint32(outer), nil)
 			if err != nil {
@@ -507,14 +520,11 @@ func (s *SolanaSource) normalizeSolanaTransaction(transaction solanaTransaction,
 			if ok {
 				parsed.Transfers = append(parsed.Transfers, transfer)
 			}
-		}
-		sort.Slice(transaction.Meta.InnerInstructions, func(i, j int) bool {
-			return transaction.Meta.InnerInstructions[i].Index < transaction.Meta.InnerInstructions[j].Index
-		})
-		for _, group := range transaction.Meta.InnerInstructions {
-			for inner, instruction := range group.Instructions {
+			// Inner instructions execute before the next outer instruction, so
+			// a later transfer can use an account initialized by an earlier CPI.
+			for inner, instruction := range innerByOuter[uint32(outer)] {
 				index := uint32(inner)
-				transfer, ok, err := s.parseSolanaInstruction(instruction, tokenAccounts, accountKeys, group.Index, &index)
+				transfer, ok, err := s.parseSolanaInstruction(instruction, tokenAccounts, accountKeys, uint32(outer), &index)
 				if err != nil {
 					return nil, err
 				}
