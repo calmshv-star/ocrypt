@@ -23,3 +23,16 @@ Current source already skips token instructions in native-only configurations,
 whereas production runs an older scanner image. Tests must disclose already
 passing behavior and add coverage for remaining token-balance poisoning rather
 than change accepted expectations merely to claim a red test.
+
+## 2026-10-09 — Actual blocker and fulfillment
+
+Production is not native-only: USDC and USDT remain enabled. An unsupported
+wrapped-SOL temporary account is initialized and closed in the same transaction,
+so balance metadata does not contain its source. Initialization provides mint,
+owner, account, and recognized program evidence. Normalization must distinguish
+this irrelevant transfer from ambiguous or conflicting supported-token evidence;
+do not disable token scanning or blanket-ignore normalization errors.
+
+The verified customer payment was fulfilled through the canonical proof lookup,
+exact finalized settlement, and integrator callback. Remaining work is scanner
+recovery, replay-safe runtime verification, and publication/deployment evidence.
