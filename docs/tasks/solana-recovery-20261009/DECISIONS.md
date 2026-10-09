@@ -36,3 +36,11 @@ do not disable token scanning or blanket-ignore normalization errors.
 The verified customer payment was fulfilled through the canonical proof lookup,
 exact finalized settlement, and integrator callback. Remaining work is scanner
 recovery, replay-safe runtime verification, and publication/deployment evidence.
+
+## 2026-10-09 — Explicit security-gate extension
+
+GitHub's supply-chain gate reports four HIGH Jackson issues in the unchanged
+Java SDK dependency 2.18.10; backend, scanner image, browser, SDK and functional
+checks passed. The user explicitly approved updating and checking this dependency,
+then reiterated main GitHub publication after completion. Upgrade only the patch
+line, retain existing SDK contracts/golden vectors, and do not bypass security CI.

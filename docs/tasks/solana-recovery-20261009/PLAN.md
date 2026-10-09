@@ -59,9 +59,21 @@ and a local evidence reference. Never commit credentials or customer records.
   gate were not enabled; source checks do not establish those unrelated live gates.
 - Linux amd64 scanner binary was built with Go 1.26.6 from clean `98868a2`; SHA256
   `5c8cfd766b6b173e505215bc52e1634ecbd41a910de3bf277bd6f7b8cd9eeceb` matched the server copy.
+- Scanner-only image `ocrypt-scanner:20261009-solana-recovery-98868a2` is running
+  with the original configuration, shard/cursor and retained stopped original.
+  It crossed the blocking slot and continues committing the historical backlog.
+  The only Docker representation normalization is original OomKillDisable null
+  versus recreated false (same default behavior); true and other drift fail.
+  A first strict attempt rolled back safely; four private rollout tests and
+  independent review cover retry/rollback safety. Readiness awaits backlog catch-up.
+- GitHub PR #111 publishes this source. All functional/container/browser checks
+  on `bd73a16` passed; supply-chain and consequently release-gate failed because
+  unchanged Java Jackson 2.18.10 has four HIGH findings. User explicitly approved
+  the bounded patch upgrade and main-branch update after checks.
 
 ## Resume / next action
 
-Orchestrator performs scanner-only rollout, compares runtime configuration,
-verifies continuing cursor advancement and one canonical customer grant after
-replay, then publishes the matching source and evidence to GitHub.
+Allocate a separate Java dependency writer from the updated accepted snapshot.
+Orchestrator continues lossless scanner catch-up/readiness and canonical replay
+verification while the approved dependency patch is independently checked.
+Publish final evidence, await all required CI, and merge PR #111 without bypasses.

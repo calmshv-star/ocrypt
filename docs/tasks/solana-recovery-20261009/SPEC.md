@@ -12,6 +12,12 @@ publication on 2026-10-09. The orchestrator alone operates production/GitHub.
 No unresolved product choice remains. Customer identifiers and chain evidence
 remain in private local operational artifacts, never committed fixtures.
 
+On 2026-10-09 the user additionally approved patch-upgrading the Java SDK's
+Jackson dependency to clear the independently failing GitHub security gate,
+checking SDK compatibility, and updating the main GitHub branch after checks.
+This extension is limited to that dependency and required verification; no Java
+service is deployed and no payment protocol or business parameter changes.
+
 The production scanner repeats `solana token instruction (malformed_response)`
 and retains slot 454579086 while a later finalized native SOL payment is not
 observed. The existing September scanner binary is behind current source.
@@ -37,6 +43,7 @@ the confirmed order; integrator fulfillment must remain exactly once.
 | F1 | The confirmed exact, timely SOL payment is fulfilled and replayed | One match/ledger effect and one Showy subscription, no duplicate grant | Canonical proof/settlement and live read-only verification | Pending |
 | D1 | Replace only the Solana scanner with verified source | Same runtime settings and retained history; cursor crosses the payment and continues, readiness passes | Config comparison, retained rollback, repeated cursor/error checks | Pending |
 | G1 | Publish the integrated tested repair | GitHub commit/PR references match deployed source | Git remote/API verification | Pending |
+| J1 | Approved Java Jackson patch upgrade | Golden SDK contracts remain compatible; security findings on unchanged 2.18.10 dependency clear; required GitHub checks pass before merge | Maven SDK tests, dependency resolution and GitHub security/release gate | Baseline security gate failed four HIGH Jackson findings; upgrade pending |
 
 For financial changes include relevant exact-money, negative, duplicate/replay,
 concurrency, tenant, finality, and external-delivery cases.
