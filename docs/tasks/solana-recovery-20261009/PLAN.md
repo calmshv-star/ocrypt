@@ -12,7 +12,7 @@ snapshot with the helper before assigning implementation workers.
 - [x] Dependencies, writer ownership, and common base assigned.
 - [x] Implementation complete and focused checks pass.
 - [x] Integrated diff independently reviewed; relevant checks repeated.
-- [ ] Completion evidence and remaining runtime/deployment limits recorded.
+- [x] Completion evidence and remaining runtime/deployment limits recorded.
 
 ## Assignments
 
@@ -21,6 +21,7 @@ snapshot with the helper before assigning implementation workers.
 | tests-first | test-author | `.ocrypt-agent-worktrees/solana-recovery-20261009/tests-first`; `agent/solana-recovery-20261009/tests-first`; base `11bd80a` | `backend/internal/providers/solana_recovery_test.go` | S1, S2, S3 | Integrated signed commit `824a732`; agent finished and worktree clean. |
 | implementation | worker | `/Users/deniss/Documents/Codex/2026-08-12/new-chat/work/ocrypt/work/.ocrypt-agent-worktrees/solana-recovery-20261009/implementation`; `agent/solana-recovery-20261009/implementation`; base `a74ab17` | `solana.go`, focused provider recovery tests | S1, S2, S3 | Integrated signed commits `4721984`, `6f02c26`, `98868a2`; worker finished and worktree clean. |
 | independent-review | reviewer, read-only | Coordinator checkout, integrated `98868a2`; no writer allocation | Integrated diff and private rollout artifact | S1, S2, S3, D1 preparation | Two P1 findings resolved and independently re-reviewed; no remaining actionable findings. |
+| java-security | worker | `/Users/deniss/Documents/Codex/2026-08-12/new-chat/work/ocrypt/work/.ocrypt-agent-worktrees/solana-recovery-20261009/java-security`; `agent/solana-recovery-20261009/java-security`; base `6a967c0` | `sdk/java/pom.xml` only | J1 | Signed `4f92859` integrated; independent bounded review passed. |
 
 ## Evidence
 
@@ -70,10 +71,41 @@ and a local evidence reference. Never commit credentials or customer records.
   on `bd73a16` passed; supply-chain and consequently release-gate failed because
   unchanged Java Jackson 2.18.10 has four HIGH findings. User explicitly approved
   the bounded patch upgrade and main-branch update after checks.
+- D1 runtime verification at 06:40 UTC: cursor advanced losslessly from 454579086
+  through the blocker and customer slot to 454788342 (block time 06:40:11 UTC),
+  then continued live-range commits. In-container readiness exited 0 and Docker
+  health is healthy. Image ID `sha256:ce85c65f6b7446fdec9f4e3e95ff46107644943bd7443409534cb946dfc4c36b`
+  identifies deployed Go revision `98868a2`. Original container/image retained
+  for rollback; no shard, cursor, rate interval, threshold, quorum or token-support
+  changes. Do not redeploy unrelated services.
+- F1 actual replay verification: scanner re-observed the canonical customer event
+  (version advanced to 2) while counts remained one transfer, one match, one
+  settlement ledger transaction and one activated Showy subscription. Paid access
+  remains active with its original activation/expiry. No synthetic production test
+  or direct ledger update was used.
+- J1 approved patch `4f92859` changes only Jackson 2.18.10 to 2.18.11. Official
+  Maven BOM/POM and resolved dependency tree agree for core/databind/annotations.
+  Baseline, upgraded, exact-commit and integrated Maven clean-test/dependency-tree
+  runs each pass 3 golden-vector tests with zero failures/errors/skips (Maven
+  3.9.16, Temurin 17.0.20.1, sanitized environment and isolated dependency cache).
+  Independent review found no SDK protocol/source or Go changes.
+- GitHub publication audit: [PR #111](https://github.com/calmshv-star/ocrypt/pull/111)
+  retains the final source, required current-head supply-chain/release-gate results,
+  and main-branch merge event. Merge is permitted only after every required check
+  succeeds; the previous failed security scan is not bypassed or reported green.
+
+## Remaining boundaries
+
+This repair is not a guarantee of universal RPC availability or every possible
+Solana token instruction form. Temporary-account inference deliberately recognizes
+the verified `initializeAccount` form; unbound or conflicting supported evidence
+still fails closed. Full unrelated sandbox/live release manifests were not exercised
+locally. GitHub's required release checks and linked merge record are authoritative
+for publication; local unit tests alone are not that evidence.
 
 ## Resume / next action
 
-Allocate a separate Java dependency writer from the updated accepted snapshot.
-Orchestrator continues lossless scanner catch-up/readiness and canonical replay
-verification while the approved dependency patch is independently checked.
-Publish final evidence, await all required CI, and merge PR #111 without bypasses.
+Use the deployed Go revision and linked PR's current-head checks/merge record for
+handoff. No customer replay, cursor reset, configuration change or unrelated
+deployment is required. Retained rollback artifacts belong to this scanner-only
+rollout, not a general server cleanup request.
