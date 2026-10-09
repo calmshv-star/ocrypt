@@ -31,9 +31,9 @@ the confirmed order; integrator fulfillment must remain exactly once.
 
 | ID | Behavior/input/fault | Expected result | Test or manual check | Evidence |
 | --- | --- | --- | --- | --- |
-| S1 | Native-only transaction contains unrelated SPL/Token-2022 instructions or malformed token balances | Valid native payment survives; unrelated tokens are not emitted | Offline provider regression, red where current source fails | Pending |
-| S2 | A configured supported token transfer has missing/conflicting owner/mint/program/amount evidence | No guessed or forged payment; fail closed | Existing and focused negative provider tests | Pending |
-| S3 | Indexed scan and direct proof lookup normalize the same confirmed native transfer | Canonical identity and exact integer amount agree | Existing/focused scan and lookup tests | Pending |
+| S1 | Native-only transaction contains unrelated SPL/Token-2022 instructions or malformed token balances | Valid native payment survives; unrelated tokens are not emitted | Offline provider regression, red where current source fails | Passed on integrated `98868a2`, including unsupported temporary account and cross-outer lifecycle |
+| S2 | A configured supported token transfer has missing/conflicting owner/mint/program/amount evidence | No guessed or forged payment; fail closed | Existing and focused negative provider tests | Passed exact-money, conflict, missing evidence, group-index and late-init negatives on `98868a2` |
+| S3 | Indexed scan and direct proof lookup normalize the same confirmed native transfer | Canonical identity and exact integer amount agree | Existing/focused scan and lookup tests | Passed canonical indices, replay and integer amount above float precision on `98868a2` |
 | F1 | The confirmed exact, timely SOL payment is fulfilled and replayed | One match/ledger effect and one Showy subscription, no duplicate grant | Canonical proof/settlement and live read-only verification | Pending |
 | D1 | Replace only the Solana scanner with verified source | Same runtime settings and retained history; cursor crosses the payment and continues, readiness passes | Config comparison, retained rollback, repeated cursor/error checks | Pending |
 | G1 | Publish the integrated tested repair | GitHub commit/PR references match deployed source | Git remote/API verification | Pending |

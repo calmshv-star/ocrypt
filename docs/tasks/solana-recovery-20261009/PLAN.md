@@ -9,9 +9,9 @@ snapshot with the helper before assigning implementation workers.
 
 - [x] Material questions resolved; specification and acceptance matrix recorded.
 - [x] Tests authored; expected failures inspected (or artifact validation defined).
-- [ ] Dependencies, writer ownership, and common base assigned.
-- [ ] Implementation complete and focused checks pass.
-- [ ] Integrated diff independently reviewed; relevant checks repeated.
+- [x] Dependencies, writer ownership, and common base assigned.
+- [x] Implementation complete and focused checks pass.
+- [x] Integrated diff independently reviewed; relevant checks repeated.
 - [ ] Completion evidence and remaining runtime/deployment limits recorded.
 
 ## Assignments
@@ -19,6 +19,8 @@ snapshot with the helper before assigning implementation workers.
 | Worker | Role | Absolute worktree / branch / base | Owned paths | Acceptance IDs | Dependencies |
 | --- | --- | --- | --- | --- | --- |
 | tests-first | test-author | `.ocrypt-agent-worktrees/solana-recovery-20261009/tests-first`; `agent/solana-recovery-20261009/tests-first`; base `11bd80a` | `backend/internal/providers/solana_recovery_test.go` | S1, S2, S3 | Integrated signed commit `824a732`; agent finished and worktree clean. |
+| implementation | worker | `/Users/deniss/Documents/Codex/2026-08-12/new-chat/work/ocrypt/work/.ocrypt-agent-worktrees/solana-recovery-20261009/implementation`; `agent/solana-recovery-20261009/implementation`; base `a74ab17` | `solana.go`, focused provider recovery tests | S1, S2, S3 | Integrated signed commits `4721984`, `6f02c26`, `98868a2`; worker finished and worktree clean. |
+| independent-review | reviewer, read-only | Coordinator checkout, integrated `98868a2`; no writer allocation | Integrated diff and private rollout artifact | S1, S2, S3, D1 preparation | Two P1 findings resolved and independently re-reviewed; no remaining actionable findings. |
 
 ## Evidence
 
@@ -39,9 +41,27 @@ and a local evidence reference. Never commit credentials or customer records.
   outside the repository.
 - Production scanner remains at its original cursor with readiness 503; no
   configuration or cursor was changed. Preserve the original container for rollback.
+- Integrated repair revision: `98868a2cf6cd2c1110d740f37a60130e54d00217`.
+- Independent review found outer-before-inner processing could miss earlier CPI
+  initialization; tests-first cross-outer regressions reproduced it. Final code
+  interleaves execution while retaining canonical indices, and rejects duplicate
+  or out-of-range inner groups. One synthetic fixture gained its missing opaque
+  outer instruction; lifecycle and expectations did not change.
+- Independent review also found a private rollout crash-window rollback issue;
+  exact replacement reconciliation and atomic private journal writes resolve it.
+  Three offline rollout fault tests and independent re-review pass.
+- On clean integrated `98868a2`, `check financial` passed tests, focused vet/race,
+  identity and aggregation fuzz; evidence `.agent-evidence/20261009T062134Z-financial-4b43a853/result.json`.
+- On the same revision, `check backend` passed all Go tests/build/vet/race;
+  evidence `.agent-evidence/20261009T062135Z-backend-82c7c9e0/result.json`.
+- The workflow profile passed 13 tests before implementation. Opt-in disposable
+  PostgreSQL/live credential/native EVM diagnostics and the full web/live release
+  gate were not enabled; source checks do not establish those unrelated live gates.
+- Linux amd64 scanner binary was built with Go 1.26.6 from clean `98868a2`; SHA256
+  `5c8cfd766b6b173e505215bc52e1634ecbd41a910de3bf277bd6f7b8cd9eeceb` matched the server copy.
 
 ## Resume / next action
 
-Pin the accepted tests and allocate the implementation writer. Repair normalization
-without ignoring ambiguous supported-token evidence. The orchestrator prepares a
-scanner-only image rollout preserving every runtime setting, cursor, and history.
+Orchestrator performs scanner-only rollout, compares runtime configuration,
+verifies continuing cursor advancement and one canonical customer grant after
+replay, then publishes the matching source and evidence to GitHub.
