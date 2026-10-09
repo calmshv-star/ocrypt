@@ -229,6 +229,63 @@ func TestSolanaConfiguredAssetsHandleUnsupportedTemporaryTokenAccount(t *testing
 	}
 }
 
+func TestSolanaTokenAccountEvidenceCannotBeOverwritten(t *testing.T) {
+	for _, origin := range []string{"balance", "initialization"} {
+		for _, conflict := range []string{"mint", "owner", "program"} {
+			t.Run(origin+"/"+conflict, func(t *testing.T) {
+				transaction := solanaRecoveryTransaction(t)
+				metadata := solanaTokenBalance{AccountIndex: 2, Mint: solanaRecoveryTo, Owner: solanaRecoveryFrom, ProgramID: solanaTokenProgram}
+				transaction.Meta.PreTokenBalances = []solanaTokenBalance{metadata}
+				transaction.Meta.PostTokenBalances = []solanaTokenBalance{{AccountIndex: 3, Mint: solanaRecoveryTo, Owner: solanaRecoveryTo, ProgramID: solanaTokenProgram}}
+				conflicting := metadata
+				switch conflict {
+				case "mint":
+					conflicting.Mint = solanaRecoveryFrom
+				case "owner":
+					conflicting.Owner = solanaRecoveryTo
+				case "program":
+					conflicting.ProgramID = solanaToken2022Program
+				}
+				if origin == "balance" {
+					// The post balance must not silently replace conflicting pre evidence.
+					transaction.Meta.PreTokenBalances[0] = conflicting
+					transaction.Meta.PostTokenBalances = append(transaction.Meta.PostTokenBalances, metadata)
+				} else {
+					parsed, err := json.Marshal(map[string]any{"type": "initializeAccount", "info": map[string]any{"account": solanaTokenProgram, "mint": conflicting.Mint, "owner": conflicting.Owner}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					transaction.Transaction.Message.Instructions = append(transaction.Transaction.Message.Instructions, solanaInstruction{Program: "spl-token", ProgramID: conflicting.ProgramID, Parsed: parsed})
+				}
+				transaction.Transaction.Message.Instructions = append(transaction.Transaction.Message.Instructions, solanaInstruction{Program: "spl-token", ProgramID: solanaTokenProgram, Parsed: json.RawMessage(`{"type":"transfer","info":{"source":"` + solanaTokenProgram + `","destination":"` + solanaToken2022Program + `","amount":"42"}}`)})
+				events, err := solanaRecoverySource(map[string]SolanaAsset{solanaRecoveryTo: {AssetID: "configured-token", Decimals: 6}}).normalizeSolanaTransaction(transaction, 7, solanaRecoveryTo, time.Unix(100, 0).UTC(), 9)
+				var providerError *ProviderError
+				if !errors.As(err, &providerError) || providerError.Kind != ErrorMalformed || len(events) != 0 {
+					t.Fatalf("conflicting account evidence was overwritten: events=%+v err=%v", events, err)
+				}
+			})
+		}
+	}
+}
+
+func TestSolanaTemporaryTokenInitializationRequiresRecognizedProgram(t *testing.T) {
+	for _, program := range []string{"", solanaRecoveryFrom, solanaToken2022Program} {
+		t.Run(program, func(t *testing.T) {
+			transaction := solanaRecoveryTransaction(t)
+			transaction.Meta.PostTokenBalances = []solanaTokenBalance{{AccountIndex: 3, Mint: solanaRecoveryTo, Owner: solanaRecoveryTo, ProgramID: solanaTokenProgram}}
+			transaction.Meta.InnerInstructions = []solanaInnerGroup{{Index: 0, Instructions: []solanaInstruction{
+				{Program: "spl-token", ProgramID: program, Parsed: json.RawMessage(`{"type":"initializeAccount","info":{"account":"` + solanaTokenProgram + `","mint":"` + solanaRecoveryTo + `","owner":"` + solanaRecoveryFrom + `"}}`)},
+				{Program: "spl-token", ProgramID: solanaTokenProgram, Parsed: json.RawMessage(`{"type":"transfer","info":{"source":"` + solanaTokenProgram + `","destination":"` + solanaToken2022Program + `","amount":"42"}}`)},
+			}}}
+			events, err := solanaRecoverySource(map[string]SolanaAsset{solanaRecoveryFrom: {AssetID: "configured-token", Decimals: 6}}).normalizeSolanaTransaction(transaction, 7, solanaRecoveryTo, time.Unix(100, 0).UTC(), 9)
+			var providerError *ProviderError
+			if !errors.As(err, &providerError) || providerError.Kind != ErrorMalformed || len(events) != 0 {
+				t.Fatalf("unrecognized or mismatched initialization program authorized token filtering: events=%+v err=%v", events, err)
+			}
+		})
+	}
+}
+
 func solanaRecoveryRPCSource(t *testing.T, transaction solanaTransaction, safe uint64) *SolanaSource {
 	t.Helper()
 	transactionResult, err := json.Marshal(transaction)
