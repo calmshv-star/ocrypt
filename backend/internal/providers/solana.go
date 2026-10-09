@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -499,7 +500,7 @@ func (s *SolanaSource) normalizeSolanaTransaction(transaction solanaTransaction,
 	parsed := chains.SolanaTransaction{Signature: signature, Slot: slot, BlockHash: blockHash, BlockTime: blockTime, Success: success, Finalized: true, Confirmations: safe - slot + 1}
 	if success {
 		for outer, instruction := range transaction.Transaction.Message.Instructions {
-			transfer, ok, err := s.parseSolanaInstruction(instruction, tokenAccounts, uint32(outer), nil)
+			transfer, ok, err := s.parseSolanaInstruction(instruction, tokenAccounts, accountKeys, uint32(outer), nil)
 			if err != nil {
 				return nil, err
 			}
@@ -513,7 +514,7 @@ func (s *SolanaSource) normalizeSolanaTransaction(transaction solanaTransaction,
 		for _, group := range transaction.Meta.InnerInstructions {
 			for inner, instruction := range group.Instructions {
 				index := uint32(inner)
-				transfer, ok, err := s.parseSolanaInstruction(instruction, tokenAccounts, group.Index, &index)
+				transfer, ok, err := s.parseSolanaInstruction(instruction, tokenAccounts, accountKeys, group.Index, &index)
 				if err != nil {
 					return nil, err
 				}
@@ -528,7 +529,7 @@ func (s *SolanaSource) normalizeSolanaTransaction(transaction solanaTransaction,
 	return adapter.Normalize(context.Background(), signature)
 }
 
-func (s *SolanaSource) parseSolanaInstruction(instruction solanaInstruction, tokenAccounts map[string]solanaTokenBalance, outer uint32, inner *uint32) (chains.SolanaTransfer, bool, error) {
+func (s *SolanaSource) parseSolanaInstruction(instruction solanaInstruction, tokenAccounts map[string]solanaTokenBalance, accountKeys []string, outer uint32, inner *uint32) (chains.SolanaTransfer, bool, error) {
 	if len(instruction.Parsed) == 0 || string(instruction.Parsed) == "null" {
 		return chains.SolanaTransfer{}, false, nil
 	}
@@ -575,7 +576,7 @@ func (s *SolanaSource) parseSolanaInstruction(instruction solanaInstruction, tok
 		account, accountOK := stringValue(info["account"])
 		mint, mintOK := stringValue(info["mint"])
 		owner, ownerOK := stringValue(info["owner"])
-		if !accountOK || !mintOK || !ownerOK || !validBase58Length(account, 32) || !validBase58Length(mint, 32) || !validBase58Length(owner, 32) {
+		if !accountOK || !mintOK || !ownerOK || !slices.Contains(accountKeys, account) || !validBase58Length(mint, 32) || !validBase58Length(owner, 32) {
 			return chains.SolanaTransfer{}, false, malformed("solana token instruction", errors.New("invalid token account initialization"))
 		}
 		// Accounts created and closed in one transaction have no balance entry.

@@ -286,6 +286,21 @@ func TestSolanaTemporaryTokenInitializationRequiresRecognizedProgram(t *testing.
 	}
 }
 
+func TestSolanaTemporaryTokenInitializationRequiresAccountKey(t *testing.T) {
+	transaction := solanaRecoveryTransaction(t)
+	account := "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+	transaction.Meta.PostTokenBalances = []solanaTokenBalance{{AccountIndex: 3, Mint: solanaRecoveryTo, Owner: solanaRecoveryTo, ProgramID: solanaTokenProgram}}
+	transaction.Meta.InnerInstructions = []solanaInnerGroup{{Index: 0, Instructions: []solanaInstruction{
+		{Program: "spl-token", ProgramID: solanaTokenProgram, Parsed: json.RawMessage(`{"type":"initializeAccount","info":{"account":"` + account + `","mint":"` + solanaRecoveryTo + `","owner":"` + solanaRecoveryFrom + `"}}`)},
+		{Program: "spl-token", ProgramID: solanaTokenProgram, Parsed: json.RawMessage(`{"type":"transfer","info":{"source":"` + account + `","destination":"` + solanaToken2022Program + `","amount":"42"}}`)},
+	}}}
+	events, err := solanaRecoverySource(map[string]SolanaAsset{solanaRecoveryFrom: {AssetID: "configured-token", Decimals: 6}}).normalizeSolanaTransaction(transaction, 7, solanaRecoveryTo, time.Unix(100, 0).UTC(), 9)
+	var providerError *ProviderError
+	if !errors.As(err, &providerError) || providerError.Kind != ErrorMalformed || len(events) != 0 {
+		t.Fatalf("initialization outside message account keys authorized token filtering: events=%+v err=%v", events, err)
+	}
+}
+
 func solanaRecoveryRPCSource(t *testing.T, transaction solanaTransaction, safe uint64) *SolanaSource {
 	t.Helper()
 	transactionResult, err := json.Marshal(transaction)
