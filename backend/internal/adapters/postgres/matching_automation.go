@@ -177,7 +177,7 @@ func loadAutomatedMatchingRoute(ctx context.Context, tx pgx.Tx, routeID string) 
 i.merchant_order_id,i.amount_minor::text,i.currency,i.version,r.chain_id,r.asset_id,r.provider,
 r.expected_amount_atomic::text,r.asset_decimals,r.display_amount,r.receiving_address,COALESCE(r.memo,''),
 r.required_finality,r.status::text,r.version,r.starts_at,r.expires_at,r.grace_ends_at,b.policy_snapshot::text,b.config_hash
-FROM payment_routes r JOIN payment_intents i ON i.id=r.intent_id AND i.tenant_id=r.tenant_id
+FROM payment_routes r JOIN payment_intents i ON i.id=r.intent_id AND i.tenant_id=r.tenant_id AND i.merchant_id=r.merchant_id
 JOIN payment_route_policy_bindings b ON b.route_id=r.id AND b.tenant_id=r.tenant_id
 WHERE r.id=$1 FOR UPDATE OF r,i`, routeID).Scan(&result.TenantID, &result.MerchantID, &result.IntentID, &result.RouteID,
 		&result.MerchantOrderID, &amountMinor, &result.Currency, &result.IntentVersion, &result.Route.ChainID, &result.Route.AssetID, &result.Route.Provider,
@@ -257,7 +257,7 @@ ORDER BY te.on_chain_time,te.id FOR UPDATE OF te`, route.Route.ChainID, route.Ro
 		if event.Kind == "gasfree_fee" {
 			continue
 		}
-		owner, err := loadAutomaticEventOwner(ctx, tx, event.ID, route.TenantID)
+		owner, err := loadAutomaticEventOwner(ctx, tx, event, route.TenantID)
 		if err != nil {
 			return nil, false, err
 		}
@@ -310,14 +310,15 @@ func filterAutomatedMatchingEvents(events []domain.TransferEvent, owners map[str
 	return filtered, unknownEvents
 }
 
-func loadAutomaticEventOwner(ctx context.Context, tx pgx.Tx, eventID, tenantID string) (string, error) {
-	rows, err := tx.Query(ctx, `SELECT mc.route_id::text,mc.score,COALESCE(mc.evidence->>'class',''),
+func loadAutomaticEventOwner(ctx context.Context, tx pgx.Tx, event domain.TransferEvent, tenantID string) (string, error) {
+	rows, err := tx.Query(ctx, `SELECT mc.route_id::text,COALESCE(r.intent_id::text,''),mc.score,COALESCE(mc.evidence->>'class',''),
  COALESCE(mc.evidence->'reason_codes','[]'::jsonb)::text
 FROM unmatched_payments up
 JOIN match_candidates mc ON mc.unmatched_id=up.id AND mc.tenant_id=up.tenant_id
  AND mc.candidate_set_version=up.workflow_version
+LEFT JOIN payment_routes r ON r.id=mc.route_id AND r.tenant_id=mc.tenant_id
 WHERE up.event_id=$1 AND up.tenant_id=$2 AND up.status IN ('new','candidates_ready','bound')
-ORDER BY mc.rank LIMIT 2`, eventID, tenantID)
+ORDER BY mc.score DESC,mc.rank`, event.ID, tenantID)
 	if err != nil {
 		return "", err
 	}
@@ -326,7 +327,7 @@ ORDER BY mc.rank LIMIT 2`, eventID, tenantID)
 	for rows.Next() {
 		var candidate application.Candidate
 		var class, reasons string
-		if err := rows.Scan(&candidate.RouteID, &candidate.Score, &class, &reasons); err != nil {
+		if err := rows.Scan(&candidate.RouteID, &candidate.IntentID, &candidate.Score, &class, &reasons); err != nil {
 			return "", err
 		}
 		candidate.Class = application.ExceptionClass(class)
@@ -338,7 +339,15 @@ ORDER BY mc.rank LIMIT 2`, eventID, tenantID)
 	if err := rows.Err(); err != nil {
 		return "", err
 	}
+	rows.Close()
 	if winner, ok := application.UniqueAutomaticCandidate(candidates); ok {
+		return winner.RouteID, nil
+	}
+	contexts, err := loadAutomaticCandidateContexts(ctx, tx, candidates, tenantID)
+	if err != nil {
+		return "", err
+	}
+	if winner, ok := application.SelectAutomaticCandidate(event, candidates, contexts); ok {
 		return winner.RouteID, nil
 	}
 	return "", nil

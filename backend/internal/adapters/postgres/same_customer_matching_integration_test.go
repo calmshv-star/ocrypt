@@ -76,8 +76,10 @@ func (f *faultDatabase) expectSameCustomerCommitted(t *testing.T, p faultPayment
 
 func (f *faultDatabase) sameCustomerTieAtomic(t *testing.T) {
 	p, routes := f.seedSameCustomerTie(t, false)
-	s := f.store(t, f.pool(t, "merchant_settlement_worker"))
-	f.ingest(t, s, p)
+	ingestStore := f.store(t, f.pool(t, "merchant_settlement_worker"))
+	s := f.store(t, f.pool(t, "merchant_matching_worker"))
+	ingestStore.now, s.now = func() time.Time { return p.now }, func() time.Time { return p.now }
+	f.ingest(t, ingestStore, p)
 	f.expectCount(t, 1, `SELECT count(*) FROM automated_matching_jobs WHERE tenant_id=$1 AND route_id=$2`, p.tenant, p.route)
 	f.expectCount(t, 0, `SELECT count(*) FROM automated_matching_jobs WHERE tenant_id=$1 AND route_id<>$2`, p.tenant, p.route)
 	// Simulate an independently scheduled neighbouring reconciliation before the
@@ -120,7 +122,7 @@ func (f *faultDatabase) sameCustomerTieAtomic(t *testing.T) {
 	}
 	f.expectSameCustomerCommitted(t, p)
 	for n := 0; n < 3; n++ {
-		if got := f.ingest(t, s, p); got.Outcome != application.SettlementDuplicate {
+		if got := f.ingest(t, ingestStore, p); got.Outcome != application.SettlementDuplicate {
 			t.Fatalf("replay outcome=%s", got.Outcome)
 		}
 	}
@@ -129,8 +131,10 @@ func (f *faultDatabase) sameCustomerTieAtomic(t *testing.T) {
 
 func (f *faultDatabase) sameCustomerTieChangedContext(t *testing.T) {
 	p, routes := f.seedSameCustomerTie(t, true)
-	s := f.store(t, f.pool(t, "merchant_settlement_worker"))
-	f.ingest(t, s, p)
+	ingestStore := f.store(t, f.pool(t, "merchant_settlement_worker"))
+	s := f.store(t, f.pool(t, "merchant_matching_worker"))
+	ingestStore.now, s.now = func() time.Time { return p.now }, func() time.Time { return p.now }
+	f.ingest(t, ingestStore, p)
 	job := f.claimSameCustomerJob(t, s, p, "same-customer-stale")
 	f.expectCount(t, 3, `SELECT count(*) FROM match_candidates c JOIN unmatched_payments up ON up.id=c.unmatched_id WHERE up.event_id=$1 AND c.score=100`, p.event.ID)
 	faultExec(t, f.ctx, f.admin, `UPDATE payment_intents SET customer_reference='synthetic-third-stranger',version=version+1,updated_at=clock_timestamp() WHERE id=(SELECT intent_id FROM payment_routes WHERE id=$1)`, routes[2])
@@ -144,8 +148,10 @@ func (f *faultDatabase) sameCustomerTieChangedContext(t *testing.T) {
 
 func (f *faultDatabase) sameCustomerTieRollback(t *testing.T) {
 	p, _ := f.seedSameCustomerTie(t, false)
-	s := f.store(t, f.pool(t, "merchant_settlement_worker"))
-	f.ingest(t, s, p)
+	ingestStore := f.store(t, f.pool(t, "merchant_settlement_worker"))
+	s := f.store(t, f.pool(t, "merchant_matching_worker"))
+	ingestStore.now, s.now = func() time.Time { return p.now }, func() time.Time { return p.now }
+	f.ingest(t, ingestStore, p)
 	job := f.claimSameCustomerJob(t, s, p, "same-customer-rollback")
 	faultExec(t, f.ctx, f.admin, `CREATE FUNCTION fault_same_customer_callback_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic callback fault'; END $$`)
 	faultExec(t, f.ctx, f.admin, fmt.Sprintf(`CREATE TRIGGER fault_same_customer_callback_failure BEFORE INSERT ON callback_events FOR EACH ROW WHEN (NEW.tenant_id='%s'::uuid) EXECUTE FUNCTION fault_same_customer_callback_failure()`, p.tenant))
@@ -162,8 +168,10 @@ func (f *faultDatabase) sameCustomerTieRollback(t *testing.T) {
 func (f *faultDatabase) sameCustomerTieFinality(t *testing.T) {
 	p, _ := f.seedSameCustomerTie(t, false)
 	p.event.Confirmations = 11
-	s := f.store(t, f.pool(t, "merchant_settlement_worker"))
-	f.ingest(t, s, p)
+	ingestStore := f.store(t, f.pool(t, "merchant_settlement_worker"))
+	s := f.store(t, f.pool(t, "merchant_matching_worker"))
+	ingestStore.now, s.now = func() time.Time { return p.now }, func() time.Time { return p.now }
+	f.ingest(t, ingestStore, p)
 	// A queue entry is not finality authority. Force a synthetic reconciliation
 	// job so the persisted boundary itself must reject insufficient confirmations.
 	faultExec(t, f.ctx, f.admin, `INSERT INTO automated_matching_jobs(route_id,tenant_id,merchant_id,status,next_attempt_at,attempt_count,reschedule_requested,created_at,updated_at) VALUES($1,$2,$3,'pending',$4,0,false,$4,$4) ON CONFLICT(route_id) DO UPDATE SET status='pending',next_attempt_at=EXCLUDED.next_attempt_at`, p.route, p.tenant, p.merchant, p.now)
