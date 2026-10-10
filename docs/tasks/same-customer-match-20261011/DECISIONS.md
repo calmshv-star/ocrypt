@@ -34,3 +34,9 @@ workers; do not deploy unrelated worker roles. Retain stopped originals with
 restart disabled, record their original policies in the protected journal and
 restore policies on rollback. Only image/release metadata changes on active
 containers; no migrations or product-configuration edits are required.
+
+Current-head image security failure requires the Go 1.26.9 patch release,
+officially published 2026-10-08. This bounded build prerequisite is part of the
+requested verified release; no additional product choice is needed. Preserve
+the 1.26 series and security gate, update four explicit build/compiler pins,
+and verify rebuilt artifacts rather than adding CVE suppressions.

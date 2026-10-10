@@ -40,11 +40,21 @@ Public task documents use synthetic fixtures, never customer records or credenti
 | M3 | Owner selection used during ingestion and later automated reconciliation, including more than two tied routes | Authoritative context is locked/revalidated; neighbouring route cannot aggregate the event | PostgreSQL owner/reconciliation integration regression | PASS; five persisted cases including cancelled/changed contender |
 | M4 | Finalized transfer replay, competing reconciliations and settlement failure | Exactly one persisted match, balanced ledger transaction, intent transition and callback/outbox; rollback is atomic | Disposable PostgreSQL regression and race/financial checks | PASS; full eleven-case persisted harness, financial/race/fuzz |
 | F1 | User-approved existing payment | One core verified settlement and one activated Showy month; replay/duplicate checks and active expiry verified | Guarded manual-resolution request and read-only postconditions | PASS; independent verifier and signed ordinary callback, private evidence |
+| S1 | Current-head runtime-image security gate rejects the existing Go 1.26.6 standard library | Patch-only Go 1.26.9 build pins; all backend/financial checks and current-head image scans pass without suppressions | Actual Trivy RED, official Go release evidence, patched compiler compatibility and GitHub scans | RED: CVE-2026-78667, CVE-2026-78669, CVE-2026-97031; repair pending |
 | P1 | GitHub publication | Signed focused commits, current-head required CI, published/merged fix without bypassing gates | GitHub PR/check/merge evidence | Pending |
 | D1 | Runtime activation of the permanent repair | Affected service revision/digest verified through established bounded rollout; no configuration drift | Deployment/readiness evidence, or explicit unverified limit | Pending |
 
 For financial changes include relevant exact-money, negative, duplicate/replay,
 concurrency, tenant, finality, and external-delivery cases.
+
+Release prerequisite discovered after implementation: Go 1.26.9 was released
+2026-10-08 with the required standard-library fixes. Update only the two Docker
+compiler defaults and two explicit CI compiler pins from 1.26.6 to 1.26.9.
+No major-version migration, module dependency, business behavior or scan-policy
+change. Rebuild the deployed service with the fixed compiler; never reuse an
+old vulnerable service/probe binary merely because functional tests passed.
+Primary evidence: https://go.dev/doc/devel/release and
+https://pkg.go.dev/vuln/GO-2026-6609 .
 
 ## Runtime prerequisites
 

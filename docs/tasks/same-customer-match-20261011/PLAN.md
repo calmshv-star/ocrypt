@@ -89,6 +89,12 @@ source revision, image digest and live readiness at:
 https://github.com/calmshv-star/ocrypt/releases/tag/v2026.10.11-samecustomer
 Do not infer live activation from the source commit or local tests alone.
 
+Current-head PR #112 at `13e75ca` passes persisted payment tests and supply-chain
+checks, but runtime-image Trivy detects three HIGH fixed stdlib CVEs in Go 1.26.6
+in both service/probe binaries. This is actual release-artifact RED, not a token
+or permission issue. Add isolated patch-only compiler-pin assignment S1, rebuild
+and independently verify compatibility/current-head scans before merge.
+
 ## Resume / next action
 
 Publish the focused reviewed branch, await all current-head release checks, merge
