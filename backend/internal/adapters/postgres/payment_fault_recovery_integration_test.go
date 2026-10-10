@@ -85,6 +85,11 @@ CREATE TABLE fault_receiver_effects(event_id text PRIMARY KEY REFERENCES fault_r
 	t.Run("F2_callback_recovers_expired_worker_lease", f.callbackRestart)
 	t.Run("F3_reorg_compensation_reinclusion", f.reorg)
 	t.Run("negative_finality_identity_and_tenant_boundaries", f.negative)
+	t.Run("M3_M4_same_customer_tie_atomic_concurrent_replay", f.sameCustomerTieAtomic)
+	t.Run("M3_same_customer_tie_revalidates_third_contender", f.sameCustomerTieChangedContext)
+	t.Run("M3_same_customer_tie_rejects_cancelled_changed_contender", f.sameCustomerTieCancelledContender)
+	t.Run("M4_same_customer_tie_callback_failure_rolls_back", f.sameCustomerTieRollback)
+	t.Run("M4_same_customer_tie_requires_finality", f.sameCustomerTieFinality)
 }
 
 func TestPaymentFaultDatabaseNamesFailClosed(t *testing.T) {

@@ -248,11 +248,21 @@ ON CONFLICT(event_id) DO NOTHING`, unmatchedID, eventID)
 						return err
 					}
 				}
-				if automatic, ok := application.UniqueAutomaticCandidate(potential); ok {
-					if err := recordExceptionIntent(ctx, tx, tenantID, potential[0], event, s.now()); err != nil {
-						return err
+				contexts, err := loadAutomaticCandidateContexts(ctx, tx, potential, tenantID)
+				if err != nil {
+					return err
+				}
+				if automatic, ok := application.SelectAutomaticCandidate(event, potential, contexts); ok {
+					// Keep existing unique-candidate observations unchanged. A newly
+					// resolved contextual tie is not a review exception: only the
+					// policy reducer may transition it or emit its paid callback.
+					if _, unique := application.UniqueAutomaticCandidate(potential); unique {
+						if err := recordExceptionIntent(ctx, tx, tenantID, automatic, event, s.now()); err != nil {
+							return err
+						}
 					}
-					// A unique score of at least 75 enters deterministic settlement. The
+					// Unique scores of at least 75 and verified same-customer ties
+					// enter deterministic settlement. The
 					// reducer still enforces finality, identity, five-percent
 					// underpayment tolerance and excess-payment accounting.
 					if err := enqueueAutomatedMatchingCandidates(ctx, tx, tenantID, []application.Candidate{automatic}, s.now()); err != nil {
@@ -762,7 +772,7 @@ JOIN payment_intents i ON i.id=r.intent_id AND i.tenant_id=r.tenant_id
 WHERE r.chain_id=$1 AND r.receiving_address=$2 AND r.status IN ('active','expired')
   AND i.status IN ('pending','observed','partially_paid','confirmed','expired','needs_review','reorg_review')
   AND $3 BETWEEN r.starts_at - interval '24 hours' AND r.grace_ends_at + interval '24 hours'
-ORDER BY r.created_at DESC,r.id LIMIT 100
+ORDER BY r.created_at DESC,r.id LIMIT 101
 FOR UPDATE OF r`, event.Identity.ChainID, event.Identity.ToAddress, event.OnChainTime)
 	if err != nil {
 		return nil, "", "", err
@@ -782,7 +792,9 @@ FOR UPDATE OF r`, event.Identity.ChainID, event.Identity.ToAddress, event.OnChai
 		}
 		item.Route.Status = domain.RouteStatus(status)
 		routes = append(routes, item)
-		tenantSet[item.TenantID] = true
+		if len(routes) <= 100 {
+			tenantSet[item.TenantID] = true
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, "", "", err
@@ -793,11 +805,23 @@ FOR UPDATE OF r`, event.Identity.ChainID, event.Identity.ToAddress, event.OnChai
 	if len(routes) == 0 {
 		return nil, "", "no_candidate_route", nil
 	}
+	// Retain the existing bounded candidate set and unique-selection behavior,
+	// but persist a sentinel when another route might be a hidden top contender.
+	// Contextual ties must remain closed both here and during later reconciliation.
+	truncated := len(routes) > 100
+	if truncated {
+		routes = routes[:100]
+	}
 	domainRoutes := make([]domain.PaymentRoute, 0, len(routes))
 	for _, item := range routes {
 		domainRoutes = append(domainRoutes, item.Route)
 	}
 	candidates := application.BuildCandidates(event, domainRoutes, now)
+	if truncated {
+		for index := range candidates {
+			candidates[index].Reasons = append(candidates[index].Reasons, "candidate_context_truncated")
+		}
+	}
 	classification := "no_candidate_route"
 	if len(candidates) > 0 {
 		classification = string(candidates[0].Class)
