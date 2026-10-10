@@ -20,7 +20,7 @@ func (f *faultDatabase) seedSameCustomerTie(t *testing.T, third bool) (faultPaym
 	t.Helper()
 	p := f.seed(t)
 	p.event.Amount = money.MustParse("4900000000")
-	faultExec(t, f.ctx, f.admin, `UPDATE payment_intents SET customer_reference='synthetic-authenticated-customer',metadata='{}'::jsonb WHERE id=$1`, p.intent)
+	faultExec(t, f.ctx, f.admin, `UPDATE payment_intents SET customer_reference='synthetic-authenticated-customer',metadata='{}'::jsonb,version=version+1,updated_at=clock_timestamp() WHERE id=$1`, p.intent)
 	faultExec(t, f.ctx, f.admin, `UPDATE payment_routes SET expected_amount_atomic=4813000000,display_amount='0.000000004813' WHERE id=$1`, p.route)
 	faultExec(t, f.ctx, f.admin, `UPDATE webhook_endpoints SET event_types=ARRAY['payment.overpaid'] WHERE id=$1`, p.endpoint)
 	requester, approver, policy, change := faultID(t), faultID(t), faultID(t), faultID(t)
@@ -133,7 +133,7 @@ func (f *faultDatabase) sameCustomerTieChangedContext(t *testing.T) {
 	f.ingest(t, s, p)
 	job := f.claimSameCustomerJob(t, s, p, "same-customer-stale")
 	f.expectCount(t, 3, `SELECT count(*) FROM match_candidates c JOIN unmatched_payments up ON up.id=c.unmatched_id WHERE up.event_id=$1 AND c.score=100`, p.event.ID)
-	faultExec(t, f.ctx, f.admin, `UPDATE payment_intents SET customer_reference='synthetic-third-stranger' WHERE id=(SELECT intent_id FROM payment_routes WHERE id=$1)`, routes[2])
+	faultExec(t, f.ctx, f.admin, `UPDATE payment_intents SET customer_reference='synthetic-third-stranger',version=version+1,updated_at=clock_timestamp() WHERE id=(SELECT intent_id FROM payment_routes WHERE id=$1)`, routes[2])
 	if err := s.ReconcileAutomatedMatching(f.ctx, "same-customer-stale", job, p.now.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
