@@ -5,6 +5,7 @@ workers return evidence instead of concurrently editing coordination files.
 
 | Task | Scope | Plan |
 | --- | --- | --- |
+| same-customer-match-20261011 | Resolve equivalent repeated-customer overpayment ties, verified fulfillment and GitHub publication | [Plan](docs/tasks/same-customer-match-20261011/PLAN.md) |
 | solana-recovery-20261009 | Restore Solana scanning, verified fulfillment, GitHub and production rollout | [Plan](docs/tasks/solana-recovery-20261009/PLAN.md) |
 | scanner-recovery-20260930 | Repair scanner readiness, verify payment recovery, audit outstanding fixes | [Plan](docs/tasks/scanner-recovery-20260930/PLAN.md) |
 | release-20260930-workflow | Publish workflow source/tooling to GitHub and server | [Plan](docs/tasks/release-20260930-workflow/PLAN.md) |
