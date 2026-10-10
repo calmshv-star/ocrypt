@@ -146,6 +146,27 @@ func (f *faultDatabase) sameCustomerTieChangedContext(t *testing.T) {
 	f.expectCount(t, 0, `SELECT count(*) FROM callback_events WHERE intent_id=$1`, p.intent)
 }
 
+func (f *faultDatabase) sameCustomerTieCancelledContender(t *testing.T) {
+	p, routes := f.seedSameCustomerTie(t, false)
+	ingestStore := f.store(t, f.pool(t, "merchant_settlement_worker"))
+	s := f.store(t, f.pool(t, "merchant_matching_worker"))
+	ingestStore.now, s.now = func() time.Time { return p.now }, func() time.Time { return p.now }
+	f.ingest(t, ingestStore, p)
+	job := f.claimSameCustomerJob(t, s, p, "same-customer-cancelled")
+	// Cancellation removes the former contender from the legacy unknown-owner
+	// overlap guard. It must not turn explicit context rejection into permission
+	// to credit the transfer through that unrelated fallback path.
+	faultExec(t, f.ctx, f.admin, `UPDATE payment_routes SET status='cancelled',version=version+1,updated_at=clock_timestamp() WHERE id=$1`, routes[1])
+	faultExec(t, f.ctx, f.admin, `UPDATE payment_intents SET customer_reference='synthetic-cancelled-stranger',version=version+1,updated_at=clock_timestamp() WHERE id=(SELECT intent_id FROM payment_routes WHERE id=$1)`, routes[1])
+	if err := s.ReconcileAutomatedMatching(f.ctx, "same-customer-cancelled", job, p.now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"payment_matches", "ledger_transactions", "callback_events", "outbox_events"} {
+		f.expectCount(t, 0, "SELECT count(*) FROM "+pgx.Identifier{table}.Sanitize()+" WHERE tenant_id=$1", p.tenant)
+	}
+	f.expectCount(t, 0, `SELECT count(*) FROM payment_intents WHERE id=$1 AND settled_at IS NOT NULL`, p.intent)
+}
+
 func (f *faultDatabase) sameCustomerTieRollback(t *testing.T) {
 	p, _ := f.seedSameCustomerTie(t, false)
 	ingestStore := f.store(t, f.pool(t, "merchant_settlement_worker"))

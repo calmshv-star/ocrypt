@@ -114,12 +114,14 @@ func (s *Store) ReconcileAutomatedMatching(ctx context.Context, workerID string,
 		if err != nil {
 			return err
 		}
-		decision, err := application.EvaluateAutomatedMatch(route.Route, events, now, route.Policy)
-		if err != nil {
-			return err
-		}
+		var decision application.AutomatedMatchDecision
 		if ambiguous {
 			decision = failClosedAmbiguousDecision(route, events)
+		} else {
+			decision, err = application.EvaluateAutomatedMatch(route.Route, events, now, route.Policy)
+			if err != nil {
+				return err
+			}
 		}
 		aggregateID, err := upsertAutomatedAggregate(ctx, tx, route, decision, now)
 		if err != nil {
@@ -253,17 +255,25 @@ ORDER BY te.on_chain_time,te.id FOR UPDATE OF te`, route.Route.ChainID, route.Ro
 	// either inflate a neighbour's aggregate or be vetoed merely because the
 	// neighbour's time window overlaps.
 	owners := make(map[string]string, len(events))
+	contextRejected := false
 	for _, event := range events {
 		if event.Kind == "gasfree_fee" {
 			continue
 		}
-		owner, err := loadAutomaticEventOwner(ctx, tx, event, route.TenantID)
+		owner, rejected, err := loadAutomaticEventOwner(ctx, tx, event, route.TenantID)
 		if err != nil {
 			return nil, false, err
 		}
 		owners[event.ID] = owner
+		contextRejected = contextRejected || rejected
 	}
 	filtered, unknownEvents := filterAutomatedMatchingEvents(events, owners, route.RouteID)
+	// A known contender set that failed authoritative validation is not an
+	// absent owner. Cancellation or changed context must never reopen ownership
+	// through the legacy unknown-event overlap fallback below.
+	if contextRejected {
+		return filtered, true, nil
+	}
 	if len(unknownEvents) == 0 {
 		return filtered, false, nil
 	}
@@ -310,7 +320,7 @@ func filterAutomatedMatchingEvents(events []domain.TransferEvent, owners map[str
 	return filtered, unknownEvents
 }
 
-func loadAutomaticEventOwner(ctx context.Context, tx pgx.Tx, event domain.TransferEvent, tenantID string) (string, error) {
+func loadAutomaticEventOwner(ctx context.Context, tx pgx.Tx, event domain.TransferEvent, tenantID string) (owner string, contextRejected bool, err error) {
 	rows, err := tx.Query(ctx, `SELECT mc.route_id::text,COALESCE(r.intent_id::text,''),mc.score,COALESCE(mc.evidence->>'class',''),
  COALESCE(mc.evidence->'reason_codes','[]'::jsonb)::text
 FROM unmatched_payments up
@@ -320,7 +330,7 @@ LEFT JOIN payment_routes r ON r.id=mc.route_id AND r.tenant_id=mc.tenant_id
 WHERE up.event_id=$1 AND up.tenant_id=$2 AND up.status IN ('new','candidates_ready','bound')
 ORDER BY mc.score DESC,mc.rank`, event.ID, tenantID)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	defer rows.Close()
 	var candidates []application.Candidate
@@ -328,29 +338,32 @@ ORDER BY mc.score DESC,mc.rank`, event.ID, tenantID)
 		var candidate application.Candidate
 		var class, reasons string
 		if err := rows.Scan(&candidate.RouteID, &candidate.IntentID, &candidate.Score, &class, &reasons); err != nil {
-			return "", err
+			return "", false, err
 		}
 		candidate.Class = application.ExceptionClass(class)
 		if err := json.Unmarshal([]byte(reasons), &candidate.Reasons); err != nil {
-			return "", err
+			return "", false, err
 		}
 		candidates = append(candidates, candidate)
 	}
 	if err := rows.Err(); err != nil {
-		return "", err
+		return "", false, err
 	}
 	rows.Close()
 	if winner, ok := application.UniqueAutomaticCandidate(candidates); ok {
-		return winner.RouteID, nil
+		return winner.RouteID, false, nil
+	}
+	if len(candidates) < 2 || candidates[0].Score != 100 || candidates[1].Score != 100 {
+		return "", false, nil
 	}
 	contexts, err := loadAutomaticCandidateContexts(ctx, tx, candidates, tenantID)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if winner, ok := application.SelectAutomaticCandidate(event, candidates, contexts); ok {
-		return winner.RouteID, nil
+		return winner.RouteID, false, nil
 	}
-	return "", nil
+	return "", true, nil
 }
 
 func failClosedAmbiguousDecision(route automatedMatchingRoute, events []domain.TransferEvent) application.AutomatedMatchDecision {
