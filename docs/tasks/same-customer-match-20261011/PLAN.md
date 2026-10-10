@@ -21,6 +21,7 @@ snapshot with the helper before assigning implementation workers.
 | tests-first | test author | `work/.ocrypt-agent-worktrees/same-customer-match-20261011/tests-first`; `agent/same-customer-match-20261011/tests-first`; `d48e7d6` | focused application and PostgreSQL tests, harness registration | M1–M4 | accepted specification |
 | implementation | worker | `/Users/deniss/Documents/Codex/2026-08-12/new-chat/work/ocrypt/work/.ocrypt-agent-worktrees/same-customer-match-20261011/implementation`; `agent/same-customer-match-20261011/implementation`; `046d0ac` | contextual selector and locked context; ingestion/reconciliation; approved fixture role/clock and saturation/P1 regressions | M1–M4 | tests-first completed and integrated |
 | independent-review | reviewer, read-only | integrated `12baccadd08ba0471c9237cec29754ae58bf6b54` | integrated diff and private operator rollout artifacts; no edits | M1–M4, D1 safety | implementation and persisted evidence |
+| go-security | worker | `work/.ocrypt-agent-worktrees/same-customer-match-20261011/go-security`; `agent/same-customer-match-20261011/go-security`; `0c290e4` | four Go compiler pins across two Dockerfiles and CI; no policy/module changes | S1 | actual current-head image scan RED |
 
 ## Evidence
 
@@ -94,6 +95,19 @@ checks, but runtime-image Trivy detects three HIGH fixed stdlib CVEs in Go 1.26.
 in both service/probe binaries. This is actual release-artifact RED, not a token
 or permission issue. Add isolated patch-only compiler-pin assignment S1, rebuild
 and independently verify compatibility/current-head scans before merge.
+
+Signed patch-only commit `ef704e4` is integrated and independently reviewed with
+no findings. Actual Go 1.26.9 passes clean-revision backend tests/build/vet/all race
+and financial tests/vet/race/both fuzz targets. Worker evidence:
+`go-security/.agent-evidence/20261010T205817Z-backend-2b831042/result.json` and
+`go-security/.agent-evidence/20261010T205830Z-financial-2448b069/result.json`.
+An earlier build ran out of disk space before behavioral checks; that failed
+artifact is retained. Only regenerable Go build cache was cleaned, then the
+same unchanged checks passed. No user files or scan suppressions were removed.
+Current-head CI, actual deployed-image scan, and runtime activation remain
+separate required gates. Rebuild both service and probe with Go 1.26.9 onto
+the existing official distroless runtime resolved to an immutable fresh digest;
+retain original container configuration and rollback identities.
 
 ## Resume / next action
 
