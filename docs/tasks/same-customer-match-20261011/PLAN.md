@@ -9,9 +9,9 @@ snapshot with the helper before assigning implementation workers.
 
 - [x] Material questions resolved; specification and acceptance matrix recorded.
 - [x] Tests authored; expected failures inspected (or artifact validation defined).
-- [ ] Dependencies, writer ownership, and common base assigned.
-- [ ] Implementation complete and focused checks pass.
-- [ ] Integrated diff independently reviewed; relevant checks repeated.
+- [x] Dependencies, writer ownership, and common base assigned.
+- [x] Implementation complete and focused checks pass.
+- [x] Integrated diff independently reviewed; relevant checks repeated.
 - [ ] Completion evidence and remaining runtime/deployment limits recorded.
 
 ## Assignments
@@ -19,7 +19,8 @@ snapshot with the helper before assigning implementation workers.
 | Worker | Role | Absolute worktree / branch / base | Owned paths | Acceptance IDs | Dependencies |
 | --- | --- | --- | --- | --- | --- |
 | tests-first | test author | `work/.ocrypt-agent-worktrees/same-customer-match-20261011/tests-first`; `agent/same-customer-match-20261011/tests-first`; `d48e7d6` | focused application and PostgreSQL tests, harness registration | M1–M4 | accepted specification |
-| implementation | worker | helper-allocated isolated worktree, pinned accepted test snapshot | contextual candidate selector; authoritative database context; ingestion and reconciliation integration; fixture role correction only | M1–M4 | tests-first completed and integrated |
+| implementation | worker | `/Users/deniss/Documents/Codex/2026-08-12/new-chat/work/ocrypt/work/.ocrypt-agent-worktrees/same-customer-match-20261011/implementation`; `agent/same-customer-match-20261011/implementation`; `046d0ac` | contextual selector and locked context; ingestion/reconciliation; approved fixture role/clock and saturation/P1 regressions | M1–M4 | tests-first completed and integrated |
+| independent-review | reviewer, read-only | integrated `12baccadd08ba0471c9237cec29754ae58bf6b54` | integrated diff and private operator rollout artifacts; no edits | M1–M4, D1 safety | implementation and persisted evidence |
 
 ## Evidence
 
@@ -54,9 +55,43 @@ The broader baseline disposable run also failed pre-existing scanner/reorg lease
 cases; distinguish those from this feature and investigate before release.
 Test writer finished clean; no production access or product implementation.
 
+Implementation commits `7570a6a` and `12bacca` are integrated. The reviewer found
+a cancelled/changed-contender fallback bypass in the first revision. Actual
+persisted RED reproduced one match instead of zero. The follow-up retains an
+explicit contextual rejection and enters fail-closed review before the reducer;
+fresh focused PostgreSQL GREEN passes all five M3/M4 cases (70.289 seconds).
+
+Final clean integrated `12bacca` passes financial tests/vet/race and both fuzz
+targets: `.agent-evidence/20261010T204757Z-financial-952b01ec/result.json`.
+Clean worker backend profile passes tests/build/vet/all race:
+`implementation/.agent-evidence/20261010T204755Z-backend-e74c399e/result.json`.
+Independent final review at that exact revision has no outstanding findings and
+reran credential-filtered focused application/PostgreSQL packages successfully.
+
+The entire real PostgreSQL fault harness was compiled from clean `12bacca` for
+Linux and run against a fresh marked PostgreSQL 18 database over server localhost.
+All 56 migrations, production role grants, all eleven persisted subtests and
+database-name guards pass (3.25 seconds). This also resolves the earlier baseline
+scanner/reorg failures: they were fixture-clock skew caused by WAN round trips,
+not product defects; no baseline assertions were weakened.
+
+The bounded journaled operator rollout covers exactly settlement, matching and
+the eleven existing proof workers because proofs share the ingestion boundary.
+No scanner/rate/callback/resolution service or business setting changes. An
+independent reviewer checked the operator script and twelve fake-daemon fault
+tests; all pass, including lost mutation responses, unknown identity rejection,
+configuration drift, retained originals and restart suppression/restoration.
+Read-only live grant checks confirm required route/intent locking permissions.
+
+Publication and runtime are still separate gates at this source snapshot. The
+immutable final release record will report current-head GitHub checks, merged
+source revision, image digest and live readiness at:
+https://github.com/calmshv-star/ocrypt/releases/tag/v2026.10.11-samecustomer
+Do not infer live activation from the source commit or local tests alone.
+
 ## Resume / next action
 
-Pin the integrated accepted-test snapshot, assign the isolated implementation,
-verify focused persisted GREEN and broader profiles, then obtain independent
-review. Publish only after current-head required GitHub checks; bounded runtime
-replacement of the affected settlement/matching workers preserves configuration.
+Publish the focused reviewed branch, await all current-head release checks, merge
+without bypass, then perform the independently reviewed pinned-image rollout.
+Verify all affected workers and the individual payment remains single-credit;
+publish the version with the actual final activation evidence and retained rollback.
