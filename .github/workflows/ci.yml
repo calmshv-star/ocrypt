@@ -552,7 +552,7 @@ jobs:
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$RUNNER_TEMP/sbom:/out" \
             anchore/syft:v1.51.0 merchant-platform-${{ matrix.binary }}:ci \
             -o cyclonedx-json=/out/${{ matrix.binary }}.cdx.json
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: merchant-platform-${{ matrix.binary }}-sbom
           path: ${{ runner.temp }}/sbom/${{ matrix.binary }}.cdx.json
@@ -813,7 +813,7 @@ jobs:
             anchore/syft:v1.51.0 dir:/src -o cyclonedx-json=/out/sbom.cdx.json
       - name: Validate SBOM
         run: jq --exit-status '.components | length > 0' "$RUNNER_TEMP/sbom/sbom.cdx.json"
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: merchant-platform-source-sbom
           path: ${{ runner.temp }}/sbom/sbom.cdx.json
