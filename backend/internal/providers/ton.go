@@ -687,8 +687,13 @@ func (s *TONSource) normalizeTONActions(all []tonAction, blocks map[uint64]tonBl
 			return nil, malformed("ton transfer action", err)
 		}
 		amount, ok := integerString(amountRaw)
-		if !ok || amount == "0" {
+		if !ok {
 			return nil, malformed("ton transfer action", errors.New("invalid amount"))
+		}
+		if amount == "0" {
+			// Zero-value transfers (for example comment-only notifications) are
+			// valid on-chain but cannot fund any route.
+			continue
 		}
 		message := chains.TONMessage{Index: action.ActionIndex, From: from, To: to, AssetID: s.nativeAssetID, Amount: amount, Decimals: s.nativeDecimals, QueryID: queryID}
 		if isJetton {
