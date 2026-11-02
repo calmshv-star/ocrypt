@@ -646,3 +646,12 @@
 .onboarding__steps { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .onboarding__steps .settings-hub__link[data-done] .settings-hub__icon { background: var(--mp-surface-soft); color: var(--mp-muted); }
 .onboarding__state { display: flex; align-items: center; gap: 10px; }
+.admin-intent-status { display: grid; justify-items: start; gap: 4px; min-width: 180px; max-width: 280px; }
+.admin-intent-status small { color: var(--mp-muted); font-size: 12px; line-height: 1.45; white-space: normal; }
+.admin-intent-status a { color: var(--mp-primary); font-size: 12px; font-weight: 600; }
+.onboarding-banner { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(80px, 180px) auto; align-items: center; gap: 14px; margin-bottom: 18px; border: 1px solid var(--mp-border); border-radius: 14px; background: var(--mp-primary-soft); padding: 14px 16px; color: var(--mp-text); }
+.onboarding-banner > svg:first-child { color: var(--mp-primary); }
+.onboarding-banner span { display: grid; gap: 2px; min-width: 0; }
+.onboarding-banner small { color: var(--mp-muted); }
+.onboarding-banner progress { width: 100%; height: 8px; accent-color: var(--mp-primary); }
+@media (max-width: 640px) { .onboarding-banner { grid-template-columns: auto minmax(0, 1fr) auto; } .onboarding-banner progress { display: none; } }

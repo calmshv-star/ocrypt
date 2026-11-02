@@ -11,8 +11,7 @@ const PAID_STATUSES = new Set(["confirmed", "finalized", "settled", "overpaid"])
 
 type Step = { key: string; href: string; icon: ComponentType<{ size?: number; "aria-hidden"?: boolean }>; done: boolean; loading: boolean };
 
-export function OnboardingPage() {
-  const { t } = useI18n();
+export function useOnboardingSteps() {
   const admin = useAdmin();
   const canWallets = admin.can("wallets:read") || admin.can("infrastructure:read");
   const wallets = useQuery({
@@ -34,7 +33,25 @@ export function OnboardingPage() {
     admin.can("payments:read") && { key: "testPayment", href: "#/intents", icon: CircleDollarSign, done: paid, loading: intents.isLoading },
     canWallets && admin.can("payments:read") && { key: "goLive", href: "#/settings", icon: Rocket, done: walletReady && paid, loading: wallets.isLoading || intents.isLoading }
   ].filter(Boolean) as Step[]);
-  const done = steps.filter((step) => step.done).length;
+  return { steps, done: steps.filter((step) => step.done).length, loading: steps.some((step) => step.loading) };
+}
+
+// Shown on the overview until every visible step is done.
+export function OnboardingBanner() {
+  const { t } = useI18n();
+  const { steps, done, loading } = useOnboardingSteps();
+  if (loading || steps.length === 0 || done === steps.length) return null;
+  return <a className="onboarding-banner" href="#/onboarding">
+    <Sparkles aria-hidden={true} size={18} />
+    <span><strong>{t("onboarding.title")}</strong><small>{t("onboarding.progress", { done, total: steps.length })}</small></span>
+    <progress aria-hidden={true} max={steps.length} value={done} />
+    <ArrowRight aria-hidden={true} size={16} />
+  </a>;
+}
+
+export function OnboardingPage() {
+  const { t } = useI18n();
+  const { steps, done } = useOnboardingSteps();
   return <div className="admin-page" data-testid="onboarding-page">
     <PageHeader description={t("onboarding.body")} eyebrow={<><Sparkles size={13} />{t("onboarding.nav")}</>} title={t("onboarding.title")} />
     <p aria-live="polite" className="onboarding__progress"><progress max={steps.length} value={done} /><span>{t("onboarding.progress", { done, total: steps.length })}</span></p>

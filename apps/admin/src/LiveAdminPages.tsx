@@ -4,6 +4,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Activity, AlertTriangle, ArrowRight, CheckCircle2, CircleDollarSign, Clock3, FileClock, RadioTower, RefreshCw, Scale, Webhook, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { isStepUpError, useAdmin, useAdminQuery } from "./AdminProvider";
+import { OnboardingBanner } from "./OnboardingPage";
+import { describeIntentStatus } from "./paymentStatus";
 import type { AdminScope, AssetRow, AuditRow, CandidateRow, IntentRow, Overview, Page, Permission, ReconciliationRow, TransferRow, UnmatchedRow, WebhookRow } from "./api/types";
 
 type Resource = "intents" | "transfers" | "assets" | "reconciliation" | "audit";
@@ -145,6 +147,7 @@ export function LiveOverviewPage() {
       eyebrow={<><Activity size={13} />{t(admin.preview ? "common.previewData" : "admin.connected")}</>}
       title={t("page.overview.title")}
     />
+    {!admin.preview && admin.scope?.merchantId && (can("wallets:read") || can("infrastructure:read")) && <OnboardingBanner />}
     <PageState permission="dashboard:read" query={queryState}>
       {overview ? <>
         <section aria-label={t("overview.keyMetrics")} className="admin-stat-grid">
@@ -227,7 +230,7 @@ export function LiveOverviewPage() {
                       ? <small>{formatAtomic(intent.received_amount_atomic, intent.received_asset_decimals)} {intent.received_asset_symbol}</small>
                       : null}
                   </span>
-                  <StatusBadge status={intent.status}>{t(overviewIntentStatusKey(intent.status))}</StatusBadge>
+                  <IntentStatus intent={intent} />
                   <time dateTime={intent.created_at}>{formatDate(intent.created_at, locale)}</time>
                 </a>)}
               </div>}
@@ -283,14 +286,14 @@ function formatOverviewDay(value:string, locale:string) {
   return Number.isFinite(parsed) ? new Intl.DateTimeFormat(locale, { weekday:"short", timeZone:"UTC" }).format(parsed) : value;
 }
 
-function overviewIntentStatusKey(status:string):MessageKey {
-  if (status === "settled") return "status.settled";
-  if (status === "observed") return "status.observed";
-  if (status === "confirmed") return "status.confirmed";
-  if (status === "partially_paid") return "status.partiallyPaid";
-  if (status === "expired" || status === "cancelled") return "status.expired";
-  if (status === "needs_review" || status === "reorg_review" || status === "overpaid" || status === "reversed") return "status.needsReview";
-	return "status.pending";
+function IntentStatus({ intent, detailed = false }: { intent: IntentRow; detailed?: boolean }) {
+  const { t } = useI18n();
+  const admin = useAdmin();
+  const view = describeIntentStatus(intent);
+  const badge = <StatusBadge status={view.badge}>{t(view.label)}</StatusBadge>;
+  if (!detailed) return badge;
+  const action = view.action && admin.can(view.action.href === "#/unmatched" ? "unmatched:read" : "payment_links:read") ? view.action : undefined;
+  return <span className="admin-intent-status">{badge}<small>{t(view.hint, { minutes: view.minutesLeft ?? 0 })}</small>{action && <a href={action.href}>{t(action.label)}</a>}</span>;
 }
 
 function transferStatusKey(status:string):MessageKey {
@@ -332,7 +335,7 @@ export function LiveResourcePage({ resource }: { resource: Resource }) {
     const items = pageItems(query.data);
     if (resource === "intents") return {
       labels: [t("admin.reference"), t("admin.identifier"), t("admin.exactAmount"), t("common.status"), t("admin.createdAt"), t("admin.expiresAt")],
-      rows: (items as IntentRow[]).map((item) => ({ id: item.id, cells: [item.merchant_order_id, <code>{short(item.id)}</code>, `${formatExactMinor(item.amount_minor, item.currency_scale)} ${item.currency}`, <StatusBadge status={item.status}>{t(overviewIntentStatusKey(item.status))}</StatusBadge>, formatDate(item.created_at, locale), formatDate(item.expires_at, locale)] }))
+      rows: (items as IntentRow[]).map((item) => ({ id: item.id, cells: [item.merchant_order_id, <code>{short(item.id)}</code>, `${formatExactMinor(item.amount_minor, item.currency_scale)} ${item.currency}`, <IntentStatus detailed intent={item} />, formatDate(item.created_at, locale), formatDate(item.expires_at, locale)] }))
     };
     if (resource === "transfers") return {
       labels: [t("admin.transaction"), t("admin.chain"), t("common.asset"), t("common.amount"), t("admin.confirmations"), t("common.status"), t("admin.observedAt")],

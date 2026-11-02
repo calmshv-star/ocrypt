@@ -1251,7 +1251,30 @@ export const en = {
   "onboarding.testPayment.title": "Make a test payment",
   "onboarding.testPayment.body": "Open your payment link and pay it in the sandbox. Watch the payment and the webhook appear.",
   "onboarding.goLive.title": "Switch to live mode",
-  "onboarding.goLive.body": "Needs two-factor authentication and a verified wallet. Until then, real payments stay switched off."
+  "onboarding.goLive.body": "Needs two-factor authentication and a verified wallet. Until then, real payments stay switched off.",
+  "intentStatus.waiting.label": "Awaiting payment",
+  "intentStatus.waiting.hint": "{minutes} min left. Nothing has arrived yet.",
+  "intentStatus.waiting.hintNoTime": "Nothing has arrived yet. Share the payment link with the customer.",
+  "intentStatus.confirming.label": "Received, confirming",
+  "intentStatus.confirming.hint": "The network has not confirmed the payment yet. Do not ship goods.",
+  "intentStatus.paid.label": "Paid",
+  "intentStatus.paid.hint": "Confirmed by the network. You can ship goods.",
+  "intentStatus.underpaid.label": "Underpaid",
+  "intentStatus.underpaid.hint": "The customer sent less than the invoice. Send a link for the rest or accept it as is.",
+  "intentStatus.overpaid.label": "Overpaid",
+  "intentStatus.overpaid.hint": "The customer sent more than the invoice. Keep the difference or refund it from your wallet.",
+  "intentStatus.review.label": "Needs review",
+  "intentStatus.review.hint": "A transfer could not be matched to exactly one order. Open the review and choose.",
+  "intentStatus.expired.label": "Expired",
+  "intentStatus.expired.hint": "No payment arrived in time. Issue a new link; a late payment goes to review.",
+  "intentStatus.cancelled.label": "Cancelled",
+  "intentStatus.cancelled.hint": "This invoice was cancelled.",
+  "intentStatus.reorg.label": "Rolled back by the network",
+  "intentStatus.reorg.hint": "The block with this payment was reorganized. Hold the goods until the check finishes.",
+  "intentStatus.reversed.label": "Reversed",
+  "intentStatus.reversed.hint": "This payment no longer counts. Do not ship goods.",
+  "intentStatus.action.review": "Open review",
+  "intentStatus.action.newLink": "New payment link"
 } as const;
 
 export type MessageKey = keyof typeof en;

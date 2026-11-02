@@ -109,4 +109,19 @@ describe("onboarding checklist", () => {
     expect(screen.getByRole("link", { name: /Switch to live mode/ })).toHaveTextContent("Done");
     expect(screen.getByRole("link", { name: "Getting started" })).toBeInTheDocument();
   });
+
+  it("keeps a progress banner on the overview until onboarding is complete", async () => {
+    const base = {
+      me: vi.fn().mockResolvedValue({ ...owner, permissions: ["dashboard:read", "payments:read", "wallets:read"] }),
+      overview: vi.fn().mockResolvedValue({ recent_intents: [], payment_flow: [], settled_volume_today: [], settled_today: 0, open_intents: 0 }),
+      financialSettings: vi.fn().mockResolvedValue({ settlement_currency: "USD", accepted_currencies: ["USD"], routes: [], wallets: [] })
+    };
+    const view = render(wrap(<MemoryRouter initialEntries={["/overview"]}><App client={client({ ...base, intents: vi.fn().mockResolvedValue({ items: [] }) })} preview={false} /></MemoryRouter>));
+    expect(await screen.findByRole("link", { name: /Get ready to accept payments.*0 of 3 done/ })).toHaveAttribute("href", "#/onboarding");
+    view.unmount();
+    const ready = { ...base, financialSettings: vi.fn().mockResolvedValue({ settlement_currency: "USD", accepted_currencies: ["USD"], routes: [], wallets: [{ id: "w1", chain_id: "tron:mainnet", chain_name: "TRON", address: "TXYZ", status: "active", version: 1 }] }), intents: vi.fn().mockResolvedValue({ items: [{ id: "i1", status: "settled" }] }) };
+    render(wrap(<MemoryRouter initialEntries={["/overview"]}><App client={client(ready)} preview={false} /></MemoryRouter>));
+    await waitFor(() => expect(ready.intents).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByText(/of 3 done/)).not.toBeInTheDocument());
+  });
 });
