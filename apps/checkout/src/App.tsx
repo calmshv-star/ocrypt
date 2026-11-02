@@ -5,7 +5,7 @@ import QRCode from "qrcode";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 type CheckoutStatus = "pending" | "detected" | "partially_paid" | "confirming" | "needs_review" | "settled" | "expired" | "preparing_payment_route" | "payment_route_failed";
-type OnChainRoute = { id: string; provider: "on_chain"; network: string; asset: string; amount: string; address: string; receivedAmount?: string; remainingAmount?: string; paymentCount?: number; topUpAllowed?: boolean; transactionHash?: string };
+type OnChainRoute = { id: string; provider: "on_chain"; network: string; asset: string; amount: string; address: string; receivedAmount?: string; remainingAmount?: string; paymentCount?: number; topUpAllowed?: boolean; transactionHash?: string; paymentURI?: string };
 type HostedRoute = { id: string; provider: "hosted_gateway"; providerId: string; asset: string; amount: string; paymentURL: string };
 type Route = OnChainRoute | HostedRoute;
 type CheckoutSession = { intentId: string; orderId: string; merchantName: string; amountMinor: string; currency: string; currencyScale: number; description: string; status: CheckoutStatus; expiresAt: string; routes: Route[]; selectedRouteId: string };
@@ -16,6 +16,9 @@ type Redemption = { checkoutToken: string; checkoutURL: URL; session: CheckoutSe
 type ReceiptSubmission = { id: string; paymentId: string; status: "proof_queued" | "transaction_not_visible"; proofId?: string; chainId: string; transactionId?: string; message: string };
 
 const checkoutTokenPattern = /^cs_[A-Za-z0-9_-]{43}$/;
+// Wallet deep links the server may send (EIP-681, Solana Pay, ton://transfer).
+// Anything else is dropped so a link can never run script or open a web page.
+const paymentURIPattern = /^(?:ethereum:0x[0-9a-fA-F]{40}@[1-9][0-9]*|solana:[1-9A-HJ-NP-Za-km-z]{32,44}\?amount=|ton:\/\/transfer\/)[^\s]*$/;
 const paymentLinkTokenPattern = /^pl_[A-Za-z0-9_-]{43}$/;
 const fixtureRoutes: Route[] = [
   { id: "tron-usdt", provider: "on_chain", network: "Tron", asset: "USDT", amount: "1280.00", address: "TWb4A6kVtQJ4z9Yp2mR7sX8cN1hL5uD3eF", transactionHash: "70e31d825cf84e0114c93c5f29dbbe2408eeab421e8a14d49f97d6fba2483f0d" },
@@ -81,11 +84,11 @@ function parseSession(value: unknown): CheckoutSession | null {
       if (typeof candidate.network !== "string" || typeof candidate.address !== "string" || candidate.address.length < 16 || candidate.address.length > 256 || candidate.transaction_hash !== undefined && typeof candidate.transaction_hash !== "string" || candidate.provider_id !== undefined || candidate.payment_url !== undefined) return null;
       const hasProgress = candidate.received_amount !== undefined || candidate.remaining_amount !== undefined || candidate.payment_count !== undefined || candidate.top_up_allowed !== undefined;
       if (hasProgress && (typeof candidate.received_amount !== "string" || !/^[0-9]+(?:\.[0-9]+)?$/.test(candidate.received_amount) || typeof candidate.remaining_amount !== "string" || !/^[0-9]+(?:\.[0-9]+)?$/.test(candidate.remaining_amount) || typeof candidate.payment_count !== "number" || !Number.isSafeInteger(candidate.payment_count) || candidate.payment_count < 1 || typeof candidate.top_up_allowed !== "boolean" || candidate.top_up_allowed && /^0+(?:\.0+)?$/.test(candidate.remaining_amount))) return null;
-      parsedRoutes.push({ id: candidate.id, provider: "on_chain", network: candidate.network, asset: candidate.asset, amount: candidate.amount, address: candidate.address, receivedAmount: hasProgress ? candidate.received_amount as string : undefined, remainingAmount: hasProgress ? candidate.remaining_amount as string : undefined, paymentCount: hasProgress ? candidate.payment_count as number : undefined, topUpAllowed: hasProgress ? candidate.top_up_allowed as boolean : undefined, transactionHash: typeof candidate.transaction_hash === "string" ? candidate.transaction_hash : undefined });
+      parsedRoutes.push({ id: candidate.id, provider: "on_chain", network: candidate.network, asset: candidate.asset, amount: candidate.amount, address: candidate.address, receivedAmount: hasProgress ? candidate.received_amount as string : undefined, remainingAmount: hasProgress ? candidate.remaining_amount as string : undefined, paymentCount: hasProgress ? candidate.payment_count as number : undefined, topUpAllowed: hasProgress ? candidate.top_up_allowed as boolean : undefined, transactionHash: typeof candidate.transaction_hash === "string" ? candidate.transaction_hash : undefined , paymentURI: typeof candidate.payment_uri === "string" && candidate.payment_uri.length <= 2048 && paymentURIPattern.test(candidate.payment_uri) ? candidate.payment_uri : undefined });
       continue;
     }
     if (candidate.provider === "hosted_gateway") {
-      if (typeof candidate.provider_id !== "string" || typeof candidate.payment_url !== "string" || !safeProviderPaymentURL(candidate.payment_url) || candidate.network !== undefined || candidate.address !== undefined || candidate.transaction_hash !== undefined || candidate.explorer_url !== undefined || candidate.received_amount !== undefined || candidate.remaining_amount !== undefined || candidate.payment_count !== undefined || candidate.top_up_allowed !== undefined) return null;
+      if (typeof candidate.provider_id !== "string" || typeof candidate.payment_url !== "string" || !safeProviderPaymentURL(candidate.payment_url) || candidate.network !== undefined || candidate.address !== undefined || candidate.payment_uri !== undefined || candidate.transaction_hash !== undefined || candidate.explorer_url !== undefined || candidate.received_amount !== undefined || candidate.remaining_amount !== undefined || candidate.payment_count !== undefined || candidate.top_up_allowed !== undefined) return null;
       parsedRoutes.push({ id: candidate.id, provider: "hosted_gateway", providerId: candidate.provider_id, asset: candidate.asset, amount: candidate.amount, paymentURL: candidate.payment_url });
       continue;
     }
@@ -430,6 +433,7 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
           <div className="checkout-payment-data">
             <div><small>{t(amountLabel)}</small><strong data-copy-value={amountToSend} data-testid="payment-amount">{amountToSend} <span>{route.asset}</span></strong><p className="checkout-fiat-equivalent" data-testid="payment-fiat-equivalent">≈ {displayTotal}</p>{canSendToRoute && <Button data-testid="copy-amount" onClick={() => void copy("amount", amountToSend)} size="sm" variant="secondary">{copied === "amount" ? <Check size={14} /> : <Copy size={14} />}{copied === "amount" ? t("common.copied") : t("checkout.copyAmount")}</Button>}</div>
             <div><small>{t("checkout.address")}</small><code data-testid="payment-address">{route.address}</code>{canSendToRoute && <Button data-testid="copy-address" onClick={() => void copy("address", route.address)} size="sm" variant="secondary">{copied === "address" ? <Check size={14} /> : <Copy size={14} />}{copied === "address" ? t("common.copied") : t("checkout.copyAddress")}</Button>}</div>
+            {canSendToRoute && route.paymentURI && <div className="checkout-wallet-link"><a className="mp-button mp-button--primary mp-button--md" data-testid="open-in-wallet" href={route.paymentURI}><ExternalLink aria-hidden="true" size={16} />{t("checkout.openInWallet")}</a><small>{t("checkout.openInWalletHelp")}</small></div>}
             {isPartial && <p className={route.topUpAllowed ? "checkout-topup-note" : "checkout-topup-note is-locked"} data-testid="top-up-instruction">{t(route.topUpAllowed ? "checkout.topUpInstruction" : "checkout.topUpUnavailable")}</p>}
             <div className="checkout-expiry"><Clock3 size={16} /><span>{t("checkout.expiresIn", { time: remaining })}</span></div>
           </div>

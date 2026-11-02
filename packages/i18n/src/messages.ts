@@ -1282,7 +1282,9 @@ export const en = {
   "checkout.poweredBy": "Powered by {product}: payment software, not the recipient of funds.",
   "checkout.paidTo": "The payment goes directly to {merchant}.",
   "checkout.regionUnavailable": "This payment page is not available in your region",
-  "checkout.regionUnavailableHelp": "If you think this is a mistake, contact the seller."
+  "checkout.regionUnavailableHelp": "If you think this is a mistake, contact the seller.",
+  "checkout.openInWallet": "Open in wallet",
+  "checkout.openInWalletHelp": "Your wallet fills in the address and amount. Check the network and amount before you confirm."
 } as const;
 
 export type MessageKey = keyof typeof en;

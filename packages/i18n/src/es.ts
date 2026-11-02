@@ -1284,5 +1284,7 @@ export const es = {
   "checkout.poweredBy": "Funciona con {product}: software de pagos, no el destinatario de los fondos.",
   "checkout.paidTo": "El pago va directamente a {merchant}.",
   "checkout.regionUnavailable": "Esta página de pago no está disponible en tu región",
-  "checkout.regionUnavailableHelp": "Si crees que es un error, contacta con el vendedor."
+  "checkout.regionUnavailableHelp": "Si crees que es un error, contacta con el vendedor.",
+  "checkout.openInWallet": "Abrir en la billetera",
+  "checkout.openInWalletHelp": "Tu billetera rellena la dirección y el importe. Comprueba la red y el importe antes de confirmar."
 } satisfies Messages;

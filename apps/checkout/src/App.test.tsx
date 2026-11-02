@@ -117,6 +117,26 @@ describe("hosted checkout", () => {
     expect(fetch).toHaveBeenCalledWith(`https://merchant-api.example/v1/checkout-sessions/${csToken}`, expect.objectContaining({ credentials: "omit", redirect: "error" }));
   });
 
+  it("opens the payer's wallet only through a vetted payment link (CHK-2)", async () => {
+    vi.stubEnv("VITE_CHECKOUT_FIXTURE_MODE", "false"); vi.stubEnv("VITE_CHECKOUT_API_URL", "https://merchant-api.example");
+    const link = "ethereum:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48@1/transfer?address=0x8077444bed90f3ca9157ab8bf8d2c51103b2ce89&uint256=1280000000";
+    const base = session("pending", routeTwo);
+    const withLink = { ...base, routes: [base.routes[0]!, { ...base.routes[1]!, payment_uri: link }] };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(withLink)));
+    window.history.replaceState({}, "", `/checkout?token=${csToken}`);
+    const view = renderCheckout();
+    expect(await screen.findByTestId("open-in-wallet")).toHaveAttribute("href", link);
+    view.unmount();
+    for (const forged of ["javascript:alert(1)", "https://evil.example/pay", "ethereum:0x8077444bed90f3ca9157ab8bf8d2c51103b2ce89@1 onclick"]) {
+      const bad = { ...base, routes: [base.routes[0]!, { ...base.routes[1]!, payment_uri: forged }] };
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(bad)));
+      const next = renderCheckout();
+      expect(await screen.findByTestId("payment-address")).toBeInTheDocument();
+      expect(screen.queryByTestId("open-in-wallet")).not.toBeInTheDocument();
+      next.unmount();
+    }
+  });
+
   it("uses canonical EVM chain identifiers for the transaction explorer", async () => {
     vi.stubEnv("VITE_CHECKOUT_FIXTURE_MODE", "false");
     vi.stubEnv("VITE_CHECKOUT_API_URL", "https://merchant-api.example");

@@ -132,6 +132,7 @@ type CheckoutRoute struct {
 	TopUpAllowed    *bool  `json:"top_up_allowed,omitempty"`
 	Address         string `json:"address,omitempty"`
 	PaymentURL      string `json:"payment_url,omitempty"`
+	PaymentURI      string `json:"payment_uri,omitempty"`
 	TransactionHash string `json:"transaction_hash,omitempty"`
 	ExplorerURL     string `json:"explorer_url,omitempty"`
 }

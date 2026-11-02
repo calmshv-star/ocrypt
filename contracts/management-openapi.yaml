@@ -691,7 +691,7 @@ components:
           not: { anyOf: [ { required: [provider_id] }, { required: [payment_url] } ] }
         - required: [provider_id, payment_url]
           properties: { provider: { const: hosted_gateway } }
-          not: { anyOf: [ { required: [network] }, { required: [address] }, { required: [transaction_hash] }, { required: [explorer_url] }, { required: [received_amount] }, { required: [remaining_amount] }, { required: [payment_count] }, { required: [top_up_allowed] } ] }
+          not: { anyOf: [ { required: [network] }, { required: [address] }, { required: [transaction_hash] }, { required: [explorer_url] }, { required: [received_amount] }, { required: [remaining_amount] }, { required: [payment_count] }, { required: [top_up_allowed] }, { required: [payment_uri] } ] }
       properties:
         id: { type: string, format: uuid }
         provider: { type: string, enum: [on_chain, hosted_gateway] }
@@ -705,6 +705,7 @@ components:
         top_up_allowed: { type: boolean, description: True only while the frozen route policy permits another transfer to this exact on-chain route. }
         address: { type: string }
         payment_url: { type: string, format: uri, pattern: '^https://' }
+        payment_uri: { type: string, maxLength: 2048, pattern: '^(?:ethereum:0x[0-9a-fA-F]{40}@[1-9][0-9]*|solana:[1-9A-HJ-NP-Za-km-z]{32,44}\?amount=|ton://transfer/)[^\s]*$', description: 'Wallet deep link for an on-chain route (EIP-681, Solana Pay, ton://transfer) carrying the address and the amount still due. Absent when the network has no widely supported standard.' }
         transaction_hash: { type: string }
         explorer_url: { type: string, format: uri, pattern: '^https://' }
     SelectRouteInput: { type: object, additionalProperties: false, required: [route_id], properties: { route_id: { type: string, format: uuid } } }

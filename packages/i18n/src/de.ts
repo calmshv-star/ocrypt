@@ -1284,5 +1284,7 @@ export const de = {
   "checkout.poweredBy": "Bereitgestellt von {product}: Zahlungssoftware, nicht der Empfänger der Gelder.",
   "checkout.paidTo": "Die Zahlung geht direkt an {merchant}.",
   "checkout.regionUnavailable": "Diese Zahlungsseite ist in Ihrer Region nicht verfügbar",
-  "checkout.regionUnavailableHelp": "Wenn Sie das für einen Fehler halten, wenden Sie sich an den Verkäufer."
+  "checkout.regionUnavailableHelp": "Wenn Sie das für einen Fehler halten, wenden Sie sich an den Verkäufer.",
+  "checkout.openInWallet": "In der Wallet öffnen",
+  "checkout.openInWalletHelp": "Ihre Wallet übernimmt Adresse und Betrag. Prüfen Sie Netzwerk und Betrag, bevor Sie bestätigen."
 } satisfies Messages;

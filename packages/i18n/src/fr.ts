@@ -1284,5 +1284,7 @@ export const fr = {
   "checkout.poweredBy": "Propulsé par {product} : logiciel de paiement, pas le destinataire des fonds.",
   "checkout.paidTo": "Le paiement va directement à {merchant}.",
   "checkout.regionUnavailable": "Cette page de paiement n’est pas disponible dans votre région",
-  "checkout.regionUnavailableHelp": "Si vous pensez qu’il s’agit d’une erreur, contactez le vendeur."
+  "checkout.regionUnavailableHelp": "Si vous pensez qu’il s’agit d’une erreur, contactez le vendeur.",
+  "checkout.openInWallet": "Ouvrir dans le portefeuille",
+  "checkout.openInWalletHelp": "Votre portefeuille remplit l’adresse et le montant. Vérifiez le réseau et le montant avant de confirmer."
 } satisfies Messages;

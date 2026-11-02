@@ -292,9 +292,11 @@ func loadPublicCheckout(ctx context.Context, tx pgx.Tx, hash [32]byte, tenantID,
  COALESCE(te.transaction_id,''),CASE WHEN te.transaction_id IS NULL THEN '' ELSE replace(c.transaction_url_template,'{tx}',te.transaction_id) END,
  r.expected_amount_atomic::text,r.asset_decimals,COALESCE(pma.received_atomic,0)::text,COALESCE(progress.payment_count,0),
  COALESCE((binding.policy_snapshot->>'accumulate_partials')::boolean,false),
- CASE WHEN COALESCE((binding.policy_snapshot->>'accept_late_within_grace')::boolean,false) THEN r.grace_ends_at ELSE r.expires_at END
+ CASE WHEN COALESCE((binding.policy_snapshot->>'accept_late_within_grace')::boolean,false) THEN r.grace_ends_at ELSE r.expires_at END,
+ COALESCE(c.family,''),COALESCE(asset.kind,''),COALESCE(asset.canonical_contract,'')
  FROM payment_routes r
  LEFT JOIN chains c ON c.id=r.chain_id
+ LEFT JOIN assets asset ON asset.id=r.asset_id AND asset.chain_id=r.chain_id
  LEFT JOIN hosted_provider_configs hpc ON hpc.id=r.provider_id AND hpc.tenant_id=r.tenant_id AND hpc.merchant_id=r.merchant_id
  LEFT JOIN payment_route_policy_bindings binding ON binding.route_id=r.id AND binding.tenant_id=r.tenant_id
  LEFT JOIN payment_match_aggregates pma ON pma.route_id=r.id AND pma.tenant_id=r.tenant_id AND pma.state<>'reversed'
@@ -314,10 +316,14 @@ func loadPublicCheckout(ctx context.Context, tx pgx.Tx, hash [32]byte, tenantID,
 		var assetDecimals int16
 		var accumulatesPartials bool
 		var collectionDeadline time.Time
-		if e = rows.Scan(&route.ID, &route.Provider, &route.ProviderID, &route.Network, &route.Asset, &route.Amount, &route.Address, &route.PaymentURL, &admittedOrigins, &route.TransactionHash, &route.ExplorerURL, &expectedAtomic, &assetDecimals, &receivedAtomic, &route.PaymentCount, &accumulatesPartials, &collectionDeadline); e != nil {
+		var chainFamily, assetKind, assetContract string
+		if e = rows.Scan(&route.ID, &route.Provider, &route.ProviderID, &route.Network, &route.Asset, &route.Amount, &route.Address, &route.PaymentURL, &admittedOrigins, &route.TransactionHash, &route.ExplorerURL, &expectedAtomic, &assetDecimals, &receivedAtomic, &route.PaymentCount, &accumulatesPartials, &collectionDeadline, &chainFamily, &assetKind, &assetContract); e != nil {
 			return result, e
 		}
 		route.Address = chains.DisplayAddress(route.Network, route.Address)
+		if route.Provider == "on_chain" {
+			route.PaymentURI = paymentURI(chainFamily, route.Network, assetKind, assetContract, route.Address, paymentURIAmount(expectedAtomic, receivedAtomic), assetDecimals)
+		}
 		var amountRemaining bool
 		route.ReceivedAmount, route.RemainingAmount, amountRemaining = checkoutPaymentProgress(expectedAtomic, receivedAtomic, assetDecimals)
 		if route.ReceivedAmount != "" {

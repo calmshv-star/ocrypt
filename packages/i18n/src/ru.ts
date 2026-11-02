@@ -1284,5 +1284,7 @@ export const ru = {
   "checkout.poweredBy": "Работает на {product} — это программа, а не получатель средств.",
   "checkout.paidTo": "Платёж поступает напрямую продавцу: {merchant}.",
   "checkout.regionUnavailable": "Страница оплаты недоступна в вашем регионе",
-  "checkout.regionUnavailableHelp": "Если вы считаете это ошибкой, свяжитесь с продавцом."
+  "checkout.regionUnavailableHelp": "Если вы считаете это ошибкой, свяжитесь с продавцом.",
+  "checkout.openInWallet": "Открыть в кошельке",
+  "checkout.openInWalletHelp": "Кошелёк подставит адрес и сумму. Перед подтверждением проверьте сеть и сумму."
 } satisfies Messages;

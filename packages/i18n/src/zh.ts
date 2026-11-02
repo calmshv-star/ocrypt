@@ -1284,5 +1284,7 @@ export const zhCN = {
   "checkout.poweredBy": "由 {product} 提供技术支持：这是支付软件，不是收款方。",
   "checkout.paidTo": "款项直接支付给 {merchant}。",
   "checkout.regionUnavailable": "此付款页面在您所在的地区不可用",
-  "checkout.regionUnavailableHelp": "如果您认为这是错误，请联系卖家。"
+  "checkout.regionUnavailableHelp": "如果您认为这是错误，请联系卖家。",
+  "checkout.openInWallet": "在钱包中打开",
+  "checkout.openInWalletHelp": "钱包会自动填入地址和金额。确认前请核对网络和金额。"
 } satisfies Messages;
