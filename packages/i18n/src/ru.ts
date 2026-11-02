@@ -1254,6 +1254,8 @@ export const ru = {
   "onboarding.testPayment.body": "Откройте ссылку и оплатите её в песочнице. Посмотрите, как появятся платёж и вебхук.",
   "onboarding.goLive.title": "Переключитесь в боевой режим",
   "onboarding.goLive.body": "Нужны двухфакторная аутентификация и подтверждённый кошелёк. До этого реальные платежи выключены.",
+  "signup.countryBlocked": "Регистрация недоступна для компаний из страны: {country}.",
+  "onboarding.ready": "Готово к запуску",
   "intentStatus.waiting.label": "Ожидает оплаты",
   "intentStatus.waiting.hint": "Осталось {minutes} мин. Оплата ещё не поступила.",
   "intentStatus.waiting.hintNoTime": "Оплата ещё не поступила. Отправьте покупателю ссылку на оплату.",

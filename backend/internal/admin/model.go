@@ -89,6 +89,8 @@ const (
 	RoleTreasury        Role = "treasury_operator"
 	RoleSecurityAdmin   Role = "security_admin"
 	RoleAuditor         Role = "auditor"
+	// RoleMerchantOwner is projected from a self-service owner membership.
+	RoleMerchantOwner Role = "merchant_owner"
 )
 
 type Scope struct {

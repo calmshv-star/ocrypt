@@ -13,7 +13,7 @@ export function isAllowedAdminOrigin(url:URL,allowInsecureLoopback=false):boolea
 export function adminCSRFCookieName(url:URL,allowInsecureLoopback=false):string{return allowInsecureLoopback&&url.protocol==="http:"&&isAllowedAdminOrigin(url,true)?"admin_csrf_e2e":"__Host-admin_csrf"}
 export async function withExplicitPreviewFallback<T>(request:()=>Promise<T>,preview:()=>T):Promise<T>{try{return await request()}catch(error){if(isAdminPreviewMode())return preview();throw error}}
 
-export type SignupOptions={enabled:false}|{enabled:true;termsVersion:string;businessTypes:string[]};
+export type SignupOptions={enabled:false}|{enabled:true;termsVersion:string;businessTypes:string[];blockedCountries:string[]};
 export type SignupForm={company_name:string;country:string;business_type:string;website?:string;terms_version:string};
 
 export class AdminClient {
@@ -41,10 +41,11 @@ export class AdminClient {
     const response=await this.fetcher(`${this.origin}/admin/v1/auth/signup/options`,{method:"GET",headers:new Headers({Accept:"application/json"}),credentials:"include",redirect:"error",cache:"no-store",signal});
     const value:unknown=await response.json().catch(()=>null);
     if(!response.ok||typeof value!=="object"||value===null||typeof (value as {enabled?:unknown}).enabled!=="boolean")return {enabled:false};
-    const options=value as {enabled:boolean;terms_version?:unknown;business_types?:unknown};
+    const options=value as {enabled:boolean;terms_version?:unknown;business_types?:unknown;blocked_countries?:unknown};
     if(!options.enabled)return {enabled:false};
     const types=Array.isArray(options.business_types)?options.business_types.filter((item):item is string=>typeof item==="string"&&/^[a-z][a-z_]{1,39}$/.test(item)):[];
-    return typeof options.terms_version==="string"&&types.length>0?{enabled:true,termsVersion:options.terms_version,businessTypes:types}:{enabled:false};
+    const blocked=Array.isArray(options.blocked_countries)?options.blocked_countries.filter((item):item is string=>typeof item==="string"&&/^[A-Z]{2}$/.test(item)):[];
+    return typeof options.terms_version==="string"&&types.length>0?{enabled:true,termsVersion:options.terms_version,businessTypes:types,blockedCountries:blocked}:{enabled:false};
   }
   async beginSignup(form:SignupForm):Promise<string>{
     const response=await this.fetcher(`${this.origin}/admin/v1/auth/signup`,{method:"POST",headers:new Headers({Accept:"application/json","Content-Type":"application/json"}),body:JSON.stringify(form),credentials:"include",redirect:"error",cache:"no-store"});

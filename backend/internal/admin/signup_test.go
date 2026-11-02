@@ -18,7 +18,7 @@ func signupService(t *testing.T, repo *repositoryStub, enabled bool) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewService(repo, provider, box, ServiceConfig{LoginTTL: 5 * time.Minute, IdleTTL: 15 * time.Minute, AbsoluteTTL: 8 * time.Hour, RotationInterval: 5 * time.Minute, StepUpTTL: 10 * time.Minute, RequiredACR: "urn:mfa", AcceptedAMR: map[string]bool{"otp": true}, SelfServiceSignup: enabled, SignupTermsVersion: "2026-11"})
+	service, err := NewService(repo, provider, box, ServiceConfig{LoginTTL: 5 * time.Minute, IdleTTL: 15 * time.Minute, AbsoluteTTL: 8 * time.Hour, RotationInterval: 5 * time.Minute, StepUpTTL: 10 * time.Minute, RequiredACR: "urn:mfa", AcceptedAMR: map[string]bool{"otp": true}, SelfServiceSignup: enabled, SignupTermsVersion: "2026-11", SignupTTL: 30 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,6 +38,25 @@ func TestSignupRequiresATermsVersionWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestSignupNeedsABoundedTTLAndMFA(t *testing.T) {
+	provider, _ := testOIDCProvider(t)
+	box, _ := NewAESGCMSecretBox(make([]byte, 32))
+	base := ServiceConfig{LoginTTL: 5 * time.Minute, IdleTTL: 15 * time.Minute, AbsoluteTTL: 8 * time.Hour, RotationInterval: 5 * time.Minute, StepUpTTL: 10 * time.Minute, RequiredACR: "urn:mfa", AcceptedAMR: map[string]bool{"otp": true}, SelfServiceSignup: true, SignupTermsVersion: "2026-11", SignupTTL: 30 * time.Minute}
+	for name, mutate := range map[string]func(*ServiceConfig){
+		"no ttl":       func(c *ServiceConfig) { c.SignupTTL = 0 },
+		"ttl too long": func(c *ServiceConfig) { c.SignupTTL = 2 * time.Hour },
+		"password only": func(c *ServiceConfig) {
+			c.PasswordOnly, c.RequiredACR, c.AcceptedAMR = true, "password", map[string]bool{"pwd": true}
+		},
+	} {
+		config := base
+		mutate(&config)
+		if _, err := NewService(&repositoryStub{}, provider, box, config); err == nil {
+			t.Fatalf("%s: configuration accepted", name)
+		}
+	}
+}
+
 func TestBeginSignupIsClosedByDefault(t *testing.T) {
 	repo := &repositoryStub{signupOK: true}
 	if _, _, err := signupService(t, repo, false).BeginSignup(context.Background(), validForm()); !errors.Is(err, ErrNotFound) || len(repo.signupForms) != 0 {
@@ -53,6 +72,9 @@ func TestBeginSignupNormalizesScreensAndRequiresMFA(t *testing.T) {
 	}
 	if got := repo.signupForms[0]; got.CompanyName != "Acme Payments Ltd" || got.Country != "DE" || got.BusinessType != "ecommerce" {
 		t.Fatalf("form not normalized before screening: %+v", got)
+	}
+	if lifetime := repo.attempt.ExpiresAt.Sub(repo.attempt.CreatedAt); lifetime != 30*time.Minute {
+		t.Fatalf("a signup attempt must last the signup TTL, got %s", lifetime)
 	}
 	if repo.attempt.Purpose != "signup" || repo.attempt.SignupRequestID == "" || repo.attempt.ReturnPath != "/#/onboarding" {
 		t.Fatalf("signup login attempt not recorded: %+v", repo.attempt)
@@ -72,6 +94,9 @@ func TestBeginSignupRejectsInvalidOrScreenedForms(t *testing.T) {
 		"stale terms":    {CompanyName: "Acme", Country: "DE", BusinessType: "ecommerce", TermsVersion: "2025-01"},
 		"missing terms":  {CompanyName: "Acme", Country: "DE", BusinessType: "ecommerce"},
 		"credential url": {CompanyName: "Acme", Country: "DE", BusinessType: "ecommerce", Website: "https://user:pass@acme.example", TermsVersion: "2026-11"},
+		"zero width":     {CompanyName: "Ac\u200bme", Country: "DE", BusinessType: "ecommerce", TermsVersion: "2026-11"},
+		"bidi override":  {CompanyName: "Acme\u202egnp", Country: "DE", BusinessType: "ecommerce", TermsVersion: "2026-11"},
+		"control":        {CompanyName: "Acme\x07Ltd", Country: "DE", BusinessType: "ecommerce", TermsVersion: "2026-11"},
 	} {
 		repo := &repositoryStub{signupOK: true}
 		if _, _, err := signupService(t, repo, true).BeginSignup(context.Background(), form); !errors.Is(err, ErrInvalid) || len(repo.signupForms) != 0 {
@@ -163,6 +188,10 @@ func TestSignupRouteIsSameOriginStrictAndOpaque(t *testing.T) {
 	if rejected.Code != http.StatusUnprocessableEntity || strings.Contains(rejected.Body.String(), "country") {
 		t.Fatalf("screened rejection must be opaque: %d %s", rejected.Code, rejected.Body.String())
 	}
+	repo.signupErr = errors.New("database unavailable")
+	if outage := post(server, "https://admin.example", body); outage.Code != http.StatusServiceUnavailable || strings.Contains(outage.Body.String(), "database") {
+		t.Fatalf("an outage must not read as a rejected form: %d %s", outage.Code, outage.Body.String())
+	}
 }
 
 func TestSignupOptionsAdvertiseOnlyWhatIsOpen(t *testing.T) {
@@ -179,8 +208,18 @@ func TestSignupOptionsAdvertiseOnlyWhatIsOpen(t *testing.T) {
 	if body := get(false); !strings.Contains(body, `"enabled":false`) || strings.Contains(body, "ecommerce") {
 		t.Fatalf("closed signup options: %s", body)
 	}
-	if body := get(true); !strings.Contains(body, `"terms_version":"2026-11"`) || !strings.Contains(body, "ecommerce") {
+	if body := get(true); !strings.Contains(body, `"terms_version":"2026-11"`) || !strings.Contains(body, "ecommerce") || !strings.Contains(body, `"blocked_countries":["IR","KP"]`) {
 		t.Fatalf("open signup options: %s", body)
+	}
+	repo := &repositoryStub{}
+	service := signupService(t, repo, true)
+	for range 3 {
+		if _, err := service.SignupOptions(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if repo.signupOptionCalls != 1 {
+		t.Fatalf("anonymous option reads must be cached, database read %d times", repo.signupOptionCalls)
 	}
 }
 
@@ -195,6 +234,16 @@ func TestMerchantOwnerManagesOnlyItsOwnWallets(t *testing.T) {
 		if _, err := AuthorizeWallets(owner, other, true); err == nil {
 			t.Fatalf("owner reached another scope %+v", other)
 		}
+	}
+	service := signupService(t, &repositoryStub{}, false)
+	if _, err := service.ReplaceWatchWalletAddress(context.Background(), owner, own, "55555555-5555-4555-8555-555555555555", WatchWalletReplacement{}); !errors.Is(err, ErrStepUpRequired) {
+		t.Fatalf("changing a receiving address must require recent MFA, got %v", err)
+	}
+	if _, err := service.CreateWatchWalletImportChallenge(owner, own, "admin.example", "evm_personal_sign", "0x0000000000000000000000000000000000000001", nil); !errors.Is(err, ErrStepUpRequired) {
+		t.Fatalf("importing wallets must require recent MFA, got %v", err)
+	}
+	if _, err := service.ImportWatchWallets(context.Background(), owner, own, "admin.example", WatchWalletImport{}); !errors.Is(err, ErrStepUpRequired) {
+		t.Fatalf("importing wallets must require recent MFA, got %v", err)
 	}
 	operator := PrincipalFor(Identity{UserID: "o", Bindings: []Binding{{Role: "auditor", Permissions: map[Permission]bool{PermissionInfrastructureRead: true}}}}, Session{ID: "s"})
 	if _, err := AuthorizeWallets(operator, own, false); err != nil {

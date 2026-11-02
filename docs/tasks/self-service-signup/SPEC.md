@@ -55,6 +55,11 @@ and a payment has been received; a real live-mode switch is billing-stage work.
 | S9 | Signup form | Disabled until terms accepted and website is https; trimmed payload with server terms version; redirect only to the returned https URL; closed installation shows no form | `Signup.test.tsx`, `client.ts` URL check | passes |
 | S10 | Server rejects | One opaque message, no redirect | `Signup.test.tsx` | passes |
 | S11 | Onboarding checklist | Each step from real data; steps without permission hidden; progress counts visible steps | `Signup.test.tsx` | passes |
+| S12 | Owner removed, merchant or tenant disabled; co-owner added | `merchant_owner` projected only from an active owner membership of an active self-service merchant; never stored | live `S1` | passes |
+| S13 | Wallet write without fresh MFA | `step_up_required` | `TestMerchantOwnerManagesOnlyItsOwnWallets` | passes |
+| S14 | Signup with password-only mode; TTL outside 5m..1h | Configuration refused | `TestSignupNeedsABoundedTTLAndMFA` | passes |
+| S15 | Expired unconsumed requests; control/bidi characters; outage | Purged on the next call; rejected; 503 not 422 | live `S1`, `TestBeginSignupRejectsInvalidOrScreenedForms`, `TestSignupRouteIsSameOriginStrictAndOpaque` | passes |
+| S16 | Blocked country chosen in the form | Reason shown before submit, submit disabled | `Signup.test.tsx` | passes |
 
 For financial changes include relevant exact-money, negative, duplicate/replay,
 concurrency, tenant, finality, and external-delivery cases.

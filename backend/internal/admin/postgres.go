@@ -197,22 +197,32 @@ FROM register_self_service_merchant($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, attempt.Si
 	return result, classifyAdminDB(err)
 }
 
-// SignupBusinessTypes lists the business types open for self-service signup.
-func (r *PostgresRepository) SignupBusinessTypes(ctx context.Context) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `SELECT business_type FROM signup_business_types WHERE allowed ORDER BY business_type`)
+// SignupOptions lists the business types open for self-service signup and
+// the countries it is closed for.
+func (r *PostgresRepository) SignupOptions(ctx context.Context) ([]string, []string, error) {
+	types, err := r.stringColumn(ctx, `SELECT business_type FROM signup_business_types WHERE allowed ORDER BY business_type`)
+	if err != nil {
+		return nil, nil, err
+	}
+	blocked, err := r.stringColumn(ctx, `SELECT country::text FROM signup_blocked_countries ORDER BY country`)
+	return types, blocked, err
+}
+
+func (r *PostgresRepository) stringColumn(ctx context.Context, query string) ([]string, error) {
+	rows, err := r.pool.Query(ctx, query)
 	if err != nil {
 		return nil, classifyAdminDB(err)
 	}
 	defer rows.Close()
-	var types []string
+	values := []string{}
 	for rows.Next() {
 		var value string
 		if err = rows.Scan(&value); err != nil {
 			return nil, classifyAdminDB(err)
 		}
-		types = append(types, value)
+		values = append(values, value)
 	}
-	return types, classifyAdminDB(rows.Err())
+	return values, classifyAdminDB(rows.Err())
 }
 
 func (r *PostgresRepository) FindIdentity(ctx context.Context, issuer, subject string) (Identity, error) {
@@ -228,7 +238,7 @@ func (r *PostgresRepository) FindIdentity(ctx context.Context, issuer, subject s
 		}
 		rows, err := tx.Query(ctx, `SELECT b.id::text,b.role_key,coalesce(b.tenant_id::text,''),coalesce(b.merchant_id::text,''),p.permission_key
 FROM admin_role_bindings b JOIN admin_role_permissions rp ON rp.role_key=b.role_key JOIN admin_permissions p ON p.permission_key=rp.permission_key
-WHERE b.user_id=$1 AND b.revoked_at IS NULL AND (b.expires_at IS NULL OR b.expires_at>clock_timestamp()) ORDER BY b.id,p.permission_key`, identity.UserID)
+WHERE b.user_id=$1 AND b.role_key<>'merchant_owner' AND b.revoked_at IS NULL AND (b.expires_at IS NULL OR b.expires_at>clock_timestamp()) ORDER BY b.id,p.permission_key`, identity.UserID)
 		if err != nil {
 			return err
 		}
@@ -280,6 +290,34 @@ WHERE b.user_id=$1 AND b.revoked_at IS NULL AND (b.expires_at IS NULL OR b.expir
 		}
 		for _, id := range merchantOrder {
 			identity.Bindings = append(identity.Bindings, *merchantBindings[id])
+		}
+		// merchant_owner exists only while the user is an active owner of an
+		// active self-service merchant; it is never read from stored bindings.
+		ownerRows, err := tx.Query(ctx, `SELECT binding_id::text,tenant_id::text,merchant_id::text,permission_key FROM list_current_admin_self_service_owner_grants()`)
+		if err != nil {
+			return err
+		}
+		defer ownerRows.Close()
+		ownerBindings := map[string]*Binding{}
+		ownerOrder := []string{}
+		for ownerRows.Next() {
+			var bindingID, tenantID, merchantID, permission string
+			if err := ownerRows.Scan(&bindingID, &tenantID, &merchantID, &permission); err != nil {
+				return err
+			}
+			binding := ownerBindings[bindingID]
+			if binding == nil {
+				binding = &Binding{Role: RoleMerchantOwner, TenantID: tenantID, MerchantID: merchantID, Permissions: map[Permission]bool{}}
+				ownerBindings[bindingID] = binding
+				ownerOrder = append(ownerOrder, bindingID)
+			}
+			binding.Permissions[Permission(permission)] = true
+		}
+		if err := ownerRows.Err(); err != nil {
+			return err
+		}
+		for _, id := range ownerOrder {
+			identity.Bindings = append(identity.Bindings, *ownerBindings[id])
 		}
 		return nil
 	})

@@ -20,7 +20,7 @@ const owner: AdminPrincipal = {
   scopes: [{ tenant_id: tenantId, merchant_id: merchantId }],
   amr: ["mfa"]
 };
-const open = { enabled: true as const, termsVersion: "2026-11", businessTypes: ["saas", "ecommerce"] };
+const open = { enabled: true as const, termsVersion: "2026-11", businessTypes: ["saas", "ecommerce"], blockedCountries: ["IR", "KP"] };
 
 function wrap(node: React.ReactNode) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -78,6 +78,21 @@ describe("self-service signup", () => {
     expect(live.beginSignup).toHaveBeenCalledWith({ company_name: "Acme VPN", country: "DE", business_type: "saas", website: "https://acme.example", terms_version: "2026-11" });
   });
 
+  it("explains a closed country before submitting and offers every other jurisdiction", async () => {
+    render(wrap(<SignupPage client={client()} locale="en" redirect={vi.fn()} />));
+    await screen.findByLabelText("Company or project name");
+    fill();
+    fireEvent.click(screen.getByRole("checkbox"));
+    const country = screen.getByLabelText("Country of registration") as HTMLSelectElement;
+    for (const code of ["PR", "GU", "VI", "SD", "IM", "JE", "GG", "CW", "XK"]) expect(Array.from(country.options).some((option) => option.value === code), code).toBe(true);
+    fireEvent.change(country, { target: { value: "IR" } });
+    expect(screen.getByRole("alert")).toHaveTextContent("Registration is not available for businesses registered in Iran");
+    expect(screen.getByRole("button", { name: "Continue to secure sign-in" })).toBeDisabled();
+    fireEvent.change(country, { target: { value: "DE" } });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue to secure sign-in" })).toBeEnabled();
+  });
+
   it("shows one opaque message when the server rejects the registration", async () => {
     const redirect = vi.fn();
     render(wrap(<SignupPage client={client({ beginSignup: vi.fn().mockRejectedValue(new AdminAPIError(422, "signup_rejected", "rejected")) })} locale="en" redirect={redirect} />));
@@ -106,7 +121,7 @@ describe("onboarding checklist", () => {
     expect(await screen.findByText("4 of 6 done")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Add your receiving wallets/ })).toHaveAttribute("href", "#/financial-settings");
     expect(screen.getByRole("link", { name: /Create an API key/ })).toHaveTextContent("To do");
-    expect(screen.getByRole("link", { name: /Switch to live mode/ })).toHaveTextContent("Done");
+    expect(screen.getByRole("link", { name: /Switch to live mode/ })).toHaveTextContent("Ready");
     expect(screen.getByRole("link", { name: "Getting started" })).toBeInTheDocument();
   });
 

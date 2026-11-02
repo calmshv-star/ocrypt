@@ -147,7 +147,7 @@ export function LiveOverviewPage() {
       eyebrow={<><Activity size={13} />{t(admin.preview ? "common.previewData" : "admin.connected")}</>}
       title={t("page.overview.title")}
     />
-    {!admin.preview && admin.scope?.merchantId && (can("wallets:read") || can("infrastructure:read")) && <OnboardingBanner />}
+    {!admin.preview && admin.scope?.merchantId && can("wallets:read") && <OnboardingBanner />}
     <PageState permission="dashboard:read" query={queryState}>
       {overview ? <>
         <section aria-label={t("overview.keyMetrics")} className="admin-stat-grid">

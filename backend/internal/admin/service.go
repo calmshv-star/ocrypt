@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/ids"
 )
@@ -33,6 +35,9 @@ type ServiceConfig struct {
 	SelfServiceSignup bool
 	// SignupTermsVersion is the terms version a registrant must accept.
 	SignupTermsVersion string
+	// SignupTTL bounds a signup request and its OIDC attempt. A registrant
+	// creates the IdP account, verifies the email and enrolls MFA inside it.
+	SignupTTL time.Duration
 }
 
 const maxAdminSessionTTL = 10 * 365 * 24 * time.Hour
@@ -50,7 +55,21 @@ type Service struct {
 	stateBox   SecretBox
 	config     ServiceConfig
 	now        func() time.Time
+
+	// The public signup page asks for options on every visit; they change
+	// only by migration, so they are cached briefly.
+	signupMu      sync.Mutex
+	signupCached  SignupOptions
+	signupExpires time.Time
 }
+
+// SignupOptions is what the public signup page may know before registration.
+type SignupOptions struct {
+	BusinessTypes    []string
+	BlockedCountries []string
+}
+
+const signupOptionsTTL = time.Minute
 
 func NewService(repository Repository, provider *OIDCProvider, stateBox SecretBox, config ServiceConfig) (*Service, error) {
 	if repository == nil || provider == nil || stateBox == nil {
@@ -73,6 +92,12 @@ func NewService(repository Repository, provider *OIDCProvider, stateBox SecretBo
 	}
 	if config.SelfServiceSignup && (config.SignupTermsVersion == "" || len(config.SignupTermsVersion) > 64) {
 		return nil, errors.New("self-service signup requires a terms version of at most 64 characters")
+	}
+	if config.SelfServiceSignup && (config.SignupTTL < 5*time.Minute || config.SignupTTL > time.Hour) {
+		return nil, errors.New("self-service signup TTL must be between five minutes and one hour")
+	}
+	if config.SelfServiceSignup && config.PasswordOnly {
+		return nil, errors.New("self-service signup requires MFA and cannot run in password-only mode")
 	}
 	return &Service{repository: repository, provider: provider, stateBox: stateBox, config: config, now: func() time.Time { return time.Now().UTC() }}, nil
 }
@@ -98,12 +123,24 @@ func (s *Service) SignupEnabled() (bool, string) {
 	return s.config.SelfServiceSignup, s.config.SignupTermsVersion
 }
 
-// SignupBusinessTypes lists the business types open for registration.
-func (s *Service) SignupBusinessTypes(ctx context.Context) ([]string, error) {
+// SignupOptions lists the business types open for registration and the
+// countries it is closed for, so the form can explain a refusal up front.
+func (s *Service) SignupOptions(ctx context.Context) (SignupOptions, error) {
 	if !s.config.SelfServiceSignup {
-		return nil, ErrNotFound
+		return SignupOptions{}, ErrNotFound
 	}
-	return s.repository.SignupBusinessTypes(ctx)
+	now := s.now()
+	s.signupMu.Lock()
+	defer s.signupMu.Unlock()
+	if now.Before(s.signupExpires) {
+		return s.signupCached, nil
+	}
+	types, blocked, err := s.repository.SignupOptions(ctx)
+	if err != nil {
+		return SignupOptions{}, err
+	}
+	s.signupCached, s.signupExpires = SignupOptions{BusinessTypes: types, BlockedCountries: blocked}, now.Add(signupOptionsTTL)
+	return s.signupCached, nil
 }
 
 // BeginSignup screens a registration form in PostgreSQL and starts an OIDC
@@ -121,7 +158,7 @@ func (s *Service) BeginSignup(ctx context.Context, form SignupForm) (string, str
 		return "", "", err
 	}
 	now := s.now()
-	accepted, err := s.repository.CreateSignupRequest(ctx, requestID, form, now, now.Add(s.config.LoginTTL))
+	accepted, err := s.repository.CreateSignupRequest(ctx, requestID, form, now, now.Add(s.config.SignupTTL))
 	if err != nil {
 		return "", "", err
 	}
@@ -137,6 +174,11 @@ func normalizeSignupForm(form SignupForm) (SignupForm, bool) {
 	form.BusinessType = strings.TrimSpace(form.BusinessType)
 	form.Website = strings.TrimSpace(form.Website)
 	form.TermsVersion = strings.TrimSpace(form.TermsVersion)
+	for _, r := range form.CompanyName {
+		if unicode.In(r, unicode.Cc, unicode.Cf) {
+			return form, false
+		}
+	}
 	nameLength := len([]rune(form.CompanyName))
 	if nameLength < 2 || nameLength > 120 || len(form.Country) != 2 || form.Country[0] < 'A' || form.Country[0] > 'Z' || form.Country[1] < 'A' || form.Country[1] > 'Z' {
 		return form, false
@@ -161,6 +203,10 @@ func (s *Service) begin(ctx context.Context, returnPath, purpose, expectedUserID
 	if !safeReturnPath(returnPath) {
 		return "", "", ErrInvalid
 	}
+	ttl := s.config.LoginTTL
+	if purpose == "signup" {
+		ttl = s.config.SignupTTL
+	}
 	state, err := randomToken(32)
 	if err != nil {
 		return "", "", err
@@ -178,7 +224,7 @@ func (s *Service) begin(ctx context.Context, returnPath, purpose, expectedUserID
 		return "", "", err
 	}
 	now := s.now()
-	attempt := LoginAttempt{StateHash: tokenHash(state), Nonce: nonce, EncryptedVerifier: sealed, Purpose: purpose, ExpectedUserID: expectedUserID, ExistingSessionHash: append([]byte(nil), existingHash...), ReturnPath: returnPath, InvitationID: invitation.ID, InvitationTenantID: invitation.TenantID, InvitationMerchantID: invitation.MerchantID, ExpectedEmail: normalizeAdminEmail(invitation.Email), SignupRequestID: signupRequestID, CreatedAt: now, ExpiresAt: now.Add(s.config.LoginTTL)}
+	attempt := LoginAttempt{StateHash: tokenHash(state), Nonce: nonce, EncryptedVerifier: sealed, Purpose: purpose, ExpectedUserID: expectedUserID, ExistingSessionHash: append([]byte(nil), existingHash...), ReturnPath: returnPath, InvitationID: invitation.ID, InvitationTenantID: invitation.TenantID, InvitationMerchantID: invitation.MerchantID, ExpectedEmail: normalizeAdminEmail(invitation.Email), SignupRequestID: signupRequestID, CreatedAt: now, ExpiresAt: now.Add(ttl)}
 	if err := s.repository.PutLoginAttempt(ctx, attempt); err != nil {
 		return "", "", err
 	}
@@ -457,8 +503,21 @@ func AuthorizeWallets(principal Principal, scope Scope, write bool) (Scope, erro
 	return principal.Authorize(merchant, scope)
 }
 
-func (s *Service) ReplaceWatchWalletAddress(ctx context.Context, principal Principal, scope Scope, walletID string, input WatchWalletReplacement) (FinancialSettingsWallet, error) {
+// authorizeWalletWrite also requires recent MFA: changing where customers pay
+// must not be possible with only a stolen or long-lived session cookie.
+func (s *Service) authorizeWalletWrite(principal Principal, scope Scope) (Scope, error) {
 	resolved, err := AuthorizeWallets(principal, scope, true)
+	if err != nil {
+		return Scope{}, err
+	}
+	if err := principal.RequireStepUp(s.now(), s.config.RequiredACR, s.config.AcceptedAMR); err != nil {
+		return Scope{}, err
+	}
+	return resolved, nil
+}
+
+func (s *Service) ReplaceWatchWalletAddress(ctx context.Context, principal Principal, scope Scope, walletID string, input WatchWalletReplacement) (FinancialSettingsWallet, error) {
+	resolved, err := s.authorizeWalletWrite(principal, scope)
 	if err != nil {
 		return FinancialSettingsWallet{}, err
 	}
@@ -469,7 +528,7 @@ func (s *Service) ReplaceWatchWalletAddress(ctx context.Context, principal Princ
 }
 
 func (s *Service) CreateWatchWalletImportChallenge(principal Principal, scope Scope, domain, kind, address string, wallets []WatchWalletImportItem) (WatchWalletImportChallenge, error) {
-	_, err := AuthorizeWallets(principal, scope, true)
+	_, err := s.authorizeWalletWrite(principal, scope)
 	if err != nil {
 		return WatchWalletImportChallenge{}, err
 	}
@@ -500,7 +559,7 @@ func (s *Service) CreateWatchWalletImportChallenge(principal Principal, scope Sc
 }
 
 func (s *Service) ImportWatchWallets(ctx context.Context, principal Principal, scope Scope, domain string, input WatchWalletImport) (WatchWalletImportResult, error) {
-	resolved, err := AuthorizeWallets(principal, scope, true)
+	resolved, err := s.authorizeWalletWrite(principal, scope)
 	if err != nil {
 		return WatchWalletImportResult{}, err
 	}

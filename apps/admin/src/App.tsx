@@ -142,7 +142,7 @@ function AdminApplication() {
   const queryClient = useQueryClient();
   const active = (path: string) => location.pathname === path;
   const operations = [
-      admin.scope?.merchantId && (admin.can("wallets:read") || admin.can("infrastructure:read")) && { label: t("onboarding.nav"), href: "#/onboarding", icon: Sparkles, active: active("/onboarding"), keywords: ["setup", "start"] },
+      admin.scope?.merchantId && admin.can("wallets:read") && { label: t("onboarding.nav"), href: "#/onboarding", icon: Sparkles, active: active("/onboarding"), keywords: ["setup", "start"] },
       admin.can("dashboard:read") && { label: t("nav.overview"), href: "#/overview", icon: LayoutDashboard, active: active("/overview"), keywords: ["dashboard"] },
       admin.can("payments:read") && { label: t("nav.intents"), href: "#/intents", icon: CircleDollarSign, active: active("/intents"), keywords: ["orders"] },
       admin.can("payments:read") && { label: t("nav.transfers"), href: "#/transfers", icon: Blocks, active: active("/transfers"), keywords: ["transactions"] },

@@ -1254,6 +1254,8 @@ export const de = {
   "onboarding.testPayment.body": "Öffnen Sie Ihren Zahlungslink und bezahlen Sie in der Sandbox. Verfolgen Sie Zahlung und Webhook.",
   "onboarding.goLive.title": "In den Live-Modus wechseln",
   "onboarding.goLive.body": "Erfordert Zwei-Faktor-Authentifizierung und eine verifizierte Wallet. Bis dahin bleiben echte Zahlungen deaktiviert.",
+  "signup.countryBlocked": "Die Registrierung ist für Unternehmen mit Sitz in {country} nicht verfügbar.",
+  "onboarding.ready": "Bereit",
   "intentStatus.waiting.label": "Wartet auf Zahlung",
   "intentStatus.waiting.hint": "Noch {minutes} Min. Bisher ist nichts eingegangen.",
   "intentStatus.waiting.hintNoTime": "Bisher ist nichts eingegangen. Senden Sie dem Kunden den Zahlungslink.",

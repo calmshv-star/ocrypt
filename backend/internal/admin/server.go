@@ -595,8 +595,12 @@ func (s *Server) signup(w http.ResponseWriter, request *http.Request) {
 		writeProblem(w, http.StatusNotFound, "not_found", "The requested resource was not found.")
 		return
 	}
-	if err != nil {
+	if errors.Is(err, ErrInvalid) {
 		writeProblem(w, http.StatusUnprocessableEntity, "signup_rejected", "This registration cannot be accepted. Check the form or contact support.")
+		return
+	}
+	if err != nil {
+		writeProblem(w, http.StatusServiceUnavailable, "signup_unavailable", "Signup is temporarily unavailable. Try again later.")
 		return
 	}
 	s.setOIDCCookie(w, correlation)
@@ -611,12 +615,12 @@ func (s *Server) signupOptions(w http.ResponseWriter, request *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
 		return
 	}
-	types, err := s.service.SignupBusinessTypes(request.Context())
+	options, err := s.service.SignupOptions(request.Context())
 	if err != nil {
 		writeProblem(w, http.StatusServiceUnavailable, "unavailable", "Signup options are unavailable.")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "terms_version": terms, "business_types": types})
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "terms_version": terms, "business_types": options.BusinessTypes, "blocked_countries": options.BlockedCountries})
 }
 
 func (s *Server) allowLoginInitiation(request *http.Request) bool {

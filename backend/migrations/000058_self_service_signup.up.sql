@@ -16,6 +16,11 @@ ALTER TABLE admin_roles DROP CONSTRAINT admin_roles_role_key_check;
 ALTER TABLE admin_roles ADD CONSTRAINT admin_roles_role_key_check CHECK (role_key IN (
   'support_read_only','payment_operator','senior_approver','treasury_operator','security_admin','auditor','merchant_owner'));
 INSERT INTO admin_roles(role_key,description) VALUES ('merchant_owner','Self-service merchant owner, scoped to one merchant');
+-- merchant_owner is projected from an active owner membership of a
+-- self-service merchant (list_current_admin_self_service_owner_grants) and is
+-- never stored as a binding, so removing the owner or disabling the merchant
+-- or tenant revokes it at the next session load.
+ALTER TABLE admin_role_bindings ADD CONSTRAINT admin_role_binding_not_merchant_owner CHECK (role_key<>'merchant_owner');
 INSERT INTO admin_role_permissions(role_key,permission_key)
 SELECT 'merchant_owner',permission_key FROM unnest(ARRAY[
   'dashboard:read','payments:read','unmatched:read','unmatched:claim','resolution:request',
@@ -76,7 +81,12 @@ CREATE INDEX admin_signup_requests_expiry_idx ON admin_signup_requests(expires_a
 ALTER TABLE admin_login_attempts ADD COLUMN signup_request_id uuid REFERENCES admin_signup_requests(id) ON DELETE CASCADE;
 ALTER TABLE admin_login_attempts DROP CONSTRAINT admin_login_attempt_purpose_check;
 ALTER TABLE admin_login_attempts DROP CONSTRAINT admin_login_attempt_shape_check;
+-- A new registrant creates the IdP account, verifies the email and enrolls
+-- MFA inside one signup attempt, so it may live up to one hour.
+ALTER TABLE admin_login_attempts DROP CONSTRAINT admin_login_attempts_check;
 ALTER TABLE admin_login_attempts
+  ADD CONSTRAINT admin_login_attempts_check CHECK (expires_at>created_at
+    AND expires_at<=created_at+CASE WHEN purpose='signup' THEN interval '1 hour' ELSE interval '15 minutes' END),
   ADD CONSTRAINT admin_login_attempt_purpose_check CHECK (purpose IN ('login','step_up','invitation','signup')),
   ADD CONSTRAINT admin_login_attempt_shape_check CHECK (
     (purpose='login' AND expected_user_id IS NULL AND existing_session_hash IS NULL
@@ -118,7 +128,14 @@ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path=pg_catalog,public AS $$
 DECLARE company text := btrim(coalesce(p_company,''));
 BEGIN
+  -- Anonymous callers write here, so expired unconsumed requests (and their
+  -- login attempts, by cascade) are purged in small batches on every call.
+  DELETE FROM public.admin_signup_requests r WHERE r.id IN (
+    SELECT x.id FROM public.admin_signup_requests x
+     WHERE x.consumed_at IS NULL AND x.expires_at<p_created
+     ORDER BY x.expires_at LIMIT 100 FOR UPDATE SKIP LOCKED);
   IF length(company) NOT BETWEEN 2 AND 120 OR coalesce(p_country,'') !~ '^[A-Z]{2}$'
+     OR company ~ '[[:cntrl:]\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]'
      OR EXISTS (SELECT 1 FROM public.signup_blocked_countries c WHERE c.country=p_country)
      OR NOT EXISTS (SELECT 1 FROM public.signup_business_types b WHERE b.business_type=p_business AND b.allowed)
      OR (p_website IS NOT NULL AND (p_website !~ '^https://[^[:space:]/?#]+(/[^[:space:]]*)?$' OR length(p_website)>255))
@@ -166,6 +183,11 @@ BEGIN
     SELECT m.tenant_id,m.merchant_id INTO tenant_id,merchant_id FROM public.merchant_members m
      WHERE m.admin_user_id=existing.id AND m.status='active' ORDER BY m.joined_at LIMIT 1;
     user_id := existing.id; created := false;
+    IF tenant_id IS NOT NULL THEN
+      PERFORM public.append_admin_audit(gen_random_uuid(),tenant_id,merchant_id,existing.id,NULL,
+        'admin.self_service.returning_identity','merchant',merchant_id::text,req.id::text,'signup by an existing identity',NULL,NULL,
+        '{}'::jsonb,NULL,NULL,p_at);
+    END IF;
     RETURN NEXT;
     RETURN;
   END IF;
@@ -179,8 +201,6 @@ BEGIN
     VALUES(p_member,p_tenant,p_merchant,p_user,p_issuer,p_subject,normalized_email,display,'active',p_at,p_at);
   INSERT INTO public.merchant_member_role_bindings(id,tenant_id,merchant_id,member_id,role_key,granted_by,granted_at,reason)
     VALUES(gen_random_uuid(),p_tenant,p_merchant,p_member,'owner',p_user,p_at,'self-service registration owner');
-  INSERT INTO public.admin_role_bindings(id,user_id,role_key,tenant_id,merchant_id,granted_by,granted_at,reason)
-    VALUES(gen_random_uuid(),p_user,'merchant_owner',p_tenant,p_merchant,NULL,p_at,'self-service registration owner');
   INSERT INTO public.merchant_signups(merchant_id,tenant_id,admin_user_id,request_id,country,business_type,website,terms_version,terms_accepted_at,created_at)
     VALUES(p_merchant,p_tenant,p_user,req.id,req.country,req.business_type,req.website,req.terms_version,req.created_at,p_at);
   PERFORM public.append_admin_audit(gen_random_uuid(),p_tenant,p_merchant,p_user,NULL,
@@ -191,9 +211,42 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION register_self_service_merchant(uuid,text,text,text,text,uuid,uuid,uuid,uuid,timestamptz) FROM PUBLIC;
 
+-- Projects merchant_owner permissions for the current admin user from each
+-- active owner membership of a self-service merchant whose merchant and
+-- tenant are active. Same identity checks as
+-- list_current_admin_merchant_memberships (000011).
+CREATE FUNCTION list_current_admin_self_service_owner_grants()
+RETURNS TABLE(binding_id uuid,tenant_id uuid,merchant_id uuid,permission_key text)
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path=pg_catalog,public
+SET row_security=off AS $$
+  WITH actor AS (
+    SELECT u.id,u.oidc_issuer,u.oidc_subject,lower(u.email) AS email
+      FROM public.admin_users u
+     WHERE u.id=nullif(current_setting('app.admin_user_id',true),'')::uuid
+       AND u.status='active'
+  )
+  SELECT b.id,m.tenant_id,m.merchant_id,rp.permission_key
+    FROM actor u
+    JOIN public.merchant_members m ON m.admin_user_id=u.id
+      AND m.status='active'
+      AND m.oidc_issuer=u.oidc_issuer
+      AND m.oidc_subject=u.oidc_subject
+      AND lower(m.email)=u.email
+    JOIN public.tenants t ON t.id=m.tenant_id AND t.status='active'
+    JOIN public.merchants merchant ON merchant.id=m.merchant_id AND merchant.tenant_id=m.tenant_id AND merchant.status='active'
+    JOIN public.merchant_signups s ON s.merchant_id=m.merchant_id AND s.tenant_id=m.tenant_id
+    JOIN public.merchant_member_role_bindings b ON b.member_id=m.id
+      AND b.tenant_id=m.tenant_id AND b.merchant_id=m.merchant_id AND b.role_key='owner' AND b.revoked_at IS NULL
+    JOIN public.admin_role_permissions rp ON rp.role_key='merchant_owner'
+   ORDER BY m.tenant_id,m.merchant_id,b.id,rp.permission_key
+$$;
+REVOKE ALL ON FUNCTION list_current_admin_self_service_owner_grants() FROM PUBLIC;
+
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='merchant_admin_runtime') THEN
+    GRANT EXECUTE ON FUNCTION list_current_admin_self_service_owner_grants() TO merchant_admin_runtime;
     GRANT EXECUTE ON FUNCTION create_admin_signup_request(uuid,text,text,text,text,text,timestamptz,timestamptz) TO merchant_admin_runtime;
     GRANT EXECUTE ON FUNCTION register_self_service_merchant(uuid,text,text,text,text,uuid,uuid,uuid,uuid,timestamptz) TO merchant_admin_runtime;
     GRANT SELECT ON signup_business_types,signup_blocked_countries TO merchant_admin_runtime;

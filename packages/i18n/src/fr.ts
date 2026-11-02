@@ -1254,6 +1254,8 @@ export const fr = {
   "onboarding.testPayment.body": "Ouvrez votre lien de paiement et réglez-le dans le bac à sable. Observez l’apparition du paiement et du webhook.",
   "onboarding.goLive.title": "Passez en mode production",
   "onboarding.goLive.body": "Nécessite l’authentification à deux facteurs et un portefeuille vérifié. D’ici là, les paiements réels restent désactivés.",
+  "signup.countryBlocked": "L’inscription n’est pas disponible pour les entreprises enregistrées en {country}.",
+  "onboarding.ready": "Prêt",
   "intentStatus.waiting.label": "En attente de paiement",
   "intentStatus.waiting.hint": "Reste {minutes} min. Rien n’est encore arrivé.",
   "intentStatus.waiting.hintNoTime": "Rien n’est encore arrivé. Envoyez le lien de paiement au client.",

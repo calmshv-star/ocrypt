@@ -13,7 +13,9 @@ type Step = { key: string; href: string; icon: ComponentType<{ size?: number; "a
 
 export function useOnboardingSteps() {
   const admin = useAdmin();
-  const canWallets = admin.can("wallets:read") || admin.can("infrastructure:read");
+  // Onboarding is the merchant owner's checklist; platform operators reach
+  // wallets through infrastructure pages instead.
+  const canWallets = admin.can("wallets:read");
   const wallets = useQuery({
     queryKey: ["admin", "onboarding-wallets", admin.scope?.tenantId, admin.scope?.merchantId],
     enabled: !admin.preview && admin.sessionState === "ready" && Boolean(admin.scope?.merchantId) && canWallets,
@@ -60,7 +62,7 @@ export function OnboardingPage() {
       return <li key={step.key}><a className="settings-hub__link" data-done={step.done || undefined} href={step.href}>
         <span className="settings-hub__icon"><Icon aria-hidden={true} size={18} /></span>
         <span><strong>{t(`onboarding.${step.key}.title` as MessageKey)}</strong><small>{t(`onboarding.${step.key}.body` as MessageKey)}</small></span>
-        <span className="onboarding__state">{!step.loading && <StatusBadge status={step.done ? "settled" : "pending"}>{t(step.done ? "onboarding.done" : "onboarding.todo")}</StatusBadge>}<ArrowRight aria-label={t("onboarding.open")} size={16} /></span>
+        <span className="onboarding__state">{!step.loading && <StatusBadge status={step.done ? "settled" : "pending"}>{t(step.done ? step.key === "goLive" ? "onboarding.ready" : "onboarding.done" : "onboarding.todo")}</StatusBadge>}<ArrowRight aria-label={t("onboarding.open")} size={16} /></span>
       </a></li>;
     })}</ol>
   </div>;

@@ -1254,6 +1254,8 @@ export const es = {
   "onboarding.testPayment.body": "Abre tu enlace de pago y págalo en el sandbox. Observa cómo aparecen el pago y el webhook.",
   "onboarding.goLive.title": "Pasa a modo real",
   "onboarding.goLive.body": "Requiere autenticación de dos factores y una billetera verificada. Hasta entonces, los pagos reales siguen desactivados.",
+  "signup.countryBlocked": "El registro no está disponible para empresas registradas en {country}.",
+  "onboarding.ready": "Listo",
   "intentStatus.waiting.label": "Esperando el pago",
   "intentStatus.waiting.hint": "Quedan {minutes} min. Aún no ha llegado nada.",
   "intentStatus.waiting.hintNoTime": "Aún no ha llegado nada. Envía el enlace de pago al cliente.",

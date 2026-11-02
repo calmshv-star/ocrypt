@@ -1254,6 +1254,8 @@ export const zhCN = {
   "onboarding.testPayment.body": "打开付款链接并在沙盒中支付，查看付款和 Webhook 是否出现。",
   "onboarding.goLive.title": "切换到正式模式",
   "onboarding.goLive.body": "需要双因素认证和已验证的钱包。在此之前，真实付款保持关闭。",
+  "signup.countryBlocked": "注册地为 {country} 的企业无法注册。",
+  "onboarding.ready": "可以上线",
   "intentStatus.waiting.label": "等待付款",
   "intentStatus.waiting.hint": "剩余 {minutes} 分钟。尚未收到付款。",
   "intentStatus.waiting.hintNoTime": "尚未收到付款。请将付款链接发送给客户。",

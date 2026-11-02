@@ -1252,6 +1252,8 @@ export const en = {
   "onboarding.testPayment.body": "Open your payment link and pay it in the sandbox. Watch the payment and the webhook appear.",
   "onboarding.goLive.title": "Switch to live mode",
   "onboarding.goLive.body": "Needs two-factor authentication and a verified wallet. Until then, real payments stay switched off.",
+  "signup.countryBlocked": "Registration is not available for businesses registered in {country}.",
+  "onboarding.ready": "Ready",
   "intentStatus.waiting.label": "Awaiting payment",
   "intentStatus.waiting.hint": "{minutes} min left. Nothing has arrived yet.",
   "intentStatus.waiting.hintNoTime": "Nothing has arrived yet. Share the payment link with the customer.",

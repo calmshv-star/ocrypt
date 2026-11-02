@@ -25,7 +25,9 @@ type AuthRepository interface {
 	CreateInvitationSession(context.Context, LoginAttempt, IDTokenClaims, Session) (Identity, Session, error)
 	CreateSignupRequest(context.Context, string, SignupForm, time.Time, time.Time) (bool, error)
 	RegisterSelfServiceMerchant(context.Context, LoginAttempt, IDTokenClaims, time.Time) (SelfServiceRegistration, error)
-	SignupBusinessTypes(context.Context) ([]string, error)
+	// SignupOptions lists the business types open for registration and the
+	// countries registration is closed for.
+	SignupOptions(context.Context) (businessTypes, blockedCountries []string, err error)
 	CreateSession(context.Context, Session) error
 	FindSession(context.Context, [32]byte, time.Time) (Session, Identity, error)
 	FindInvitationSession(context.Context, [32]byte, time.Time) (Session, Identity, error)

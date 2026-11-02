@@ -130,6 +130,7 @@ paths:
                   enabled: {type: boolean}
                   terms_version: {type: string}
                   business_types: {type: array, items: {type: string}}
+                  blocked_countries: {type: array, items: {type: string, pattern: '^[A-Z]{2}$'}}
         '503': {$ref: '#/components/responses/Problem'}
   /admin/v1/auth/callback:
     get:
