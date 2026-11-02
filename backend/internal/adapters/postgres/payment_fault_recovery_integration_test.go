@@ -90,6 +90,7 @@ CREATE TABLE fault_receiver_effects(event_id text PRIMARY KEY REFERENCES fault_r
 	t.Run("M3_same_customer_tie_rejects_cancelled_changed_contender", f.sameCustomerTieCancelledContender)
 	t.Run("M4_same_customer_tie_callback_failure_rolls_back", f.sameCustomerTieRollback)
 	t.Run("M4_same_customer_tie_requires_finality", f.sameCustomerTieFinality)
+	t.Run("N11_noncustodial_custodial_wallet_guard", f.custodialWalletGuard)
 }
 
 func TestPaymentFaultDatabaseNamesFailClosed(t *testing.T) {

@@ -46,3 +46,15 @@ an attribute under one message (exit codes and order unchanged; nothing in the
 repository depends on the old strings). Management payment links with a
 `hosted_gateway` route remain possible only with an admitted hosted
 configuration in the database; database-level enforcement stays a follow-up.
+
+## 2026-11-02 — database guard for watch-only custody
+
+- No application path creates non-`watch_only` wallets (only bootstrap SQL,
+  all `watch_only`), so the guard defends against manual or imported data.
+- Readiness, not a constraint: a CHECK on `wallets` would change the full
+  edition too. The noncustodial `api` refuses readiness instead.
+- The function filters by tenant explicitly. The first live run showed that
+  an RLS-bypassing owner otherwise counts every tenant on each loop pass.
+- Not verified: the forced-RLS path with a NOBYPASSRLS function owner (the
+  live harness runs migrations as a superuser), and the production wallet
+  inventory (no SSH key available on 2026-11-02).

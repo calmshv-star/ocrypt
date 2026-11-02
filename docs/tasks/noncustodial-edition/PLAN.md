@@ -38,6 +38,10 @@ snapshot with the helper before assigning implementation workers.
   pass on the changed Dockerfile and script; actionlint passes on ci.yml;
   a mutation leaking the financial proxy into noncustodial admin-api is
   detected by the symbol check.
+- Database guard: live payment-fault suite (all 13 subtests incl. N11) passes
+  on a disposable PostgreSQL 18.6 with 57 migrations and runtime grants;
+  000057 down/up/grants re-applied; both-edition Go tests, symbol check,
+  `check backend`, `check financial`, `deploy/validate.sh static` pass.
 - Not run locally: `docker build` (no Docker on this machine; covered by the
   new CI `noncustodial-image` job);
   PHP/Java/.NET and web checks (no change); `pnpm verify` live gate.
@@ -52,7 +56,6 @@ added by the repository owner: `.github/workflows/noncustodial-edition.yml`
 in the PR description) and the two `go-version: 1.26.9` pins in `ci.yml`
 (deployment and SDK jobs). Until then the noncustodial checks are local-only
 evidence. Follow-ups —
-DB-level `watch_only` enforcement, Helm/Compose noncustodial profile, CI image
-matrix for the noncustodial edition. Note: every container-image job currently
+Helm/Compose noncustodial profile. Note: every container-image job currently
 fails Trivy on Go 1.26.9 stdlib CVE-2026-111943 (fixed in 1.26.10); this is
 independent of this task.

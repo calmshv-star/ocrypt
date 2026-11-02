@@ -97,6 +97,7 @@ func main() {
 		}
 		planner = persistedPlanner
 		probes := readinessGroup{pool, postgresStore}
+		probes = append(probes, editionReadiness(postgresStore)...)
 		if hostedRuntime != nil {
 			probes = append(probes, hostedProviderProbe{store: postgresStore})
 		}

@@ -33,3 +33,25 @@ func (probe hostedProviderProbe) Ping(ctx context.Context) error {
 	}
 	return probe.store.HostedProviderReady(ctx)
 }
+
+type custodialWalletCounter interface {
+	CustodialWalletCount(context.Context) (int64, error)
+}
+
+// custodialWalletProbe keeps the noncustodial edition unready while any active
+// wallet could let the operator hold or sign funds.
+type custodialWalletProbe struct{ store custodialWalletCounter }
+
+func (probe custodialWalletProbe) Ping(ctx context.Context) error {
+	if probe.store == nil {
+		return fmt.Errorf("custodial wallet check is unavailable")
+	}
+	count, err := probe.store.CustodialWalletCount(ctx)
+	if err != nil {
+		return fmt.Errorf("custodial wallet check failed: %w", err)
+	}
+	if count != 0 {
+		return fmt.Errorf("noncustodial edition found %d active custodial wallets", count)
+	}
+	return nil
+}

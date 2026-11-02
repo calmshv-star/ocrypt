@@ -39,9 +39,15 @@ In the `noncustodial` edition:
 Unchanged: quorum, finality, intervals, assets, providers, money handling,
 migrations, the full edition, and all existing tests.
 
-Non-goals (follow-up tasks): database-level enforcement that only
-`watch_only` wallets exist (needs an RLS-safe SQL function), Helm/Compose SaaS
-profiles, a UI build flag, legal texts, deployment.
+Database guard (added 2026-11-02): migration 000057 adds
+`platform_custodial_wallet_count()`, a SECURITY DEFINER count of active
+wallets that are not `watch_only` or carry a signer reference, visiting each
+tenant under forced RLS with an explicit tenant filter. Only
+`merchant_api_runtime` may execute it; the noncustodial `api` keeps `/readyz`
+closed while it is not zero or cannot be evaluated.
+
+Non-goals (follow-up tasks): Helm/Compose SaaS profiles, a UI build flag,
+legal texts, deployment.
 
 ## Acceptance matrix
 
@@ -56,6 +62,7 @@ profiles, a UI build flag, legal texts, deployment.
 | N7 | Admin principal with financial/provider-config grants | Those permissions removed in noncustodial; other permissions kept | `internal/admin` tagged unit test || `authz_noncustodial_test.go` passes |
 | N8 | Default build | All existing tests pass unchanged | `check backend`, `check financial` || `check backend`, `check financial`, `deploy/validate.sh static` pass |
 | N10 | Platform assertion grants and platform-admin-api wiring | `provider_config:*` dropped from signed grants; provider-configuration plane not enabled | `grants_noncustodial_test.go`, `grants_full_test.go`, `provider_configuration_noncustodial_test.go` | tests pass in both editions |
+| N11 | Active custodial wallets (non-`watch_only` or with a signer) in any tenant | Counted exactly across tenants; watch-only and disabled wallets ignored; only the API runtime may execute; noncustodial `/readyz` closed while the count is not zero or the check fails | live `N11_noncustodial_custodial_wallet_guard` + `custody_readiness_noncustodial_test.go` | live suite passes on PostgreSQL 18.6 (superuser owner); first run caught a cross-tenant overcount (26 instead of 2) fixed by the tenant filter; down/up/grants applied |
 | N9 | Dockerfile `EDITION` | Unknown edition and custody binaries in noncustodial rejected; tag passed; edition label | static check in the same script || script string checks (incl. `-tags "${build_tags}"`, mutation detected); fake-`go` RUN simulation; hadolint passes; CI `noncustodial-image` job reads `go version -m` |
 
 For financial changes include relevant exact-money, negative, duplicate/replay,
