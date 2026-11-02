@@ -5,6 +5,7 @@ workers return evidence instead of concurrently editing coordination files.
 
 | Task | Scope | Plan |
 | --- | --- | --- |
+| rpc-provider-probe | Prove which RPC providers agree on recent and archival logs before admission (product stage 1, NFR-1) | [Plan](docs/tasks/rpc-provider-probe/PLAN.md) |
 | scanner-watchdog | Alert within minutes when a scanner stays unready or behind (product stage 1, NFR-2/NFR-3) | [Plan](docs/tasks/scanner-watchdog/PLAN.md) |
 | noncustodial-edition | SaaS build that links no custody, signing or hosted-provider clients (product stage 0) | [Plan](docs/tasks/noncustodial-edition/PLAN.md) |
 | same-customer-match-20261011 | Resolve equivalent repeated-customer overpayment ties, verified fulfillment and GitHub publication | [Plan](docs/tasks/same-customer-match-20261011/PLAN.md) |
