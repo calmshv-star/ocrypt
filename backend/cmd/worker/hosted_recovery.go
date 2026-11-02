@@ -1,3 +1,5 @@
+//go:build !noncustodial
+
 package main
 
 import (
@@ -9,10 +11,6 @@ import (
 	"github.com/calmshv-star/ocrypt/backend/internal/adapters/postgres"
 	"github.com/calmshv-star/ocrypt/backend/internal/hostedproviders"
 )
-
-type hostedRecoveryRunner interface {
-	RunBatch(context.Context, string, int) (int, error)
-}
 
 type hostedRecoveryReadiness struct{ store *postgres.Store }
 

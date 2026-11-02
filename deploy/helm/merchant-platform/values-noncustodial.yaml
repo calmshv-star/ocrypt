@@ -1,0 +1,25 @@
+# Noncustodial (SaaS) edition overlay: apply after the environment values.
+# Every image must be built with EDITION=noncustodial; templates/validate.yaml
+# rejects financial workloads, FINANCIAL_*/HOSTED_PROVIDER_* configuration, the
+# hosted worker role and financial bridge secrets.
+edition: noncustodial
+workloads:
+  financial-api: {enabled: false}
+  financial-worker: {enabled: false}
+  admin-api:
+    env:
+      FINANCIAL_INTERNAL_URL: null
+      FINANCIAL_INTERNAL_ASSERTION_KEY_FILE: null
+      FINANCIAL_INTERNAL_CA_FILE: null
+      FINANCIAL_INTERNAL_CLIENT_CERT_FILE: null
+      FINANCIAL_INTERNAL_CLIENT_KEY_FILE: null
+      FINANCIAL_INTERNAL_SERVER_NAME: null
+    secretFiles:
+      - {path: /run/secrets/management-assertion-key, secretRef: {name: merchant-platform-management-bridge, key: assertion-key}}
+      - {path: /run/secrets/management-ca.pem, secretRef: {name: merchant-platform-management-tls, key: ca.crt}}
+      - {path: /run/secrets/platform-assertion-key, secretRef: {name: merchant-platform-platform-bridge, key: assertion-key}}
+      - {path: /run/secrets/platform-ca.pem, secretRef: {name: merchant-platform-platform-tls, key: ca.crt}}
+      - {path: /run/secrets/merchant-settings-assertion-key, secretRef: {name: merchant-platform-merchant-settings-bridge, key: assertion-key}}
+      - {path: /run/secrets/merchant-settings-ca.pem, secretRef: {name: merchant-platform-merchant-settings-tls, key: ca.crt}}
+      - {path: /run/secrets/merchant-settings-client.crt, secretRef: {name: merchant-platform-merchant-settings-client, key: tls.crt}}
+      - {path: /run/secrets/merchant-settings-client.key, secretRef: {name: merchant-platform-merchant-settings-client, key: tls.key}}
