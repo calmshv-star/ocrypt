@@ -40,6 +40,7 @@ codes), a live/test switch (billing stage), offline service worker.
 | C6 | CHK-2 link building | Exact EIP-681/Solana Pay/ton links; refused for TRON, jettons, devnet, non-numeric EVM chain, malformed or injected addresses, zero/nil amount; remainder only | `internal/management/payment_uri_test.go` | passes |
 | C7 | CHK-2 in the browser | Link rendered only when it matches the strict pattern; `javascript:`, https and whitespace-injected values dropped | `apps/checkout/src/App.test.tsx` | passes |
 | C8 | PWA | Standalone manifest, 192/512 and maskable PNG icons with matching sizes, manifest and touch icon linked | `tests/web/test_admin_pwa.py` | passes |
+| C10 | Review fixes: link only while the route accepts a transfer; malformed or joined region values refused, preflight not gated; human network and asset names; CHK-6 text only with `direct_to_merchant`; 451 on select-route | As described in DECISIONS.md | `payment_uri_test.go`, `region_gate_test.go`, `apps/checkout/src/App.test.tsx` | passes |
 | C9 | Reports: payments CSV export | RFC 4180 quoting, formula cells neutralized, exact string amounts, localized headers and status, paging at 200 until the server stops, capped at 10 000 rows with a notice | `apps/admin/src/csvExport.test.ts` | passes |
 
 | ID | Behavior/input/fault | Expected result | Test or manual check | Evidence |

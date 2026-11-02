@@ -20,6 +20,7 @@ describe("merchant-facing intent statuses", () => {
   it("says paid only for settled and never for unconfirmed or unknown states", () => {
     const paid = STATUSES.filter((status) => describeIntentStatus({ status, expires_at: "" }, now).label === "intentStatus.paid.label");
     expect(paid).toEqual(["settled"]);
+    expect(describeIntentStatus({ status: "overpaid", expires_at: "" }, now)).toMatchObject({ label: "intentStatus.overpaid.label", badge: "settled" });
     expect(describeIntentStatus({ status: "observed", expires_at: "" }, now).label).toBe("intentStatus.confirming.label");
     expect(describeIntentStatus({ status: "brand_new_state", expires_at: "" }, now).label).toBe("intentStatus.review.label");
   });
@@ -32,11 +33,11 @@ describe("merchant-facing intent statuses", () => {
     expect(unknown.hint).toBe("intentStatus.waiting.hintNoTime");
   });
 
-  it("points review and reorg states to the review queue and expired or underpaid ones to a new link", () => {
+  it("points review and reorg states to the review queue, expired ones to a new link, and never offers a second link for an underpaid order", () => {
     expect(describeIntentStatus({ status: "needs_review", expires_at: "" }, now).action?.href).toBe("#/unmatched");
     expect(describeIntentStatus({ status: "reorg_review", expires_at: "" }, now).action?.href).toBe("#/unmatched");
     expect(describeIntentStatus({ status: "expired", expires_at: "" }, now).action?.href).toBe("#/payment-links");
-    expect(describeIntentStatus({ status: "partially_paid", expires_at: "" }, now).action?.href).toBe("#/payment-links");
+    expect(describeIntentStatus({ status: "partially_paid", expires_at: "" }, now).action).toBeUndefined();
     expect(describeIntentStatus({ status: "settled", expires_at: "" }, now).action).toBeUndefined();
   });
 });

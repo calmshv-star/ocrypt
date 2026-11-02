@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 )
 
 var (
@@ -61,6 +62,16 @@ func paymentURI(family, chainID, assetKind, contract, recipient string, amount *
 		return fmt.Sprintf("ton://transfer/%s?amount=%s", url.PathEscape(recipient), amount.String())
 	}
 	return ""
+}
+
+// routeAcceptsTransfer reports whether a payer may still send to a route: it
+// is active and inside its collection deadline, and it is either untouched
+// while the intent waits for payment or the frozen policy allows a top-up.
+func routeAcceptsTransfer(routeStatus, publicStatus string, received, topUpAllowed bool, deadline, now time.Time) bool {
+	if routeStatus != "active" || !deadline.After(now) {
+		return false
+	}
+	return topUpAllowed || publicStatus == "pending" && !received
 }
 
 // paymentURIAmount is what the payer still has to send: the remainder of a

@@ -1,7 +1,7 @@
 import { I18nProvider } from "@merchant/i18n";
 import { ThemeProvider } from "@merchant/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -136,7 +136,12 @@ describe("onboarding checklist", () => {
     view.unmount();
     const ready = { ...base, financialSettings: vi.fn().mockResolvedValue({ settlement_currency: "USD", accepted_currencies: ["USD"], routes: [], wallets: [{ id: "w1", chain_id: "tron:mainnet", chain_name: "TRON", address: "TXYZ", status: "active", version: 1 }] }), intents: vi.fn().mockResolvedValue({ items: [{ id: "i1", status: "settled" }] }) };
     render(wrap(<MemoryRouter initialEntries={["/overview"]}><App client={client(ready)} preview={false} /></MemoryRouter>));
+    // The banner renders nothing while loading, so wait until both queries
+    // have resolved and React has committed before asserting its absence.
     await waitFor(() => expect(ready.intents).toHaveBeenCalled());
-    await waitFor(() => expect(screen.queryByText(/of 3 done/)).not.toBeInTheDocument());
+    await waitFor(() => expect(ready.financialSettings).toHaveBeenCalled());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(screen.queryByText(/of 3 done/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Get ready to accept payments/ })).not.toBeInTheDocument();
   });
 });

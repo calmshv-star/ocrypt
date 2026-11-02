@@ -121,12 +121,29 @@ describe("hosted checkout", () => {
     vi.stubEnv("VITE_CHECKOUT_FIXTURE_MODE", "false"); vi.stubEnv("VITE_CHECKOUT_API_URL", "https://merchant-api.example");
     const link = "ethereum:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48@1/transfer?address=0x8077444bed90f3ca9157ab8bf8d2c51103b2ce89&uint256=1280000000";
     const base = session("pending", routeTwo);
-    const withLink = { ...base, routes: [base.routes[0]!, { ...base.routes[1]!, payment_uri: link }] };
+    const withLink = { ...base, routes: [base.routes[0]!, { ...base.routes[1]!, network_name: "Ethereum", asset_symbol: "USDC", payment_uri: link }] };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(withLink)));
     window.history.replaceState({}, "", `/checkout?token=${csToken}`);
     const view = renderCheckout();
     expect(await screen.findByTestId("open-in-wallet")).toHaveAttribute("href", link);
+    expect(screen.getByTestId("open-in-wallet")).toHaveTextContent("Open in wallet · Ethereum");
+    expect(screen.getByTestId("payment-network-warning")).toHaveTextContent("Send only USDC on Ethereum");
+    expect(screen.getByTestId("payment-amount")).toHaveTextContent("1280.00 USDC");
     view.unmount();
+    // A link to another address, or on a route that no longer takes a transfer, is never shown.
+    const elsewhere = "ethereum:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48@1/transfer?address=0x1111111111111111111111111111111111111111&uint256=1280000000";
+    const closed = [
+      { ...base, routes: [base.routes[0]!, { ...base.routes[1]!, payment_uri: elsewhere }] },
+      { ...session("settled", routeTwo), routes: [base.routes[0]!, { ...base.routes[1]!, payment_uri: link }] },
+      { ...session("partially_paid", routeTwo), routes: [base.routes[0]!, { ...base.routes[1]!, payment_uri: link, received_amount: "1", remaining_amount: "1279", payment_count: 1, top_up_allowed: false }] }
+    ];
+    for (const body of closed) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(body)));
+      const next = renderCheckout();
+      expect(await screen.findByTestId("payment-address")).toBeInTheDocument();
+      expect(screen.queryByTestId("open-in-wallet")).not.toBeInTheDocument();
+      next.unmount();
+    }
     for (const forged of ["javascript:alert(1)", "https://evil.example/pay", "ethereum:0x8077444bed90f3ca9157ab8bf8d2c51103b2ce89@1 onclick"]) {
       const bad = { ...base, routes: [base.routes[0]!, { ...base.routes[1]!, payment_uri: forged }] };
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(bad)));
@@ -348,6 +365,29 @@ describe("hosted checkout", () => {
     expect(screen.queryByRole("link", { name: "Cancel and return" })).not.toBeInTheDocument();
     expect(document.querySelector('a[href*="evil.example"]')).toBeNull();
     await waitFor(() => expect(window.sessionStorage.getItem(`checkout-returns:${csToken}`)).not.toContain("/cancel"));
+  });
+
+  it("says the payment goes to the merchant only when the server guarantees it (CHK-6)", async () => {
+    vi.stubEnv("VITE_CHECKOUT_FIXTURE_MODE", "false"); vi.stubEnv("VITE_CHECKOUT_API_URL", "https://merchant-api.example");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(session("pending"))));
+    window.history.replaceState({}, "", `/checkout?token=${csToken}`);
+    const custodial = renderCheckout();
+    expect(await screen.findByTestId("payment-address")).toBeInTheDocument();
+    expect(screen.queryByTestId("checkout-disclaimer")).not.toBeInTheDocument();
+    custodial.unmount();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ ...session("pending"), direct_to_merchant: true })));
+    renderCheckout();
+    expect(await screen.findByTestId("checkout-disclaimer")).toHaveTextContent("not the recipient of funds");
+    expect(screen.getByText("The payment goes directly to Demo Store.")).toBeInTheDocument();
+  });
+
+  it("shows the region message when route selection is refused", async () => {
+    vi.stubEnv("VITE_CHECKOUT_FIXTURE_MODE", "false"); vi.stubEnv("VITE_CHECKOUT_API_URL", "https://merchant-api.example");
+    vi.stubGlobal("fetch", vi.fn((input: string) => Promise.resolve(String(input).endsWith("/select-route") ? response({ error: { code: "unavailable_in_region" } }, 451) : response(session("pending", "")))));
+    window.history.replaceState({}, "", `/checkout?token=${csToken}`);
+    renderCheckout();
+    fireEvent.change(await screen.findByRole("combobox", { name: "Select a payment route" }), { target: { value: routeTwo } });
+    expect(await screen.findByTestId("region-unavailable")).toBeInTheDocument();
   });
 
   it("shows a neutral, final message when the region is refused and stops polling", async () => {

@@ -55,7 +55,7 @@ func NewServer(service *Service, authenticator Authenticator, config HTTPConfig)
 	blocked := make(map[string]struct{}, len(config.BlockedRegions))
 	for _, code := range config.BlockedRegions {
 		if !validRegionCode(code) {
-			return nil, fmt.Errorf("blocked region %q must be an upper-case ISO 3166-1 alpha-2 code", code)
+			return nil, fmt.Errorf("blocked region %q must be an upper-case ISO 3166-1 alpha-2 code or an edge pseudo-region such as T1", code)
 		}
 		blocked[code] = struct{}{}
 	}
@@ -296,7 +296,7 @@ func (s *Server) submitReceipt(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) checkoutPreflight(w http.ResponseWriter, request *http.Request) {
-	if !s.allowPublic(w, request, request.PathValue("token")) {
+	if !s.allowPublicRate(w, request, request.PathValue("token")) {
 		return
 	}
 	origin, valid := requestOrigin(request)
@@ -815,6 +815,13 @@ func (s *Server) allowPublic(w http.ResponseWriter, request *http.Request, token
 		writeProblem(w, request, http.StatusUnavailableForLegalReasons, "unavailable_in_region", "This payment page is not available in your region.")
 		return false
 	}
+	return s.allowPublicRate(w, request, token)
+}
+
+// allowPublicRate applies only the public rate limit. CORS preflights use it
+// directly: a refused preflight would surface as a network error and hide the
+// 451 that the following request returns.
+func (s *Server) allowPublicRate(w http.ResponseWriter, request *http.Request, token string) bool {
 	host, _, err := net.SplitHostPort(request.RemoteAddr)
 	if err != nil {
 		host = request.RemoteAddr
@@ -865,8 +872,9 @@ func (l *fixedWindowLimiter) Allow(key string, now time.Time) bool {
 	return true
 }
 
-// regionBlocked fails closed when the edge header is repeated, because a
-// trusted proxy sets it exactly once.
+// regionBlocked fails closed when the edge header is repeated or holds anything
+// but one region code, because a trusted proxy sets exactly one. An edge that
+// appends instead of overwriting produces "DE, IR" and is refused too.
 func (s *Server) regionBlocked(request *http.Request) bool {
 	if len(s.blocked) == 0 {
 		return false
@@ -878,12 +886,18 @@ func (s *Server) regionBlocked(request *http.Request) bool {
 	if len(values) > 1 {
 		return true
 	}
-	_, blocked := s.blocked[strings.ToUpper(strings.TrimSpace(values[0]))]
+	region := strings.ToUpper(strings.TrimSpace(values[0]))
+	if !validRegionCode(region) {
+		return true
+	}
+	_, blocked := s.blocked[region]
 	return blocked
 }
 
+// validRegionCode accepts ISO 3166-1 alpha-2 codes and the edge
+// pseudo-regions XX (unknown) and T1 (Tor), which can be blocked like any code.
 func validRegionCode(code string) bool {
-	return len(code) == 2 && code[0] >= 'A' && code[0] <= 'Z' && code[1] >= 'A' && code[1] <= 'Z'
+	return len(code) == 2 && code[0] >= 'A' && code[0] <= 'Z' && (code[1] >= 'A' && code[1] <= 'Z' || code[1] >= '0' && code[1] <= '9')
 }
 
 func validHeaderName(name string) bool {

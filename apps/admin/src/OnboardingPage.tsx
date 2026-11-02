@@ -6,8 +6,9 @@ import type { ComponentType } from "react";
 import { useAdmin, useAdminQuery } from "./AdminProvider";
 import type { AdminScope } from "./api/types";
 
-// Intent statuses that mean the customer's money arrived and was accepted.
-const PAID_STATUSES = new Set(["confirmed", "finalized", "settled", "overpaid"]);
+// Intent statuses that mean the customer's money arrived and is final
+// (overpaid is reached only from settled).
+const PAID_STATUSES = new Set(["settled", "overpaid"]);
 
 type Step = { key: string; href: string; icon: ComponentType<{ size?: number; "aria-hidden"?: boolean }>; done: boolean; loading: boolean };
 

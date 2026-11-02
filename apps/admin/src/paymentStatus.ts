@@ -28,15 +28,16 @@ const KINDS: Record<string, Kind> = {
 };
 
 const BADGES: Record<Kind, string> = {
-  waiting: "pending", confirming: "confirming", paid: "settled", underpaid: "partially_paid", overpaid: "needs_review",
+  waiting: "pending", confirming: "confirming", paid: "settled", underpaid: "partially_paid", overpaid: "settled",
   review: "needs_review", expired: "expired", cancelled: "expired", reorg: "failed", reversed: "failed"
 };
 
 const ACTIONS: Partial<Record<Kind, { label: MessageKey; href: string }>> = {
   review: { label: "intentStatus.action.review", href: "#/unmatched" },
   reorg: { label: "intentStatus.action.review", href: "#/unmatched" },
-  expired: { label: "intentStatus.action.newLink", href: "#/payment-links" },
-  underpaid: { label: "intentStatus.action.newLink", href: "#/payment-links" }
+  // No new link for an underpaid order: the payer tops up on the same page,
+  // and a second link would invite paying twice.
+  expired: { label: "intentStatus.action.newLink", href: "#/payment-links" }
 };
 
 export function describeIntentStatus(intent: Pick<IntentRow, "status" | "expires_at">, now: number = Date.now()): IntentStatusView {

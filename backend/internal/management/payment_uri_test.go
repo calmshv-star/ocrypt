@@ -3,6 +3,7 @@ package management
 import (
 	"math/big"
 	"testing"
+	"time"
 )
 
 func TestPaymentURIFollowsWalletStandards(t *testing.T) {
@@ -59,6 +60,33 @@ func TestPaymentURIAmountAsksOnlyForTheRemainder(t *testing.T) {
 	for _, c := range [][2]string{{"1000", "1000"}, {"1000", "1200"}, {"0", "0"}, {"x", "0"}} {
 		if got := paymentURIAmount(c[0], c[1]); got != nil {
 			t.Fatalf("%v: expected no link, got %v", c, got)
+		}
+	}
+}
+
+func TestPaymentURIOnlyForRoutesThatStillAcceptATransfer(t *testing.T) {
+	now := time.Date(2026, 11, 3, 10, 0, 0, 0, time.UTC)
+	open, closed := now.Add(time.Minute), now.Add(-time.Second)
+	for _, c := range []struct {
+		name                string
+		routeStatus, public string
+		received, topUp     bool
+		deadline            time.Time
+		want                bool
+	}{
+		{"untouched pending route", "active", "pending", false, false, open, true},
+		{"top-up allowed", "active", "partially_paid", true, true, open, true},
+		{"partial without top-up", "active", "partially_paid", true, false, open, false},
+		{"something received while pending", "active", "pending", true, false, open, false},
+		{"detected", "active", "detected", false, false, open, false},
+		{"needs review", "active", "needs_review", false, false, open, false},
+		{"settled route", "settled", "settled", true, false, open, false},
+		{"expired route", "expired", "expired", false, false, closed, false},
+		{"deadline passed", "active", "pending", false, false, closed, false},
+		{"top-up after deadline", "active", "partially_paid", true, true, closed, false},
+	} {
+		if got := routeAcceptsTransfer(c.routeStatus, c.public, c.received, c.topUp, c.deadline, now); got != c.want {
+			t.Fatalf("%s: got %v", c.name, got)
 		}
 	}
 }

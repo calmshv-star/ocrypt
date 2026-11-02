@@ -50,7 +50,25 @@ func TestPublicPaymentPagesRefuseBlockedRegions(t *testing.T) {
 		t.Fatalf("repeated header: status %d", response.Code)
 	}
 
-	for name, country := range map[string]string{"allowed": "DE", "missing": ""} {
+	// Values the edge would never set fail closed, including comma-joined
+	// duplicates that a hop merged into one line.
+	for _, malformed := range []string{"DE, IR", "DEU", "", "1", "D E", "de-IR"} {
+		request := httptest.NewRequest(http.MethodGet, "https://pay.example/v1/checkout-sessions/cs_x", nil)
+		request.Header["Cf-Ipcountry"] = []string{malformed}
+		if !server.regionBlocked(request) {
+			t.Fatalf("malformed region %q was served", malformed)
+		}
+	}
+	// Preflight carries no payment data; refusing it would hide the 451.
+	preflight := httptest.NewRequest(http.MethodOptions, "https://pay.example/v1/checkout-sessions/cs_x", nil)
+	preflight.Header.Set("CF-IPCountry", "IR")
+	preflight.Header.Set("Origin", "https://shop.example")
+	preflightResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(preflightResponse, preflight)
+	if preflightResponse.Code == http.StatusUnavailableForLegalReasons {
+		t.Fatal("a CORS preflight must not be region-refused")
+	}
+	for name, country := range map[string]string{"allowed": "DE", "missing": "", "unknown to the edge": "XX"} {
 		if blocked := server.regionBlocked(requestWithCountry(country)); blocked {
 			t.Fatalf("%s country was blocked", name)
 		}
@@ -60,6 +78,7 @@ func TestPublicPaymentPagesRefuseBlockedRegions(t *testing.T) {
 func TestRegionGateConfigurationIsStrict(t *testing.T) {
 	for name, config := range map[string]HTTPConfig{
 		"lower-case code": {RegionHeader: "CF-IPCountry", BlockedRegions: []string{"ir"}},
+		"digit first":     {RegionHeader: "CF-IPCountry", BlockedRegions: []string{"1T"}},
 		"three letters":   {RegionHeader: "CF-IPCountry", BlockedRegions: []string{"IRN"}},
 		"no header":       {BlockedRegions: []string{"IR"}},
 		"bad header":      {RegionHeader: "CF IPCountry", BlockedRegions: []string{"IR"}},
@@ -68,6 +87,10 @@ func TestRegionGateConfigurationIsStrict(t *testing.T) {
 		if _, err := NewServer(&Service{}, CombinedAuthenticator{}, config); err == nil {
 			t.Fatalf("%s: configuration accepted", name)
 		}
+	}
+	tor, err := NewServer(&Service{}, CombinedAuthenticator{}, HTTPConfig{BodyLimit: 1024, PublicPerMinute: 10, RegionHeader: "CF-IPCountry", BlockedRegions: []string{"T1"}})
+	if err != nil || !tor.regionBlocked(requestWithCountry("T1")) {
+		t.Fatalf("the Tor pseudo-region T1 must be blockable: %v", err)
 	}
 	server, err := NewServer(&Service{}, CombinedAuthenticator{}, HTTPConfig{BodyLimit: 1024, PublicPerMinute: 10})
 	if err != nil {

@@ -317,7 +317,7 @@ function IntentStatus({ intent, detailed = false }: { intent: IntentRow; detaile
   const view = describeIntentStatus(intent);
   const badge = <StatusBadge status={view.badge}>{t(view.label)}</StatusBadge>;
   if (!detailed) return badge;
-  const action = view.action && admin.can(view.action.href === "#/unmatched" ? "unmatched:read" : "payment_links:read") ? view.action : undefined;
+  const action = view.action && admin.can(view.action.href === "#/unmatched" ? "unmatched:read" : "payment_links:write") ? view.action : undefined;
   return <span className="admin-intent-status">{badge}<small>{t(view.hint, { minutes: view.minutesLeft ?? 0 })}</small>{action && <a href={action.href}>{t(action.label)}</a>}</span>;
 }
 
