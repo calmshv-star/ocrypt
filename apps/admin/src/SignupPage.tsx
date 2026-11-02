@@ -24,7 +24,8 @@ export function SignupPage({ client, locale, redirect = (url) => window.location
   }, [locale]);
   const open = options.data?.enabled ? options.data : undefined;
   const websiteValid = website.trim() === "" || /^https:\/\/[^\s/?#]+(\/\S*)?$/.test(website.trim());
-  const valid = company.trim().length >= 2 && company.trim().length <= 120 && country !== "" && business !== "" && websiteValid && accepted;
+  const nameLength = company.trim().length;
+  const valid = 2 <= nameLength && nameLength <= 120 && country !== "" && business !== "" && websiteValid && accepted;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!open || !valid || state === "submitting") return;
