@@ -52,13 +52,11 @@ snapshot with the helper before assigning implementation workers.
 ## Resume / next action
 
 Implementation and review fixes done; published as one branch together with
-the Go 1.26.10 pin update. Workflow files could not be pushed: neither the gh
-token nor the GitHub integration has the `workflow` scope. Pending, to be
-added by the repository owner: `.github/workflows/noncustodial-edition.yml`
-(noncustodial test/vet, symbol check, shellcheck, noncustodial image job; text
-in the PR description) and the two `go-version: 1.26.9` pins in `ci.yml`
-(deployment and SDK jobs). Until then the noncustodial checks are local-only
-evidence. Follow-ups —
+the Go 1.26.10 pin update. The noncustodial workflow (`.github/workflows/noncustodial-edition.yml`) was
+added through the GitHub web editor; after the `workflow` scope was granted to
+`gh`, `ci.yml` moved the SDK job to ubuntu-24.04 (Python 3.9 floor) and the
+remaining Go pins to 1.26.10. Trivy findings in klauspost/compress and the
+migrator image were fixed in the same PR. Follow-ups —
 none for stage 0 code; a Compose profile is not needed (local-only). Note: every container-image job currently
 fails Trivy on Go 1.26.9 stdlib CVE-2026-111943 (fixed in 1.26.10); this is
 independent of this task.
