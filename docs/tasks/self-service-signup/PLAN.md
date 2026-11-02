@@ -7,10 +7,10 @@ snapshot with the helper before assigning implementation workers.
 
 ## Progress
 
-- [ ] Material questions resolved; specification and acceptance matrix recorded.
-- [ ] Tests authored; expected failures inspected (or artifact validation defined).
-- [ ] Dependencies, writer ownership, and common base assigned.
-- [ ] Implementation complete and focused checks pass.
+- [x] Material questions resolved; specification and acceptance matrix recorded.
+- [x] Tests authored; expected failures inspected (or artifact validation defined).
+- [x] Dependencies, writer ownership, and common base assigned (single writer, branch `feat/stage2-self-service`).
+- [x] Implementation complete and focused checks pass.
 - [ ] Integrated diff independently reviewed; relevant checks repeated.
 - [ ] Completion evidence and remaining runtime/deployment limits recorded.
 
@@ -24,6 +24,10 @@ snapshot with the helper before assigning implementation workers.
 Record command, working directory, revision, dirty state, result, skipped checks,
 and a local evidence reference. Never commit credentials or customer records.
 
+- 2026-11-02, repo root, base `ea10f0e`: live `S1_self_service_signup_registration` on local PostgreSQL 18.6 passed; `go test ./internal/admin/...` passed.
+- 2026-11-03, repo root, uncommitted UI on `1c9e7ca`: `pnpm --filter ./apps/admin exec tsc --noEmit -p .` clean; `pnpm --filter ./apps/admin test` 65/65 passed (8 files, including `Signup.test.tsx` 5/5); `pnpm --filter ./packages/i18n test` 3/3; `pnpm --filter ./apps/admin build` succeeded; `agent_workflow.py check web` passed (`.agent-evidence/20261102T213650Z-web-edb964f1`).
+
 ## Resume / next action
 
-Record completed work, unresolved failures/questions, and the next concrete step.
+Backend, migration, BFF and UI are done. Next: independent review of the integrated
+diff, then the stage 2 PR. Live-mode switch and billing follow in the next increment.

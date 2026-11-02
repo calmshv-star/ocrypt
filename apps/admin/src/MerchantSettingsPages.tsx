@@ -79,7 +79,7 @@ function SettingsHub(){
   const{t}=useI18n();const admin=useAdmin();
   const groups=[
     {title:t("financialSettings.title"),items:[
-      admin.can("infrastructure:read")&&{href:"#/financial-settings",title:t("financialSettings.title"),body:t("financialSettings.description"),icon:CircleDollarSign},
+      (admin.can("infrastructure:read")||admin.can("wallets:read"))&&{href:"#/financial-settings",title:t("financialSettings.title"),body:t("financialSettings.description"),icon:CircleDollarSign},
       admin.can("matching_policy:read")&&{href:"#/matching-policies",title:t("nav.matchingPolicies"),body:t("matching.body"),icon:GitCompareArrows}
     ].filter(Boolean)},
     {title:t("nav.integration"),items:[

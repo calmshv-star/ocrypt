@@ -1,17 +1,18 @@
 import { useI18n } from "@merchant/i18n";
 import { AppShell, Badge, Button, PRODUCT_NAME, Select, ThemeToggle, WorkspaceSwitcher, type ShellNavGroup } from "@merchant/ui";
-import { useQueryClient } from "@tanstack/react-query";
-import { Activity, Archive, Blocks, CircleDollarSign, Fingerprint, GitCompareArrows, KeyRound, Landmark, LayoutDashboard, Link2, RadioTower, ReceiptText, RefreshCw, Settings2, ShieldCheck } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Activity, Archive, Blocks, CircleDollarSign, Fingerprint, GitCompareArrows, KeyRound, Landmark, LayoutDashboard, Link2, RadioTower, ReceiptText, RefreshCw, Settings2, ShieldCheck, Sparkles } from "lucide-react";
 import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AdminProvider, useAdmin } from "./AdminProvider";
 import type { AdminClient } from "./api/client";
 import type { Permission } from "./api/types";
+import { SignupPage } from "./SignupPage";
 
 const SETTINGS_PATHS = new Set(["/settings", "/financial-settings", "/webhooks", "/audit", "/matching-policies", "/api-clients", "/team"]);
 const SETTINGS_PERMISSIONS: Permission[] = [
   "settings:read", "webhook_settings:read", "reconciliation:read", "audit:read", "management_audit:read",
-  "matching_policy:read", "api_clients:read", "team:read", "infrastructure:read", "platform_config:read",
+  "matching_policy:read", "api_clients:read", "team:read", "infrastructure:read", "wallets:read", "platform_config:read",
   "webhook_settings:disable", "api_clients:revoke"
 ];
 
@@ -45,6 +46,7 @@ const FinancialSettingsPage = lazy(() => import("./FinancialSettingsPage").then(
 const ProviderOperationsPage = lazy(() => import("./ProviderOperationsPage").then((module) => ({ default: module.ProviderOperationsPage })));
 const ProviderConfigurationPage = lazy(() => import("./ProviderConfigurationPage").then((module) => ({ default: module.ProviderConfigurationPage })));
 const RetentionControlPage = lazy(() => import("./RetentionControlPage").then((module) => ({ default: module.RetentionControlPage })));
+const OnboardingPage = lazy(() => import("./OnboardingPage").then((module) => ({ default: module.OnboardingPage })));
 const MigrationControlPage = lazy(() => import("./MigrationControlPage").then((module) => ({ default: module.MigrationControlPage })));
 
 function safeReturnPath() {
@@ -55,9 +57,10 @@ function safeReturnPath() {
 function AccessScreen({ state }: { state: "loading" | "unauthenticated" | "error" | "scope" }) {
   const { locale, locales, localeNames, setLocale, t } = useI18n();
   const { client } = useAdmin();
+  const signup = useQuery({ queryKey: ["signup-options"], enabled: state === "unauthenticated" && Boolean(client), queryFn: ({ signal }) => client!.signupOptions(signal), staleTime: 60_000 });
   const title = state === "loading" ? t("admin.sessionLoading") : state === "unauthenticated" ? t("admin.signInTitle") : state === "scope" ? t("admin.noScopeTitle") : t("admin.sessionErrorTitle");
   const body = state === "unauthenticated" ? t("admin.signInBody") : state === "scope" ? t("admin.noScopeBody") : state === "error" ? t("admin.sessionErrorBody") : "";
-  return <main className="admin-access"><div className="admin-access__controls"><Select aria-label={t("common.locale")} onChange={(event) => setLocale(event.target.value as typeof locale)} value={locale}>{locales.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}</Select><ThemeToggle label={t("common.theme")} /></div><section aria-busy={state === "loading" || undefined} role={state === "error" ? "alert" : "status"}><div className="admin-access__brand"><span aria-hidden="true" className="mp-brand__mark"><span/><span/></span><strong>{PRODUCT_NAME}</strong></div><div className="admin-access__content"><span aria-hidden="true" className="admin-access__shield"><ShieldCheck size={24}/></span><div><h1>{title}</h1>{body && <p>{body}</p>}</div></div>{state === "unauthenticated" && client && <a className="mp-button mp-button--primary mp-button--md" href={client.loginURL(safeReturnPath())}>{t("common.signIn")}</a>}{state === "error" && <Button onClick={() => window.location.reload()}>{t("common.retry")}</Button>}</section></main>;
+  return <main className="admin-access"><div className="admin-access__controls"><Select aria-label={t("common.locale")} onChange={(event) => setLocale(event.target.value as typeof locale)} value={locale}>{locales.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}</Select><ThemeToggle label={t("common.theme")} /></div><section aria-busy={state === "loading" || undefined} role={state === "error" ? "alert" : "status"}><div className="admin-access__brand"><span aria-hidden="true" className="mp-brand__mark"><span/><span/></span><strong>{PRODUCT_NAME}</strong></div><div className="admin-access__content"><span aria-hidden="true" className="admin-access__shield"><ShieldCheck size={24}/></span><div><h1>{title}</h1>{body && <p>{body}</p>}</div></div>{state === "unauthenticated" && client && <a className="mp-button mp-button--primary mp-button--md" href={client.loginURL(safeReturnPath())}>{t("common.signIn")}</a>}{state === "unauthenticated" && signup.data?.enabled && <a className="admin-signup__signin" href="#/signup">{t("signup.create")}</a>}{state === "error" && <Button onClick={() => window.location.reload()}>{t("common.retry")}</Button>}</section></main>;
 }
 
 function PreviewRoutes() {
@@ -76,6 +79,7 @@ function PreviewRoutes() {
     <Route element={<TeamPage />} path="/team" />
     <Route element={<MerchantProjectSettingsPage />} path="/settings" />
     <Route element={<FinancialSettingsPage />} path="/financial-settings" />
+    <Route element={<OnboardingPage />} path="/onboarding" />
     <Route element={<UnavailablePage description={"management.auditBody"} title={"management.auditTitle"} />} path="/management-audit" />
     <Route element={<UnavailablePage description={"platform.body"} title={"platform.title"} />} path="/platform" />
     <Route element={<UnavailablePage description={"management.actionsBody"} title={"management.actionsTitle"} />} path="/management-actions" />
@@ -111,6 +115,7 @@ function ProductionRoutes() {
     <Route element={<MerchantTeamPage />} path="/team" />
     <Route element={<MerchantProjectSettingsPage />} path="/settings" />
     <Route element={<FinancialSettingsPage />} path="/financial-settings" />
+    <Route element={<OnboardingPage />} path="/onboarding" />
     <Route element={<InvitationAcceptPage />} path="/invite" />
     <Route element={<FinancialSweepsPage />} path="/financial/sweeps" />
     <Route element={<FinancialRefundsPage />} path="/financial/refunds" />
@@ -137,6 +142,7 @@ function AdminApplication() {
   const queryClient = useQueryClient();
   const active = (path: string) => location.pathname === path;
   const operations = [
+      admin.scope?.merchantId && (admin.can("wallets:read") || admin.can("infrastructure:read")) && { label: t("onboarding.nav"), href: "#/onboarding", icon: Sparkles, active: active("/onboarding"), keywords: ["setup", "start"] },
       admin.can("dashboard:read") && { label: t("nav.overview"), href: "#/overview", icon: LayoutDashboard, active: active("/overview"), keywords: ["dashboard"] },
       admin.can("payments:read") && { label: t("nav.intents"), href: "#/intents", icon: CircleDollarSign, active: active("/intents"), keywords: ["orders"] },
       admin.can("payments:read") && { label: t("nav.transfers"), href: "#/transfers", icon: Blocks, active: active("/transfers"), keywords: ["transactions"] },
@@ -162,6 +168,7 @@ function AdminApplication() {
   ].filter(Boolean) as ShellNavGroup["items"];
   const navGroups = [operations.length && { label: t("nav.operations"), items: operations }, financial.length && { label: t("financial.cabinet"), items: financial }, settings.length && { label: t("nav.settings"), items: settings }, infrastructure.length && !admin.scope?.merchantId && { label: t("common.platform"), items: infrastructure, collapsible: true }].filter(Boolean) as ShellNavGroup[];
 
+  if (!admin.preview && location.pathname === "/signup" && admin.client) return <SignupPage client={admin.client} locale={locale} />;
   if (!admin.preview && location.pathname === "/invite") return <Suspense fallback={<div aria-busy="true" className="admin-route-loading"><span /><span /><span /></div>}><InvitationAcceptPage /></Suspense>;
   if (admin.sessionState === "loading") return <AccessScreen state="loading" />;
   if (admin.sessionState === "unauthenticated") return <AccessScreen state="unauthenticated" />;

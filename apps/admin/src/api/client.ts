@@ -13,6 +13,9 @@ export function isAllowedAdminOrigin(url:URL,allowInsecureLoopback=false):boolea
 export function adminCSRFCookieName(url:URL,allowInsecureLoopback=false):string{return allowInsecureLoopback&&url.protocol==="http:"&&isAllowedAdminOrigin(url,true)?"admin_csrf_e2e":"__Host-admin_csrf"}
 export async function withExplicitPreviewFallback<T>(request:()=>Promise<T>,preview:()=>T):Promise<T>{try{return await request()}catch(error){if(isAdminPreviewMode())return preview();throw error}}
 
+export type SignupOptions={enabled:false}|{enabled:true;termsVersion:string;businessTypes:string[]};
+export type SignupForm={company_name:string;country:string;business_type:string;website?:string;terms_version:string};
+
 export class AdminClient {
   private readonly origin:string;
   constructor(private readonly fetcher:Fetch=(input,init)=>globalThis.fetch(input,init),baseURL?:string){
@@ -32,6 +35,25 @@ export class AdminClient {
     if(typeof authorizationURL!=="string")throw new AdminAPIError(502,"invalid_response","Invitation login response was invalid");
     const parsed=new URL(authorizationURL);
     if(parsed.protocol!=="https:"||parsed.username!==""||parsed.password!=="")throw new AdminAPIError(502,"invalid_response","Invitation login response was invalid");
+    return parsed.toString();
+  }
+  async signupOptions(signal?:AbortSignal):Promise<SignupOptions>{
+    const response=await this.fetcher(`${this.origin}/admin/v1/auth/signup/options`,{method:"GET",headers:new Headers({Accept:"application/json"}),credentials:"include",redirect:"error",cache:"no-store",signal});
+    const value:unknown=await response.json().catch(()=>null);
+    if(!response.ok||typeof value!=="object"||value===null||typeof (value as {enabled?:unknown}).enabled!=="boolean")return {enabled:false};
+    const options=value as {enabled:boolean;terms_version?:unknown;business_types?:unknown};
+    if(!options.enabled)return {enabled:false};
+    const types=Array.isArray(options.business_types)?options.business_types.filter((item):item is string=>typeof item==="string"&&/^[a-z][a-z_]{1,39}$/.test(item)):[];
+    return typeof options.terms_version==="string"&&types.length>0?{enabled:true,termsVersion:options.terms_version,businessTypes:types}:{enabled:false};
+  }
+  async beginSignup(form:SignupForm):Promise<string>{
+    const response=await this.fetcher(`${this.origin}/admin/v1/auth/signup`,{method:"POST",headers:new Headers({Accept:"application/json","Content-Type":"application/json"}),body:JSON.stringify(form),credentials:"include",redirect:"error",cache:"no-store"});
+    const value:unknown=await response.json().catch(()=>null);
+    if(!response.ok){const problem=value as Partial<APIProblem>|null;throw new AdminAPIError(response.status,problem?.code??"http_error",problem?.detail??"Signup could not be started")}
+    const authorizationURL=(value as {authorization_url?:unknown}|null)?.authorization_url;
+    if(typeof authorizationURL!=="string")throw new AdminAPIError(502,"invalid_response","Signup response was invalid");
+    const parsed=new URL(authorizationURL);
+    if(parsed.protocol!=="https:"||parsed.username!==""||parsed.password!=="")throw new AdminAPIError(502,"invalid_response","Signup response was invalid");
     return parsed.toString();
   }
   me(signal?:AbortSignal){return this.request<AdminPrincipal>("/admin/v1/session/me",{signal})}

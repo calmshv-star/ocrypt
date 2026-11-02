@@ -5,7 +5,7 @@ export type Permission =
   | "payment_links:read" | "payment_links:write" | "checkout:write"
   | "webhook_settings:read" | "webhook_settings:write" | "webhook_settings:rotate" | "webhook_settings:disable"
   | "api_clients:read" | "api_clients:write" | "api_clients:rotate" | "api_clients:revoke"
-  | "management_audit:read"
+  | "management_audit:read" | "wallets:read" | "wallets:write"
   | "matching_policy:read" | "matching_policy:write" | "matching_policy:approve" | "matching_policy:activate"
   | "platform_config:read" | "platform_config:write" | "platform_config:request" | "platform_config:approve"
   | "platform_config:schedule" | "platform_config:activate" | "platform_config:rollback" | "platform_config:emergency"

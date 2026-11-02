@@ -56,6 +56,7 @@ function client(overrides: Record<string, unknown> = {}) {
     reconciliation: vi.fn().mockResolvedValue({ items: [] }),
     audit: vi.fn().mockResolvedValue({ items: [] }),
     refreshCSRF: vi.fn().mockResolvedValue(undefined),
+    signupOptions: vi.fn().mockResolvedValue({ enabled: false }),
     logout: vi.fn().mockResolvedValue(undefined),
     loginURL: vi.fn(() => "https://admin.example/admin/v1/auth/login"),
     beginInvitationLogin: vi.fn().mockResolvedValue("https://id.example/authorize"),

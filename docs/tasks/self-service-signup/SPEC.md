@@ -30,8 +30,15 @@ infrastructure, provider or custody permission. Signup is disabled unless
 `ADMIN_SELF_SERVICE_SIGNUP=true`.
 
 Non-goals here: billing, live-mode switch, four-eyes redesign for single-owner
-merchants, sanctions screening of names (only country screening), UI (next
-increment).
+merchants, sanctions screening of names (only country screening).
+
+UI increment: `#/signup` form (country names from `Intl.DisplayNames`, business
+types from the server, https-only website, terms version from the server), a
+"Create an account" link on the sign-in screen only when the server reports
+signup open, and a `#/onboarding` checklist whose steps are derived from the
+merchant's real data (active wallet, API client, webhook endpoint, payment
+link, a paid intent). "Switch to live mode" shows ready when a wallet is active
+and a payment has been received; a real live-mode switch is billing-stage work.
 
 ## Acceptance matrix
 
@@ -44,6 +51,10 @@ increment).
 | S5 | Other roles | Cannot create signup requests | same | passes |
 | S6 | BFF: signup disabled, origin, validation, callback with unverified email or missing MFA, returning identity | Rejected or logged in as specified | `internal/admin/signup_test.go` | passes (written alongside the implementation) |
 | S7 | Wallet pages for a merchant owner | `wallets:*` admits only the owner's own merchant; operators keep `infrastructure:*` access | `TestMerchantOwnerManagesOnlyItsOwnWallets` | passes |
+| S8 | Sign-in screen with signup open/closed | Link to `#/signup` only when the server reports `enabled` | `Signup.test.tsx` | passes |
+| S9 | Signup form | Disabled until terms accepted and website is https; trimmed payload with server terms version; redirect only to the returned https URL; closed installation shows no form | `Signup.test.tsx`, `client.ts` URL check | passes |
+| S10 | Server rejects | One opaque message, no redirect | `Signup.test.tsx` | passes |
+| S11 | Onboarding checklist | Each step from real data; steps without permission hidden; progress counts visible steps | `Signup.test.tsx` | passes |
 
 For financial changes include relevant exact-money, negative, duplicate/replay,
 concurrency, tenant, finality, and external-delivery cases.
