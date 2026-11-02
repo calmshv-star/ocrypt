@@ -30,14 +30,14 @@ four-eyes admin flow), non-EVM chains, deployment.
 
 | ID | Behavior/input/fault | Expected result | Test or manual check | Evidence |
 | --- | --- | --- | --- | --- |
-| P1 | Logs digest | Independent of order, sensitive to content | `test_log_digest_*` | |
-| P2 | Agreement on both ranges | Agreeing endpoints listed; archive refusal shown as an error category | `test_providers_that_agree_*`, `test_a_disagreeing_provider_*` | |
-| P3 | Tie or no head | No majority, chain insufficient, no crash | `test_a_tie_*`, `test_no_head_at_all_*` | |
-| P4 | One endpoint lies about the head | Median keeps the ranges | `test_reference_head_is_the_median_*` | |
-| P5 | Secret endpoint URLs | Never in table, JSON or error text | `test_secret_endpoint_urls_*` | |
-| P6 | Exit code | 0 only when every chain passes | `test_exit_code_*` | |
-| P7 | Invalid config | Rejected | `test_invalid_configuration_is_rejected` | |
-| P8 | Real JSON-RPC over HTTP | Round trip works | `test_real_json_rpc_round_trip` | |
+| P1 | Logs digest | Independent of order, sensitive to content | `test_log_digest_*` || test passes |
+| P2 | Agreement on both ranges | Agreeing endpoints listed; archive refusal shown as an error category | `test_providers_that_agree_*`, `test_a_disagreeing_provider_*` || test passes + live BSC run |
+| P3 | Tie or no head | No majority, chain insufficient, no crash | `test_a_tie_*`, `test_no_head_at_all_*` || test passes |
+| P4 | One endpoint lies about the head | Median keeps the ranges | `test_reference_head_is_the_median_*` || test passes |
+| P5 | Secret endpoint URLs | Never in table, JSON or error text | `test_secret_endpoint_urls_*` || test passes |
+| P6 | Exit code | 0 only when every chain passes | `test_exit_code_*` || test passes |
+| P7 | Invalid config | Rejected | `test_invalid_configuration_is_rejected` || test passes |
+| P8 | Real JSON-RPC over HTTP | Round trip works | `test_real_json_rpc_round_trip` || test passes + live BSC run |
 
 For financial changes include relevant exact-money, negative, duplicate/replay,
 concurrency, tenant, finality, and external-delivery cases.

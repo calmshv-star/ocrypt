@@ -7,10 +7,10 @@ snapshot with the helper before assigning implementation workers.
 
 ## Progress
 
-- [ ] Material questions resolved; specification and acceptance matrix recorded.
-- [ ] Tests authored; expected failures inspected (or artifact validation defined).
-- [ ] Dependencies, writer ownership, and common base assigned.
-- [ ] Implementation complete and focused checks pass.
+- [x] Material questions resolved; specification and acceptance matrix recorded.
+- [x] Tests authored; expected failures inspected (or artifact validation defined).
+- [x] Dependencies, writer ownership, and common base assigned (serial, orchestrator only).
+- [x] Implementation complete and focused checks pass.
 - [ ] Integrated diff independently reviewed; relevant checks repeated.
 - [ ] Completion evidence and remaining runtime/deployment limits recorded.
 
@@ -21,9 +21,12 @@ snapshot with the helper before assigning implementation workers.
 
 ## Evidence
 
-Record command, working directory, revision, dirty state, result, skipped checks,
-and a local evidence reference. Never commit credentials or customer records.
+- Before implementation (dc35a1b): collection failed, script missing.
+- After: 17 probe tests pass, including a real local JSON-RPC round trip.
+- Live run 2026-11-03 against five public BSC endpoints: four agree on both
+  ranges, bloXroute returns http 403 (table in the deploy README).
 
 ## Resume / next action
 
-Record completed work, unresolved failures/questions, and the next concrete step.
+Implementation done. Next: independent review; operators run it weekly and
+before proposing a provider through the admin flow.
