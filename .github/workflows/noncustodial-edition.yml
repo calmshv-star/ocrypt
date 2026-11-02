@@ -1,0 +1,67 @@
+name: noncustodial-edition
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: noncustodial-edition-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  noncustodial-backend:
+    runs-on: ubuntu-latest
+    env:
+      GOFLAGS: -mod=readonly
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Test noncustodial edition
+        run: go test -tags noncustodial ./...
+      - name: Vet noncustodial edition
+        run: go vet -tags noncustodial ./...
+      - name: Prove noncustodial binaries link no custody or hosted-provider clients
+        run: ../scripts/check-noncustodial-edition.sh
+      - name: Lint the edition check script
+        working-directory: .
+        run: docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck-alpine:v0.10.0 shellcheck /mnt/scripts/check-noncustodial-edition.sh
+
+  noncustodial-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: backend/go.mod
+          cache: false
+      - name: Build a noncustodial runtime image
+        run: >-
+          docker build --file deploy/docker/Dockerfile.backend
+          --build-arg BINARY=admin-api
+          --build-arg EDITION=noncustodial
+          --build-arg VERSION=ci
+          --build-arg REVISION=${{ github.sha }}
+          --tag merchant-platform-admin-api:noncustodial .
+      - name: Prove the image binary was built with the noncustodial tag
+        run: |
+          test "$(docker image inspect --format '{{ index .Config.Labels "org.ocrypt.edition" }}' merchant-platform-admin-api:noncustodial)" = noncustodial
+          container="$(docker create merchant-platform-admin-api:noncustodial)"
+          docker cp "$container:/app/service" "$RUNNER_TEMP/admin-api"
+          docker rm "$container"
+          go version -m "$RUNNER_TEMP/admin-api" | grep -Eq '^[[:space:]]+build[[:space:]]+-tags=noncustodial$'
+      - name: Refuse custody binaries in the noncustodial edition
+        run: |
+          if docker build --file deploy/docker/Dockerfile.backend --build-arg BINARY=financial-worker --build-arg EDITION=noncustodial .; then
+            echo "financial-worker must not build in the noncustodial edition" >&2
+            exit 1
+          fi
