@@ -656,3 +656,6 @@
 .onboarding-banner progress { width: 100%; height: 8px; accent-color: var(--mp-primary); }
 @media (max-width: 640px) { .onboarding-banner { grid-template-columns: auto minmax(0, 1fr) auto; } .onboarding-banner progress { display: none; } }
 .admin-signup__form .admin-signup__blocked { color: var(--mp-negative); }
+.admin-export { display: inline-grid; justify-items: end; gap: 4px; }
+.admin-export small { max-width: 260px; color: var(--mp-muted); font-size: 12px; text-align: right; }
+.admin-export small[role="alert"] { color: var(--mp-negative); }
