@@ -100,11 +100,13 @@ spec:
             matchLabels:
               {{- include "merchant.selectorLabels" (dict "root" $root "component" "merchant-settings-api") | nindent 14 }}
       ports: [{protocol: TCP, port: 8447}]
+    {{- if eq $root.Values.edition "full" }}
     - to:
         - podSelector:
             matchLabels:
               {{- include "merchant.selectorLabels" (dict "root" $root "component" "financial-api") | nindent 14 }}
       ports: [{protocol: TCP, port: 8444}]
+    {{- end }}
     {{- end }}
     {{- if $cfg.network.httpsEgressPeers }}
     - to:

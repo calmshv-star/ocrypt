@@ -4,6 +4,7 @@
   "required": ["global", "migration", "migrationVerifier", "migrationActuator", "workloads", "ingress", "networkPolicy", "platformOutbox"],
   "additionalProperties": false,
   "properties": {
+    "edition": {"type": "string", "enum": ["full", "noncustodial"]},
     "nameOverride": {"type": "string"},
     "fullnameOverride": {"type": "string"},
     "global": {

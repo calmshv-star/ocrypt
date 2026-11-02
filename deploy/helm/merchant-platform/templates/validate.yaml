@@ -1,3 +1,20 @@
+{{- if not (has .Values.edition (list "full" "noncustodial")) }}{{- fail "edition must be full or noncustodial" }}{{- end }}
+{{- if eq .Values.edition "noncustodial" }}
+{{- range $name := list "financial-api" "financial-worker" }}
+{{- if (index $.Values.workloads $name).enabled }}{{- fail (printf "workloads.%s is not part of the noncustodial edition" $name) }}{{- end }}
+{{- end }}
+{{- range $name, $cfg := .Values.workloads }}
+{{- if $cfg.enabled }}
+{{- range $key, $value := $cfg.env }}
+{{- if and (or (hasPrefix "FINANCIAL_" $key) (hasPrefix "HOSTED_PROVIDER_" $key)) (not (empty $value)) }}{{- fail (printf "workloads.%s.env.%s is not supported by the noncustodial edition" $name $key) }}{{- end }}
+{{- if and (eq $key "WORKER_ROLES") (regexMatch "(^|,)[[:space:]]*hosted[[:space:]]*(,|$)" (toString $value)) }}{{- fail (printf "workloads.%s must not run the hosted worker role in the noncustodial edition" $name) }}{{- end }}
+{{- end }}
+{{- range $file := $cfg.secretFiles }}
+{{- if hasPrefix "/run/secrets/financial" $file.path }}{{- fail (printf "workloads.%s must not mount financial bridge secrets in the noncustodial edition" $name) }}{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- if .Values.global.requireImageDigest }}
 {{- range $name, $cfg := .Values.workloads }}
 {{- if and $cfg.enabled (empty $cfg.image.digest) }}{{- fail (printf "workloads.%s.image.digest is required" $name) }}{{- end }}
@@ -85,8 +102,10 @@
 {{- $financialServerName := printf "%s-financial-api.%s.svc" (include "merchant.fullname" .) .Release.Namespace -}}
 {{- if ne $adminAPI.env.MERCHANT_SETTINGS_INTERNAL_URL $merchantSettingsOrigin }}{{- fail (printf "admin MERCHANT_SETTINGS_INTERNAL_URL must be %s" $merchantSettingsOrigin) }}{{- end }}
 {{- if ne $adminAPI.env.MERCHANT_SETTINGS_INTERNAL_SERVER_NAME $merchantSettingsServerName }}{{- fail (printf "admin merchant settings TLS server name must be %s" $merchantSettingsServerName) }}{{- end }}
+{{- if eq .Values.edition "full" }}
 {{- if ne $adminAPI.env.FINANCIAL_INTERNAL_URL $financialOrigin }}{{- fail (printf "admin FINANCIAL_INTERNAL_URL must be %s" $financialOrigin) }}{{- end }}
 {{- if ne $adminAPI.env.FINANCIAL_INTERNAL_SERVER_NAME $financialServerName }}{{- fail (printf "admin financial TLS server name must be %s" $financialServerName) }}{{- end }}
+{{- end }}
 {{- end }}
 {{- $financialAPI := index .Values.workloads "financial-api" }}
 {{- if and $financialAPI.enabled (empty $financialAPI.network.ingressFrom) }}{{- fail "enabled financial-api requires explicit private ingress peers" }}{{- end }}

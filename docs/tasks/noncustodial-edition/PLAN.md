@@ -42,6 +42,9 @@ snapshot with the helper before assigning implementation workers.
   on a disposable PostgreSQL 18.6 with 57 migrations and runtime grants;
   000057 down/up/grants re-applied; both-edition Go tests, symbol check,
   `check backend`, `check financial`, `deploy/validate.sh static` pass.
+- Helm: `helm lint` and `kubeconform` pass for both editions; negative cases
+  rejected; the full-edition render is byte-identical to main. The final
+  Compose step of `deploy/validate.sh full` needs Docker and was not run.
 - Not run locally: `docker build` (no Docker on this machine; covered by the
   new CI `noncustodial-image` job);
   PHP/Java/.NET and web checks (no change); `pnpm verify` live gate.
@@ -56,6 +59,6 @@ added by the repository owner: `.github/workflows/noncustodial-edition.yml`
 in the PR description) and the two `go-version: 1.26.9` pins in `ci.yml`
 (deployment and SDK jobs). Until then the noncustodial checks are local-only
 evidence. Follow-ups —
-Helm/Compose noncustodial profile. Note: every container-image job currently
+none for stage 0 code; a Compose profile is not needed (local-only). Note: every container-image job currently
 fails Trivy on Go 1.26.9 stdlib CVE-2026-111943 (fixed in 1.26.10); this is
 independent of this task.
