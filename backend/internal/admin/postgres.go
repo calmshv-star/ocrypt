@@ -148,8 +148,8 @@ func (r *PostgresRepository) LookupInvitation(ctx context.Context, digest [sha25
 
 func (r *PostgresRepository) PutLoginAttempt(ctx context.Context, value LoginAttempt) error {
 	_, err := r.pool.Exec(ctx, `INSERT INTO admin_login_attempts
-(state_hash,nonce,encrypted_verifier,purpose,expected_user_id,existing_session_hash,return_path,invitation_id,invitation_tenant_id,invitation_merchant_id,expected_email,created_at,expires_at)
-VALUES($1,$2,$3,$4,NULLIF($5,'')::uuid,$6,$7,NULLIF($8,'')::uuid,NULLIF($9,'')::uuid,NULLIF($10,'')::uuid,NULLIF($11,''),$12,$13)`, value.StateHash[:], value.Nonce, value.EncryptedVerifier, value.Purpose, value.ExpectedUserID, nilIfEmptyBytes(value.ExistingSessionHash), value.ReturnPath, value.InvitationID, value.InvitationTenantID, value.InvitationMerchantID, value.ExpectedEmail, value.CreatedAt, value.ExpiresAt)
+(state_hash,nonce,encrypted_verifier,purpose,expected_user_id,existing_session_hash,return_path,invitation_id,invitation_tenant_id,invitation_merchant_id,expected_email,signup_request_id,created_at,expires_at)
+VALUES($1,$2,$3,$4,NULLIF($5,'')::uuid,$6,$7,NULLIF($8,'')::uuid,NULLIF($9,'')::uuid,NULLIF($10,'')::uuid,NULLIF($11,''),NULLIF($12,'')::uuid,$13,$14)`, value.StateHash[:], value.Nonce, value.EncryptedVerifier, value.Purpose, value.ExpectedUserID, nilIfEmptyBytes(value.ExistingSessionHash), value.ReturnPath, value.InvitationID, value.InvitationTenantID, value.InvitationMerchantID, value.ExpectedEmail, value.SignupRequestID, value.CreatedAt, value.ExpiresAt)
 	return classifyAdminDB(err)
 }
 
@@ -158,8 +158,8 @@ func (r *PostgresRepository) ConsumeLoginAttempt(ctx context.Context, state [32]
 	var expected *string
 	var stateHash []byte
 	err := r.pool.QueryRow(ctx, `DELETE FROM admin_login_attempts WHERE state_hash=$1 AND expires_at>$2
-RETURNING state_hash,nonce,encrypted_verifier,purpose,expected_user_id::text,existing_session_hash,return_path,coalesce(invitation_id::text,''),coalesce(invitation_tenant_id::text,''),coalesce(invitation_merchant_id::text,''),coalesce(expected_email,''),created_at,expires_at`, state[:], now).
-		Scan(&stateHash, &value.Nonce, &value.EncryptedVerifier, &value.Purpose, &expected, &value.ExistingSessionHash, &value.ReturnPath, &value.InvitationID, &value.InvitationTenantID, &value.InvitationMerchantID, &value.ExpectedEmail, &value.CreatedAt, &value.ExpiresAt)
+RETURNING state_hash,nonce,encrypted_verifier,purpose,expected_user_id::text,existing_session_hash,return_path,coalesce(invitation_id::text,''),coalesce(invitation_tenant_id::text,''),coalesce(invitation_merchant_id::text,''),coalesce(expected_email,''),coalesce(signup_request_id::text,''),created_at,expires_at`, state[:], now).
+		Scan(&stateHash, &value.Nonce, &value.EncryptedVerifier, &value.Purpose, &expected, &value.ExistingSessionHash, &value.ReturnPath, &value.InvitationID, &value.InvitationTenantID, &value.InvitationMerchantID, &value.ExpectedEmail, &value.SignupRequestID, &value.CreatedAt, &value.ExpiresAt)
 	if err == nil && len(stateHash) != len(value.StateHash) {
 		err = errors.New("admin login state hash has an invalid length")
 	}
@@ -170,6 +170,49 @@ RETURNING state_hash,nonce,encrypted_verifier,purpose,expected_user_id::text,exi
 		value.ExpectedUserID = *expected
 	}
 	return value, classifyAdminDB(err)
+}
+
+// CreateSignupRequest screens and stores a self-service signup request. A
+// false result means the request was rejected without saying which rule.
+func (r *PostgresRepository) CreateSignupRequest(ctx context.Context, id string, form SignupForm, createdAt, expiresAt time.Time) (bool, error) {
+	var accepted bool
+	err := r.pool.QueryRow(ctx, `SELECT create_admin_signup_request($1,$2,$3,$4,NULLIF($5,''),$6,$7,$8)`, id, form.CompanyName, form.Country, form.BusinessType, form.Website, form.TermsVersion, createdAt, expiresAt).Scan(&accepted)
+	return accepted, classifyAdminDB(err)
+}
+
+// RegisterSelfServiceMerchant consumes a screened signup request once.
+func (r *PostgresRepository) RegisterSelfServiceMerchant(ctx context.Context, attempt LoginAttempt, claims IDTokenClaims, at time.Time) (SelfServiceRegistration, error) {
+	identifiers := make([]string, 4)
+	for index := range identifiers {
+		value, err := ids.New()
+		if err != nil {
+			return SelfServiceRegistration{}, err
+		}
+		identifiers[index] = value
+	}
+	var result SelfServiceRegistration
+	err := r.pool.QueryRow(ctx, `SELECT user_id::text,coalesce(tenant_id::text,''),coalesce(merchant_id::text,''),created
+FROM register_self_service_merchant($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, attempt.SignupRequestID, claims.Issuer, claims.Subject, claims.Email, claims.Name,
+		identifiers[0], identifiers[1], identifiers[2], identifiers[3], at).Scan(&result.UserID, &result.TenantID, &result.MerchantID, &result.Created)
+	return result, classifyAdminDB(err)
+}
+
+// SignupBusinessTypes lists the business types open for self-service signup.
+func (r *PostgresRepository) SignupBusinessTypes(ctx context.Context) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `SELECT business_type FROM signup_business_types WHERE allowed ORDER BY business_type`)
+	if err != nil {
+		return nil, classifyAdminDB(err)
+	}
+	defer rows.Close()
+	var types []string
+	for rows.Next() {
+		var value string
+		if err = rows.Scan(&value); err != nil {
+			return nil, classifyAdminDB(err)
+		}
+		types = append(types, value)
+	}
+	return types, classifyAdminDB(rows.Err())
 }
 
 func (r *PostgresRepository) FindIdentity(ctx context.Context, issuer, subject string) (Identity, error) {

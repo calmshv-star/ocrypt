@@ -42,7 +42,8 @@ increment).
 | S3 | Replay of a consumed request; returning identity with a new request | No row; login without a new tenant | same | passes |
 | S4 | `merchant_owner` permissions | Has payments/links/API clients/webhooks/wallets; no platform or custody permission | same | passes |
 | S5 | Other roles | Cannot create signup requests | same | passes |
-| S6 | BFF: signup disabled, origin, validation, callback with unverified email or missing MFA, returning identity | Rejected or logged in as specified | Go unit tests | |
+| S6 | BFF: signup disabled, origin, validation, callback with unverified email or missing MFA, returning identity | Rejected or logged in as specified | `internal/admin/signup_test.go` | passes (written alongside the implementation) |
+| S7 | Wallet pages for a merchant owner | `wallets:*` admits only the owner's own merchant; operators keep `infrastructure:*` access | `TestMerchantOwnerManagesOnlyItsOwnWallets` | passes |
 
 For financial changes include relevant exact-money, negative, duplicate/replay,
 concurrency, tenant, finality, and external-delivery cases.

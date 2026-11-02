@@ -23,6 +23,9 @@ type AuthRepository interface {
 	ConsumeLoginAttempt(context.Context, [32]byte, time.Time) (LoginAttempt, error)
 	FindIdentity(context.Context, string, string) (Identity, error)
 	CreateInvitationSession(context.Context, LoginAttempt, IDTokenClaims, Session) (Identity, Session, error)
+	CreateSignupRequest(context.Context, string, SignupForm, time.Time, time.Time) (bool, error)
+	RegisterSelfServiceMerchant(context.Context, LoginAttempt, IDTokenClaims, time.Time) (SelfServiceRegistration, error)
+	SignupBusinessTypes(context.Context) ([]string, error)
 	CreateSession(context.Context, Session) error
 	FindSession(context.Context, [32]byte, time.Time) (Session, Identity, error)
 	FindInvitationSession(context.Context, [32]byte, time.Time) (Session, Identity, error)

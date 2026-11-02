@@ -19,6 +19,22 @@ type repositoryStub struct {
 	claimErr     error
 	walletInput  WatchWalletReplacement
 	walletImport WatchWalletImport
+	signupForms  []SignupForm
+	signupOK     bool
+	registration SelfServiceRegistration
+	registerErr  error
+	sessions     []Session
+}
+
+func (r *repositoryStub) CreateSignupRequest(_ context.Context, _ string, form SignupForm, _, _ time.Time) (bool, error) {
+	r.signupForms = append(r.signupForms, form)
+	return r.signupOK, nil
+}
+func (r *repositoryStub) RegisterSelfServiceMerchant(context.Context, LoginAttempt, IDTokenClaims, time.Time) (SelfServiceRegistration, error) {
+	return r.registration, r.registerErr
+}
+func (r *repositoryStub) SignupBusinessTypes(context.Context) ([]string, error) {
+	return []string{"ecommerce", "saas"}, nil
 }
 
 func (r *repositoryStub) LookupInvitation(context.Context, [32]byte) (InvitationLogin, error) {

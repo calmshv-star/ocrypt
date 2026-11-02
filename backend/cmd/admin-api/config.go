@@ -23,6 +23,8 @@ type adminConfig struct {
 	RequiredACR                    string
 	AcceptedAMR                    map[string]bool
 	PasswordOnly                   bool
+	SelfServiceSignup              bool
+	SignupTermsVersion             string
 	IdleTTL                        time.Duration
 	AbsoluteTTL                    time.Duration
 	RotationInterval               time.Duration
@@ -141,6 +143,14 @@ func loadAdminConfig() (adminConfig, error) {
 	config.PasswordOnly, err = strconv.ParseBool(envOr("ADMIN_PASSWORD_ONLY_MODE", "false"))
 	if err != nil {
 		return adminConfig{}, errors.New("ADMIN_PASSWORD_ONLY_MODE must be true or false")
+	}
+	config.SelfServiceSignup, err = strconv.ParseBool(envOr("ADMIN_SELF_SERVICE_SIGNUP", "false"))
+	if err != nil {
+		return adminConfig{}, errors.New("ADMIN_SELF_SERVICE_SIGNUP must be true or false")
+	}
+	config.SignupTermsVersion = strings.TrimSpace(os.Getenv("ADMIN_SIGNUP_TERMS_VERSION"))
+	if config.SelfServiceSignup && (config.SignupTermsVersion == "" || len(config.SignupTermsVersion) > 64) {
+		return adminConfig{}, errors.New("ADMIN_SELF_SERVICE_SIGNUP=true requires ADMIN_SIGNUP_TERMS_VERSION (at most 64 characters)")
 	}
 	if config.PasswordOnly && (config.RequiredACR != "password" || !config.AcceptedAMR["pwd"]) {
 		return adminConfig{}, errors.New("password-only mode requires ADMIN_REQUIRED_ACR=password and ADMIN_ACCEPTED_AMR to include pwd")
