@@ -44,7 +44,14 @@ snapshot with the helper before assigning implementation workers.
 
 ## Resume / next action
 
-Implementation and review fixes done. Next: PR, then follow-ups —
+Implementation and review fixes done; published as one branch together with
+the Go 1.26.10 pin update. Workflow files could not be pushed: neither the gh
+token nor the GitHub integration has the `workflow` scope. Pending, to be
+added by the repository owner: `.github/workflows/noncustodial-edition.yml`
+(noncustodial test/vet, symbol check, shellcheck, noncustodial image job; text
+in the PR description) and the two `go-version: 1.26.9` pins in `ci.yml`
+(deployment and SDK jobs). Until then the noncustodial checks are local-only
+evidence. Follow-ups —
 DB-level `watch_only` enforcement, Helm/Compose noncustodial profile, CI image
 matrix for the noncustodial edition. Note: every container-image job currently
 fails Trivy on Go 1.26.9 stdlib CVE-2026-111943 (fixed in 1.26.10); this is
