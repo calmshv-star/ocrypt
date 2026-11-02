@@ -213,9 +213,16 @@ function readReturns(token: string): ReturnTargets {
   }
 }
 
-function CheckoutChrome({ children }: { children: ReactNode }) {
+function CheckoutChrome({ children, merchantName }: { children: ReactNode; merchantName?: string }) {
   const { locale, locales, localeNames, setLocale, t } = useI18n();
-  return <div className="checkout-page"><a className="mp-skip-link" href="#checkout-main">{t("common.skipContent")}</a><header className="checkout-header"><a aria-label={PRODUCT_NAME} className="checkout-brand" href="/"><span aria-hidden="true" className="checkout-brand__mark"><i /><i /></span><strong>{PRODUCT_NAME}</strong></a><div><Select aria-label={t("common.locale")} onChange={(event) => setLocale(event.target.value as typeof locale)} value={locale}>{locales.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}</Select><ThemeToggle label={t("common.theme")} /></div></header>{children}</div>;
+  return <div className="checkout-page"><a className="mp-skip-link" href="#checkout-main">{t("common.skipContent")}</a><header className="checkout-header"><a aria-label={PRODUCT_NAME} className="checkout-brand" href="/"><span aria-hidden="true" className="checkout-brand__mark"><i /><i /></span><strong>{PRODUCT_NAME}</strong></a><div><Select aria-label={t("common.locale")} onChange={(event) => setLocale(event.target.value as typeof locale)} value={locale}>{locales.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}</Select><ThemeToggle label={t("common.theme")} /></div></header>{children}<footer className="checkout-footer">{merchantName && <p>{t("checkout.paidTo", { merchant: merchantName })}</p>}<p data-testid="checkout-disclaimer">{t("checkout.poweredBy", { product: PRODUCT_NAME })}</p></footer></div>;
+}
+
+// CHK-8: the server refused the visitor's region (HTTP 451). The copy is
+// deliberately neutral and offers no retry.
+function CheckoutRegionUnavailable() {
+  const { t } = useI18n();
+  return <CheckoutChrome><main className="checkout-main checkout-main--state" id="checkout-main"><section className="checkout-state" data-testid="region-unavailable" role="alert"><span aria-hidden="true" className="checkout-state__icon"><LockKeyhole size={26} /></span><h1>{t("checkout.regionUnavailable")}</h1><p>{t("checkout.regionUnavailableHelp")}</p></section></main></CheckoutChrome>;
 }
 
 function CheckoutUnavailable({ loading = false }: { loading?: boolean }) {
@@ -226,11 +233,12 @@ function CheckoutUnavailable({ loading = false }: { loading?: boolean }) {
 function PaymentLinkPage({ token, onRedeemed }: { token: string; onRedeemed: (redemption: Redemption) => void }) {
   const { locale, t } = useI18n();
   const [link, setLink] = useState<PaymentLink | null>(null);
-  const [state, setState] = useState<"loading" | "ready" | "redeeming" | "unavailable" | "rate" | "conflict" | "error">("loading");
+  const [state, setState] = useState<"loading" | "ready" | "redeeming" | "unavailable" | "region" | "rate" | "conflict" | "error">("loading");
   useEffect(() => {
     const controller = new AbortController();
     void fetch(`${apiBase()}/v1/public/payment-links/${encodeURIComponent(token)}`, { headers: { Accept: "application/json" }, credentials: "omit", redirect: "error", cache: "no-store", signal: controller.signal }).then(async (response) => {
       if (response.status === 404) { setState("unavailable"); return; }
+      if (response.status === 451) { setState("region"); return; }
       if (response.status === 429) { setState("rate"); return; }
       if (!response.ok) { setState("error"); return; }
       const parsed = parsePaymentLink(await response.json());
@@ -245,6 +253,7 @@ function PaymentLinkPage({ token, onRedeemed }: { token: string; onRedeemed: (re
     try {
       const response = await fetch(`${apiBase()}/v1/public/payment-links/${encodeURIComponent(token)}/redeem`, { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", "Idempotency-Key": idempotency }, body: "{}", credentials: "omit", redirect: "error" });
       if (response.status === 404) { setState("unavailable"); return; }
+      if (response.status === 451) { setState("region"); return; }
       if (response.status === 409) { setState("conflict"); return; }
       if (response.status === 429) { setState("rate"); return; }
       if (response.status !== 201) { setState("error"); return; }
@@ -256,6 +265,7 @@ function PaymentLinkPage({ token, onRedeemed }: { token: string; onRedeemed: (re
       setState("error");
     }
   };
+  if (state === "region") return <CheckoutRegionUnavailable />;
   const errorCopy = state === "rate" ? "checkout.rateLimited" : state === "conflict" ? "checkout.redeemConflict" : state === "unavailable" ? "checkout.unavailable" : "admin.dataError";
   const selector = link?.allowedRoutes[0];
   return <CheckoutChrome><main className="checkout-main" id="checkout-main"><section className="checkout-intro"><Badge tone="info">{t("checkout.offer")}</Badge><h1>{t("checkout.paymentLinkTitle")}</h1><p>{t("checkout.paymentLinkDescription")}</p></section>{link && selector && (state === "ready" || state === "redeeming") ? <section className="checkout-card payment-link-card" data-testid="payment-link-offer"><div><Badge tone="violet">{t("checkout.offer")}</Badge><h2>{link.name}</h2>{link.description && <p>{link.description}</p>}</div><dl><div><dt>{t("checkout.offerAmount")}</dt><dd data-testid="payment-link-amount">{formatMinor(link.amountMinor, link.currencyScale)} {link.currency}</dd></div><div><dt>{t(selector.provider === "on_chain" ? "common.network" : "checkout.provider")}</dt><dd>{selector.provider === "on_chain" ? selector.chainId : selector.providerId} · {selector.assetId}</dd></div>{link.expiresAt && <div><dt>{t("checkout.offerExpires")}</dt><dd>{new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(Date.parse(link.expiresAt))}</dd></div>}</dl><Button data-testid="redeem-payment-link" disabled={state === "redeeming"} onClick={() => void redeem()}>{t(state === "redeeming" ? "checkout.redeeming" : "checkout.payNow")}</Button></section> : <div className="checkout-link-state" role={state === "loading" ? "status" : "alert"}><strong>{t(state === "loading" ? "checkout.loading" : errorCopy as MessageKey)}</strong>{state !== "loading" && <Button onClick={() => window.location.reload()} variant="secondary">{t("common.retry")}</Button>}</div>}</main></CheckoutChrome>;
@@ -267,6 +277,7 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
   const seed = fixture ? fixtureSession(params) : initialSession ?? null;
   const [session, setSession] = useState<CheckoutSession | null>(seed);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [regionBlocked, setRegionBlocked] = useState(false);
   const [routeId, setRouteId] = useState(seed?.selectedRouteId || seed?.routes.find((item) => item.provider === "on_chain" && item.receivedAmount !== undefined)?.id || seed?.routes[0]?.id || "");
   const [selecting, setSelecting] = useState(false);
   const [selectionFailed, setSelectionFailed] = useState(false);
@@ -298,6 +309,7 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
         const response = await fetch(`${apiBase()}/v1/checkout-sessions/${encodeURIComponent(token)}`, { headers, credentials: "omit", redirect: "error", cache: "no-store", signal: controller.signal });
         if (response.status === 304 && hasSession) { setLoadFailed(false); retryAttempt = 0; schedule(5000); return; }
         if (response.status === 404) { setSession(null); setLoadFailed(true); return; }
+        if (response.status === 451) { setSession(null); setRegionBlocked(true); return; }
         if (!response.ok) throw new Error("checkout_unavailable");
         const parsed = parseSession(await response.json());
         if (!parsed) throw new Error("invalid_checkout_contract");
@@ -361,6 +373,7 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
       setReceiptState(result.status === "proof_queued" ? "queued" : "missing");
     } catch { setReceiptState("error"); }
   };
+  if (regionBlocked) return <CheckoutRegionUnavailable />;
   if (!session) return <CheckoutUnavailable loading={!loadFailed} />;
   if (!route) {
     const preparationStatus = status === "payment_route_failed" || status === "expired" ? "payment_route_failed" : "preparing_payment_route";
@@ -390,7 +403,7 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
   const badgeTone = status === "settled" ? "positive" : status === "expired" ? "negative" : status === "partially_paid" || status === "needs_review" ? "warning" : "info";
   const routeSelectable = status === "pending" && !session.selectedRouteId && session.routes.length > 1;
   const displayTotal = `${formatMinor(session.amountMinor, session.currencyScale)} ${session.currency}`;
-  return <CheckoutChrome><main className="checkout-main" id="checkout-main">
+  return <CheckoutChrome merchantName={session.merchantName}><main className="checkout-main" id="checkout-main">
     <section className="checkout-intro">
       <div className="checkout-intro__copy">{fixture && <Badge tone="violet">{t("checkout.preview")}</Badge>}<h1>{t("checkout.title")}</h1><p>{session.description || t("checkout.description")}</p></div>
       <div className="checkout-order-context"><strong>{session.merchantName}</strong><span>{session.orderId}</span><div><small>{t("checkout.offerAmount")}</small><b>{displayTotal}</b></div></div>
@@ -420,6 +433,7 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
             {isPartial && <p className={route.topUpAllowed ? "checkout-topup-note" : "checkout-topup-note is-locked"} data-testid="top-up-instruction">{t(route.topUpAllowed ? "checkout.topUpInstruction" : "checkout.topUpUnavailable")}</p>}
             <div className="checkout-expiry"><Clock3 size={16} /><span>{t("checkout.expiresIn", { time: remaining })}</span></div>
           </div>
+          {canSendToRoute && <div className="checkout-transfer-guidance is-network" data-testid="payment-network-warning"><CircleAlert aria-hidden="true" size={20} /><div><strong>{t("checkout.wrongNetworkTitle", { asset: route.asset, network: route.network })}</strong><p>{t("checkout.wrongNetworkHelp")}</p></div></div>}
           {canSendToRoute && <div className="checkout-transfer-guidance" data-testid="payment-fee-warning"><CircleAlert aria-hidden="true" size={20} /><div><strong>{t("checkout.networkFeeTitle")}</strong><p>{t("checkout.networkFeeHelp")}</p></div></div>}
         </div> : <div className="checkout-provider"><ShieldCheck size={42} /><small>{t("checkout.providerAmount")}</small><strong data-testid="payment-amount">{route.amount} <span>{route.asset}</span></strong><p>{t("checkout.providerInstructions")}</p>{status !== "expired" && status !== "settled" && <a className="checkout-provider-link" data-testid="provider-payment-link" href={route.paymentURL} rel="noopener noreferrer" target="_blank">{t("checkout.continueProvider")}<ExternalLink size={16} /></a>}<div className="checkout-expiry"><Clock3 size={16} /><span>{t("checkout.expiresIn", { time: remaining })}</span></div></div>}
         <div className={`checkout-status is-${status}`} role="status"><span>{status === "settled" ? <CheckCircle2 size={22} /> : <RadioTower size={22} />}</span><div><strong>{t(routeStatusTitle)}</strong><p>{t(routeStatusHelp)}</p></div></div>

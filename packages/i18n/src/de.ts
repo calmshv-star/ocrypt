@@ -1276,5 +1276,11 @@ export const de = {
   "intentStatus.reversed.label": "Rückgängig gemacht",
   "intentStatus.reversed.hint": "Diese Zahlung zählt nicht mehr. Ware nicht ausliefern.",
   "intentStatus.action.review": "Prüfung öffnen",
-  "intentStatus.action.newLink": "Neuer Zahlungslink"
+  "intentStatus.action.newLink": "Neuer Zahlungslink",
+  "checkout.wrongNetworkTitle": "Senden Sie nur {asset} im Netzwerk {network}",
+  "checkout.wrongNetworkHelp": "Eine Überweisung in einem anderen Netzwerk oder Token bezahlt diese Bestellung nicht und kann verloren gehen. Ist es schon passiert, laden Sie unten den Beleg hoch.",
+  "checkout.poweredBy": "Bereitgestellt von {product}: Zahlungssoftware, nicht der Empfänger der Gelder.",
+  "checkout.paidTo": "Die Zahlung geht direkt an {merchant}.",
+  "checkout.regionUnavailable": "Diese Zahlungsseite ist in Ihrer Region nicht verfügbar",
+  "checkout.regionUnavailableHelp": "Wenn Sie das für einen Fehler halten, wenden Sie sich an den Verkäufer."
 } satisfies Messages;

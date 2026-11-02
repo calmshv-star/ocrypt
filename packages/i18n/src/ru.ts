@@ -1276,5 +1276,11 @@ export const ru = {
   "intentStatus.reversed.label": "Платёж аннулирован",
   "intentStatus.reversed.hint": "Этот платёж больше не учитывается. Не выдавайте товар.",
   "intentStatus.action.review": "Открыть разбор",
-  "intentStatus.action.newLink": "Новая ссылка на оплату"
+  "intentStatus.action.newLink": "Новая ссылка на оплату",
+  "checkout.wrongNetworkTitle": "Отправляйте только {asset} в сети {network}",
+  "checkout.wrongNetworkHelp": "Перевод в другой сети или другим токеном не оплатит заказ и может быть потерян. Если это уже случилось, загрузите чек ниже.",
+  "checkout.poweredBy": "Работает на {product} — это программа, а не получатель средств.",
+  "checkout.paidTo": "Платёж поступает напрямую продавцу: {merchant}.",
+  "checkout.regionUnavailable": "Страница оплаты недоступна в вашем регионе",
+  "checkout.regionUnavailableHelp": "Если вы считаете это ошибкой, свяжитесь с продавцом."
 } satisfies Messages;

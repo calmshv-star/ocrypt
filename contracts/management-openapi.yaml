@@ -43,6 +43,7 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/PublicPaymentLink' } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/RateLimited' }
+        '451': { $ref: '#/components/responses/RegionUnavailable' }
   /v1/public/payment-links/{token}/redeem:
     post:
       tags: [Public payment links]
@@ -72,6 +73,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '429': { $ref: '#/components/responses/RateLimited' }
+        '451': { $ref: '#/components/responses/RegionUnavailable' }
         '503': { $ref: '#/components/responses/DependencyUnavailable' }
   /v1/checkout-sessions/{token}:
     get:
@@ -92,6 +94,7 @@ paths:
         '304': { description: State is unchanged }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/RateLimited' }
+        '451': { $ref: '#/components/responses/RegionUnavailable' }
   /v1/checkout-sessions/{token}/select-route:
     post:
       tags: [Public checkout]
@@ -110,6 +113,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '429': { $ref: '#/components/responses/RateLimited' }
+        '451': { $ref: '#/components/responses/RegionUnavailable' }
   /v1/checkout-sessions/{token}/receipt:
     post:
       tags: [Public checkout]
@@ -136,6 +140,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '429': { $ref: '#/components/responses/RateLimited' }
+        '451': { $ref: '#/components/responses/RegionUnavailable' }
         '503': { $ref: '#/components/responses/DependencyUnavailable' }
   /v1/payment-links:
     post:
@@ -542,6 +547,7 @@ components:
     NotFound: { description: Unknown or unusable capability/resource; sensitive states are indistinguishable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
     Conflict: { description: State/version/idempotency conflict, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
     RateLimited: { description: Public capability rate limit exceeded, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
+    RegionUnavailable: { description: The visitor's region is refused by installation policy (unavailable_in_region), content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
     DependencyUnavailable: { description: Required database, KMS key, quote, address pool, DNS, or remote verifier unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
   schemas:
     ReceiptAnalysis:

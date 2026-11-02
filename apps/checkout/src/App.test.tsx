@@ -83,6 +83,9 @@ describe("hosted checkout", () => {
     expect(screen.getByTestId("payment-fiat-equivalent")).toHaveTextContent("≈ 1280.00 USD");
     expect(screen.getByText("This QR code contains only the receiving address. Enter the amount separately.")).toBeInTheDocument();
     expect(screen.getByTestId("payment-fee-warning")).toHaveTextContent("wallet or exchange may add or deduct its fee");
+    expect(screen.getByTestId("payment-network-warning")).toHaveTextContent("Send only USDT on Tron");
+    expect(screen.getByTestId("checkout-disclaimer")).toHaveTextContent("payment software, not the recipient of funds");
+    expect(screen.getByText("The payment goes directly to Demo Store.")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("update the payment status automatically");
     expect(screen.getByText(/Time remaining to pay:/)).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Select a payment route" })).not.toBeInTheDocument();
@@ -325,6 +328,22 @@ describe("hosted checkout", () => {
     expect(screen.queryByRole("link", { name: "Cancel and return" })).not.toBeInTheDocument();
     expect(document.querySelector('a[href*="evil.example"]')).toBeNull();
     await waitFor(() => expect(window.sessionStorage.getItem(`checkout-returns:${csToken}`)).not.toContain("/cancel"));
+  });
+
+  it("shows a neutral, final message when the region is refused and stops polling", async () => {
+    vi.stubEnv("VITE_CHECKOUT_FIXTURE_MODE", "false"); vi.stubEnv("VITE_CHECKOUT_API_URL", "https://merchant-api.example");
+    const refused = response({ error: { code: "unavailable_in_region", message: "This payment page is not available in your region." } }, 451);
+    const fetchMock = vi.fn().mockResolvedValue(refused);
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState({}, "", `/checkout?token=${csToken}`);
+    const view = renderCheckout();
+    expect(await screen.findByTestId("region-unavailable")).toHaveTextContent("not available in your region");
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    view.unmount();
+    window.history.replaceState({}, "", `/pay?token=${plToken}`);
+    renderCheckout();
+    expect(await screen.findByTestId("region-unavailable")).toBeInTheDocument();
   });
 
   it("shows stale-state feedback and recovers after a transient polling failure", async () => {

@@ -1276,5 +1276,11 @@ export const zhCN = {
   "intentStatus.reversed.label": "已撤销",
   "intentStatus.reversed.hint": "此付款不再计入。请勿发货。",
   "intentStatus.action.review": "打开审核",
-  "intentStatus.action.newLink": "新付款链接"
+  "intentStatus.action.newLink": "新付款链接",
+  "checkout.wrongNetworkTitle": "仅在 {network} 网络发送 {asset}",
+  "checkout.wrongNetworkHelp": "通过其他网络或其他代币转账无法支付此订单，且可能丢失。如已发生，请在下方上传凭证。",
+  "checkout.poweredBy": "由 {product} 提供技术支持：这是支付软件，不是收款方。",
+  "checkout.paidTo": "款项直接支付给 {merchant}。",
+  "checkout.regionUnavailable": "此付款页面在您所在的地区不可用",
+  "checkout.regionUnavailableHelp": "如果您认为这是错误，请联系卖家。"
 } satisfies Messages;

@@ -1276,5 +1276,11 @@ export const es = {
   "intentStatus.reversed.label": "Anulado",
   "intentStatus.reversed.hint": "Este pago ya no cuenta. No entregues el producto.",
   "intentStatus.action.review": "Abrir revisión",
-  "intentStatus.action.newLink": "Nuevo enlace de pago"
+  "intentStatus.action.newLink": "Nuevo enlace de pago",
+  "checkout.wrongNetworkTitle": "Envía solo {asset} en {network}",
+  "checkout.wrongNetworkHelp": "Una transferencia en otra red u otro token no paga este pedido y puede perderse. Si ya ocurrió, sube el comprobante abajo.",
+  "checkout.poweredBy": "Funciona con {product}: software de pagos, no el destinatario de los fondos.",
+  "checkout.paidTo": "El pago va directamente a {merchant}.",
+  "checkout.regionUnavailable": "Esta página de pago no está disponible en tu región",
+  "checkout.regionUnavailableHelp": "Si crees que es un error, contacta con el vendedor."
 } satisfies Messages;

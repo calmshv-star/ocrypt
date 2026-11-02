@@ -95,7 +95,7 @@ func main() {
 	}
 	service.EnableReceiptAnalysis(receiptAnalyzer)
 	authenticator := management.CombinedAuthenticator{Merchant: auth.Authenticator{Credentials: credentials, Nonces: nonces}, Replay: repository, AssertionKey: config.AssertionKey}
-	api, err := management.NewServer(service, authenticator, management.HTTPConfig{BodyLimit: config.BodyLimit, PublicPerMinute: config.PublicRateLimit})
+	api, err := management.NewServer(service, authenticator, management.HTTPConfig{BodyLimit: config.BodyLimit, PublicPerMinute: config.PublicRateLimit, RegionHeader: config.RegionHeader, BlockedRegions: config.BlockedRegions})
 	if err != nil {
 		slog.Error("management HTTP initialization failed", "error", err)
 		os.Exit(1)

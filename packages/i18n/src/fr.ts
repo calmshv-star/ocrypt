@@ -1276,5 +1276,11 @@ export const fr = {
   "intentStatus.reversed.label": "Invalidé",
   "intentStatus.reversed.hint": "Ce paiement ne compte plus. N’expédiez pas la marchandise.",
   "intentStatus.action.review": "Ouvrir l’examen",
-  "intentStatus.action.newLink": "Nouveau lien de paiement"
+  "intentStatus.action.newLink": "Nouveau lien de paiement",
+  "checkout.wrongNetworkTitle": "Envoyez uniquement {asset} sur {network}",
+  "checkout.wrongNetworkHelp": "Un virement sur un autre réseau ou avec un autre jeton ne règle pas cette commande et peut être perdu. Si c’est déjà fait, déposez le justificatif ci-dessous.",
+  "checkout.poweredBy": "Propulsé par {product} : logiciel de paiement, pas le destinataire des fonds.",
+  "checkout.paidTo": "Le paiement va directement à {merchant}.",
+  "checkout.regionUnavailable": "Cette page de paiement n’est pas disponible dans votre région",
+  "checkout.regionUnavailableHelp": "Si vous pensez qu’il s’agit d’une erreur, contactez le vendeur."
 } satisfies Messages;

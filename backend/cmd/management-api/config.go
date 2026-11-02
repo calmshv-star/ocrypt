@@ -22,6 +22,8 @@ type runtimeConfig struct {
 	ReceiptAIKey    []byte
 	BodyLimit       int64
 	PublicRateLimit int
+	RegionHeader    string
+	BlockedRegions  []string
 	VerificationTTL time.Duration
 	TLSCertFile     string
 	TLSKeyFile      string
@@ -79,6 +81,15 @@ func loadConfig() (runtimeConfig, error) {
 		if err != nil {
 			return runtimeConfig{}, errors.New("MANAGEMENT_PUBLIC_RATE_PER_MINUTE must be an integer")
 		}
+	}
+	config.RegionHeader = strings.TrimSpace(os.Getenv("MANAGEMENT_REGION_HEADER"))
+	for _, code := range strings.Split(os.Getenv("MANAGEMENT_BLOCKED_REGIONS"), ",") {
+		if code = strings.ToUpper(strings.TrimSpace(code)); code != "" {
+			config.BlockedRegions = append(config.BlockedRegions, code)
+		}
+	}
+	if len(config.BlockedRegions) > 0 && config.RegionHeader == "" {
+		return runtimeConfig{}, errors.New("MANAGEMENT_BLOCKED_REGIONS requires MANAGEMENT_REGION_HEADER set by the trusted edge proxy")
 	}
 	if raw := strings.TrimSpace(os.Getenv("MANAGEMENT_WEBHOOK_VERIFY_TIMEOUT")); raw != "" {
 		config.VerificationTTL, err = time.ParseDuration(raw)

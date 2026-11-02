@@ -1274,7 +1274,13 @@ export const en = {
   "intentStatus.reversed.label": "Reversed",
   "intentStatus.reversed.hint": "This payment no longer counts. Do not ship goods.",
   "intentStatus.action.review": "Open review",
-  "intentStatus.action.newLink": "New payment link"
+  "intentStatus.action.newLink": "New payment link",
+  "checkout.wrongNetworkTitle": "Send only {asset} on {network}",
+  "checkout.wrongNetworkHelp": "A transfer in another network or token does not pay this order and may be lost. If it already happened, upload the receipt below.",
+  "checkout.poweredBy": "Powered by {product}: payment software, not the recipient of funds.",
+  "checkout.paidTo": "The payment goes directly to {merchant}.",
+  "checkout.regionUnavailable": "This payment page is not available in your region",
+  "checkout.regionUnavailableHelp": "If you think this is a mistake, contact the seller."
 } as const;
 
 export type MessageKey = keyof typeof en;
