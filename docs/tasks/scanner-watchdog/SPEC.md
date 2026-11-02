@@ -28,12 +28,12 @@ changes, quorum or interval changes, deploying to production.
 
 | ID | Behavior/input/fault | Expected result | Test or manual check | Evidence |
 | --- | --- | --- | --- | --- |
-| W1 | Metrics text | Lag parsed from `merchant_scanner_head_lag_blocks` only | `test_parse_lag_reads_only_the_scanner_lag_gauge` | |
-| W2 | Ready / 503 / lagging / connection error | Classified ready, not ready, behind, unreachable | `test_probe_classifies_*`, `test_real_http_probe_against_a_stalled_scanner` | |
-| W3 | Continuous bad state | No alert before 300 s, one alert at 300 s, repeat after 3600 s, recovery message, state reset | `test_alert_after_threshold_*`, `test_short_blip_*` | |
-| W4 | Telegram and webhook delivery | Exact Bot API URL and payload; webhook gets `{"text": ...}`; failed sends retried next run | `test_run_once_*`, `test_failed_notification_*`, `test_webhook_*` | |
-| W5 | Secrets | Token never in stdout, stderr, state or status files | `test_run_once_alerts_through_telegram_and_writes_status` | |
-| W6 | Invalid config | No targets, non-HTTP URL, no notifier, duplicate names rejected | `test_invalid_configuration_is_rejected` | |
+| W1 | Metrics text | Lag parsed from `merchant_scanner_head_lag_blocks` only | `test_parse_lag_reads_only_the_scanner_lag_gauge` || tests pass incl. non-finite values |
+| W2 | Ready / 503 / lagging / connection error | Classified ready, not ready, behind, unreachable | `test_probe_classifies_*`, `test_real_http_probe_against_a_stalled_scanner` || tests pass incl. http.client errors and a real HTTP stalled scanner |
+| W3 | Continuous bad state | No alert before 300 s, one alert at 300 s, repeat after 3600 s, recovery message, state reset | `test_alert_after_threshold_*`, `test_short_blip_*` || tests pass incl. run_once repeat/recovery, clock skew, unobserved gaps, removed targets |
+| W4 | Telegram and webhook delivery | Exact Bot API URL and payload; webhook gets `{"text": ...}`; failed sends retried next run | `test_run_once_*`, `test_failed_notification_*`, `test_webhook_*` || tests pass: exact payload, per-channel outboxes, one failing channel neither spams nor silences the other, redirect not counted |
+| W5 | Secrets | Token never in stdout, stderr, state or status files | `test_run_once_alerts_through_telegram_and_writes_status` || tests pass on success and failure paths with real InvalidURL messages |
+| W6 | Invalid config | No targets, non-HTTP URL, no notifier, duplicate names rejected | `test_invalid_configuration_is_rejected` || tests pass; each invalid case now has a notifier so it tests its own rule |
 
 For financial changes include relevant exact-money, negative, duplicate/replay,
 concurrency, tenant, finality, and external-delivery cases.

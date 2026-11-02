@@ -15,3 +15,15 @@ agent assumptions. Amend the specification when accepted behavior changes.
 - Readiness plus the exported lag gauge only: no database credentials, so the
   watchdog cannot affect funds or cursors.
 - A failed notification keeps the alert pending and retries next run.
+
+## 2026-11-03 — independent review outcome
+
+All findings accepted and fixed: any transport error now means "unreachable"
+and one target or tick can no longer stop the loop; each channel has its own
+bounded outbox; secrets are validated at start and never echoed; webhook
+redirects fail; ports, origins, chat IDs and config shapes are validated;
+status.json is 0644; clock steps backwards and unobserved gaps no longer fake
+durations; a removed alerting target is reported; a set lag limit with an
+unreadable lag is a problem; corrupt state is ignored; reads have a total
+deadline; every tick logs one line. The README now prepares UID 65532
+ownership, uses --init, log rotation and a pinned python:3.12.16-alpine3.24.
