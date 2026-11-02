@@ -11,8 +11,8 @@ snapshot with the helper before assigning implementation workers.
 - [x] Tests authored; expected failures inspected (or artifact validation defined).
 - [x] Dependencies, writer ownership, and common base assigned (serial, orchestrator only).
 - [x] Implementation complete and focused checks pass.
-- [ ] Integrated diff independently reviewed; relevant checks repeated.
-- [ ] Completion evidence and remaining runtime/deployment limits recorded.
+- [x] Integrated diff independently reviewed; relevant checks repeated.
+- [x] Completion evidence and remaining runtime/deployment limits recorded.
 
 ## Assignments
 
@@ -22,11 +22,13 @@ snapshot with the helper before assigning implementation workers.
 ## Evidence
 
 - Before implementation (dc35a1b): collection failed, script missing.
-- After: 17 probe tests pass, including a real local JSON-RPC round trip.
-- Live run 2026-11-03 against five public BSC endpoints: four agree on both
-  ranges, bloXroute returns http 403 (table in the deploy README).
+- After review fixes: 39 probe tests pass, including local HTTP nodes for
+  403, slow-drip deadline and `main()`.
+- Live run recorded verbatim with UTC time and revision in the deploy README:
+  four of five public BSC endpoints agree on both ranges; bloXroute returns
+  http 403 on `eth_getLogs`.
 
 ## Resume / next action
 
-Implementation done. Next: independent review; operators run it weekly and
+Implementation and review fixes done; operators run it weekly and
 before proposing a provider through the admin flow.

@@ -9,27 +9,42 @@ chain data only and never changes provider bindings.
 python3 scripts/rpc_provider_probe.py --config deploy/standalone/rpc-provider-probe/bsc.example.json
 ```
 
-The probe takes the median head across endpoints, digests each answer by
-(blockHash, transactionHash, logIndex) and lists endpoints that match the
-unique majority on both ranges. It exits 1 when fewer than `min_agreeing`
-endpoints agree, so a weekly systemd timer or cron job can alert on it.
-Endpoints with API keys use `url_file` (a file holding the URL); URLs are never
-printed, and errors are reduced to `http N`, `rpc error N`, `timeout`,
-`unreachable` or `invalid response`.
+The probe checks each endpoint's `eth_chainId`, takes the lower median of the
+valid heads, keeps the recent range at least `finality_blocks` below it, and
+digests each answer by (blockHash, transactionHash, logIndex). An endpoint
+agrees only when its non-empty answer matches a strict majority of the
+answering endpoints on both ranges; empty answers are reported as
+`empty (not evidence)`, because pruned or wrong-chain nodes often return `[]`.
+It always prints a table and, with `--json PATH`, also writes the JSON report.
+It exits 1 when fewer than `min_agreeing` (at least 2) endpoints agree, so a
+weekly systemd timer or cron job can alert on it. Endpoints with API keys use
+`url_file` (a file holding the URL); URLs are never printed, and errors are
+reduced to `http N`, `rpc error N` (or `rpc error unknown`), `timeout`,
+`unreachable`, `invalid response`, `response too large` or `wrong chain`.
+Each request has a 30-second total deadline.
 
 Set `archive_age_blocks` to roughly 72 hours of blocks for the chain (BSC:
-345600 at 0.75 s blocks) and `recent_offset` beyond the finality depth.
+345600 at 0.75 s blocks); `recent_offset` must be at least `span +
+finality_blocks`.
 
-## Evidence, 2026-11-03 (BSC, USDT Transfer logs, 10-block windows)
+## Evidence
 
-| Endpoint | Recent | ~72 h old |
-| --- | --- | --- |
-| `rpc-bsc.48.club` | agrees (309 logs) | agrees (390 logs) |
-| `public-bsc-mainnet.fastnode.io` | agrees | agrees |
-| `1rpc.io/bnb` | agrees | agrees |
-| `bsc-rpc.publicnode.com` | agrees | agrees |
-| `bsc.rpc.blxrbdn.com` | `http 403` | `http 403` |
+Raw output of `python3 scripts/rpc_provider_probe.py --config
+deploy/standalone/rpc-provider-probe/bsc.example.json` at 2026-11-02T21:26Z, revision
+`ed3643e` (USDT Transfer logs, 10-block windows, archive range ~72 h old):
 
-On 2026-10-22 `bsc-rpc.publicnode.com` refused a range about 400000 blocks old
-(`Archive requests require a personal token`), so its archival depth is close
-to the 72-hour window; rerun the probe before relying on it for catch-up.
+```text
+bsc: OK (4 of 2 required agree; reference head 131312738)
+  blxr                 head 131312738    recent: http 403; archive: http 403
+  club48               head 131312740    recent: 317 logs agrees; archive: 507 logs agrees
+  fastnode             head 131312742    recent: 317 logs agrees; archive: 507 logs agrees
+  onerpc               head 131312734    recent: 317 logs agrees; archive: 507 logs agrees
+  publicnode           head 131312737    recent: 317 logs agrees; archive: 507 logs agrees
+exit=0
+```
+
+bloXroute answers `eth_chainId` and `eth_blockNumber` but refuses
+`eth_getLogs` with HTTP 403. On 2026-10-22, before this tool existed,
+`bsc-rpc.publicnode.com` refused a range about 400000 blocks old with an
+archive-token error, so its archival depth is close to the 72-hour window;
+rerun the probe before relying on it for catch-up.

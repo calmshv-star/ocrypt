@@ -2,12 +2,14 @@
   "chains": [
     {
       "name": "bsc",
+      "chain_id": 56,
       "filter": {
         "address": "0x55d398326f99059fF775485246999027B3197955",
         "topics": [
           "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
         ]
       },
+      "finality_blocks": 15,
       "recent_offset": 200,
       "archive_age_blocks": 345600,
       "span": 10,
