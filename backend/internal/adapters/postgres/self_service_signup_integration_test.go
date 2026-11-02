@@ -48,6 +48,24 @@ func (f *faultDatabase) selfServiceSignup(t *testing.T) {
 		}
 		return user, tenant, merchant, created, true
 	}
+	// REG-5: disposable mailbox domains (and their subdomains) cannot register
+	// and do not consume the request.
+	for _, disposable := range []string{"someone@mailinator.com", "someone@eu.Mailinator.com", "someone@yopmail.com"} {
+		var rows int
+		if err := admin.QueryRow(f.ctx, `SELECT count(*) FROM register_self_service_merchant($1,$2,$3,$4,'Temp',$5,$6,$7,$8,$9)`,
+			requestID, issuer, "temp-"+faultID(t), disposable, faultID(t), faultID(t), faultID(t), faultID(t), now).Scan(&rows); err != nil {
+			t.Fatal(err)
+		}
+		if rows != 0 {
+			t.Fatalf("%s registered with a disposable mailbox", disposable)
+		}
+	}
+	if n := f.count(t, `SELECT count(*) FROM admin_signup_requests WHERE id=$1 AND consumed_at IS NULL`, requestID); n != 1 {
+		t.Fatal("a disposable-mailbox attempt must not consume the signup request")
+	}
+	if n := f.count(t, `SELECT count(*) FROM signup_blocked_email_domains WHERE domain='notmailinator.com'`); n != 0 {
+		t.Fatal("fixture assumption broken")
+	}
 	user, tenant, merchant, created, found := register(requestID)
 	if !found || !created {
 		t.Fatal("first registration must create the account")

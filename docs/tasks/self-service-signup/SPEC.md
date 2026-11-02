@@ -60,6 +60,7 @@ and a payment has been received; a real live-mode switch is billing-stage work.
 | S14 | Signup with password-only mode; TTL outside 5m..1h | Configuration refused | `TestSignupNeedsABoundedTTLAndMFA` | passes |
 | S15 | Expired unconsumed requests; control/bidi characters; outage | Purged on the next call; rejected; 503 not 422 | live `S1`, `TestBeginSignupRejectsInvalidOrScreenedForms`, `TestSignupRouteIsSameOriginStrictAndOpaque` | passes |
 | S16 | Blocked country chosen in the form | Reason shown before submit, submit disabled | `Signup.test.tsx` | passes |
+| S17 | REG-5: registration with a disposable mailbox (domain or subdomain, any case) | No account, request not consumed | live `S1` (failed first, then passes) | passes |
 
 For financial changes include relevant exact-money, negative, duplicate/replay,
 concurrency, tenant, finality, and external-delivery cases.

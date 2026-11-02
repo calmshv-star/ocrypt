@@ -41,6 +41,22 @@ INSERT INTO signup_blocked_countries(country,reason) VALUES
   ('KP','comprehensive sanctions'),('SY','comprehensive sanctions'),
   ('RU','closed pending a legal opinion on Federal Law 259-FZ');
 
+-- REG-5: disposable mailbox providers. A domain also blocks its subdomains.
+-- Operators extend this table; the seed lists widely known providers.
+CREATE TABLE signup_blocked_email_domains (
+  domain text PRIMARY KEY CHECK (domain=lower(domain) AND domain ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$' AND length(domain)<=253)
+);
+INSERT INTO signup_blocked_email_domains(domain) VALUES
+  ('10minutemail.com'),('20minutemail.com'),('33mail.com'),('dispostable.com'),('dropmail.me'),
+  ('emailondeck.com'),('fakeinbox.com'),('getairmail.com'),('getnada.com'),('guerrillamail.biz'),
+  ('guerrillamail.com'),('guerrillamail.de'),('guerrillamail.info'),('guerrillamail.net'),('guerrillamail.org'),
+  ('guerrillamailblock.com'),('harakirimail.com'),('mail-temp.com'),('mailcatch.com'),('maildrop.cc'),
+  ('mailinator.com'),('mailinator.net'),('mailnesia.com'),('mintemail.com'),('moakt.com'),
+  ('mohmal.com'),('mytemp.email'),('sharklasers.com'),('spambox.us'),('spamgourmet.com'),
+  ('temp-mail.io'),('temp-mail.org'),('tempail.com'),('tempmail.dev'),('tempmail.net'),
+  ('tempmailo.com'),('tempr.email'),('throwawaymail.com'),('tmpmail.net'),('tmpmail.org'),
+  ('trashmail.com'),('trashmail.de'),('trashmail.net'),('yopmail.com'),('yopmail.fr'),('yopmail.net');
+
 CREATE TABLE signup_business_types (
   business_type text PRIMARY KEY CHECK (business_type ~ '^[a-z][a-z_]{1,39}$'),
   allowed boolean NOT NULL,
@@ -168,6 +184,12 @@ BEGIN
     RETURN;
   END IF;
   IF display='' THEN display := normalized_email; END IF;
+  -- A disposable mailbox neither registers nor consumes the request.
+  IF EXISTS (SELECT 1 FROM public.signup_blocked_email_domains d
+              WHERE split_part(normalized_email,'@',2)=d.domain
+                 OR split_part(normalized_email,'@',2) LIKE '%.'||d.domain) THEN
+    RETURN;
+  END IF;
   SELECT * INTO req FROM public.admin_signup_requests r
    WHERE r.id=p_request AND r.consumed_at IS NULL AND r.expires_at>p_at FOR UPDATE;
   IF NOT FOUND THEN RETURN; END IF;

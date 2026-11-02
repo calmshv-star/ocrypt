@@ -57,3 +57,13 @@ Accepted findings and what changed:
 Not changed: a failed OIDC callback still answers with a JSON problem for
 every purpose (login, step-up, invitation, signup). A friendly landing page is
 general cabinet work and is tracked for the cabinet stage.
+
+## 2026-11-03 — disposable mailboxes (REG-5)
+
+`signup_blocked_email_domains` lists widely known disposable mailbox
+providers; a listed domain also blocks its subdomains. The check runs in
+`register_self_service_merchant` after OIDC, so such an identity gets no
+account and the signup request stays unconsumed. The seed is a hand-written
+list of well-known providers, not a copied third-party dataset; operators add
+domains with plain SQL. The registrant currently sees the generic callback
+failure (see the callback limitation above).

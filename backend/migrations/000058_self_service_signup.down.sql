@@ -22,6 +22,7 @@ ALTER TABLE admin_login_attempts
       AND expected_email=lower(expected_email) AND length(expected_email) BETWEEN 3 AND 320)
   );
 DROP TABLE IF EXISTS admin_signup_requests;
+DROP TABLE IF EXISTS signup_blocked_email_domains;
 DROP TABLE IF EXISTS signup_business_types;
 DROP TABLE IF EXISTS signup_blocked_countries;
 ALTER TABLE admin_role_bindings DROP CONSTRAINT admin_role_binding_not_merchant_owner;
