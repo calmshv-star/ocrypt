@@ -11,8 +11,8 @@ snapshot with the helper before assigning implementation workers.
 - [x] Tests authored; expected failures inspected (or artifact validation defined).
 - [x] Dependencies, writer ownership, and common base assigned (serial, orchestrator only; base origin/main 1fbfbf1).
 - [x] Implementation complete and focused checks pass.
-- [ ] Integrated diff independently reviewed; relevant checks repeated.
-- [ ] Completion evidence and remaining runtime/deployment limits recorded.
+- [x] Integrated diff independently reviewed; relevant checks repeated.
+- [x] Completion evidence and remaining runtime/deployment limits recorded.
 
 ## Assignments
 
@@ -34,12 +34,17 @@ snapshot with the helper before assigning implementation workers.
 - Dockerfile RUN logic exercised with a fake `go`: full -> `-tags ""`,
   noncustodial -> `-tags noncustodial`, noncustodial financial-worker and an
   unknown edition exit 2.
-- Not run locally: `docker build`, hadolint (no Docker on this machine);
+- After review fixes: all of the above rerun and pass; hadolint and shellcheck
+  pass on the changed Dockerfile and script; actionlint passes on ci.yml;
+  a mutation leaking the financial proxy into noncustodial admin-api is
+  detected by the symbol check.
+- Not run locally: `docker build` (no Docker on this machine; covered by the
+  new CI `noncustodial-image` job);
   PHP/Java/.NET and web checks (no change); `pnpm verify` live gate.
 
 ## Resume / next action
 
-Implementation done. Next: independent review, PR, then follow-ups —
+Implementation and review fixes done. Next: PR, then follow-ups —
 DB-level `watch_only` enforcement, Helm/Compose noncustodial profile, CI image
 matrix for the noncustodial edition. Note: every container-image job currently
 fails Trivy on Go 1.26.9 stdlib CVE-2026-111943 (fixed in 1.26.10); this is

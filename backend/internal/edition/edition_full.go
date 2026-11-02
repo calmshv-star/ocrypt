@@ -7,6 +7,3 @@ package edition
 
 // NonCustodial is true only in the noncustodial edition.
 const NonCustodial = false
-
-// Name is the edition label recorded in logs and images.
-const Name = "full"

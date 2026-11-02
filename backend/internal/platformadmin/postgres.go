@@ -79,6 +79,9 @@ func (r *PostgresRepository) AuthorizedPlatformGrants(ctx context.Context, actor
 			if err = rows.Scan(&grant.Permission, &grant.TenantID); err != nil {
 				return err
 			}
+			if !editionAllowsGrant(grant.Permission) {
+				continue
+			}
 			grants = append(grants, grant)
 		}
 		return rows.Err()

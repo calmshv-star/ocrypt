@@ -21,3 +21,28 @@ agent assumptions. Amend the specification when accepted behavior changes.
   navigation follow from one place.
 - Deferred: DB-level `watch_only` enforcement, Helm/Compose profiles.
 - Serial implementation by the orchestrator; independent review by a subagent.
+
+## 2026-11-02 — independent review outcome
+
+An independent reviewer found no full-edition regression and no noncustodial
+path that moves funds or calls a hosted provider. Accepted and fixed:
+
+- The Dockerfile check did not require `-tags "${build_tags}"`; it now does,
+  and a CI job builds a noncustodial admin-api image, reads `go version -m`
+  for `-tags=noncustodial`, and proves `financial-worker` refuses to build.
+- One combined pattern for the three remote clients let renames slip through
+  the self-test; patterns are now per type, include constructors, and a
+  package-wide rule rejects any non-type symbol from `financialapi`,
+  `treasury` and `refunds`. A deliberate leak was detected before the fix
+  was kept.
+- Platform assertions now drop `provider_config:*`, and platform-admin-api
+  does not serve the provider-configuration plane (defence in depth; the BFF
+  already denied the route).
+- `api` rejects hosted configuration in every environment.
+- Full-edition behavior of the extracted hooks is pinned by tests.
+
+Accepted as is: admin-api and api now log the detailed configuration error as
+an attribute under one message (exit codes and order unchanged; nothing in the
+repository depends on the old strings). Management payment links with a
+`hosted_gateway` route remain possible only with an admitted hosted
+configuration in the database; database-level enforcement stays a follow-up.

@@ -19,6 +19,7 @@ import (
 	"github.com/calmshv-star/ocrypt/backend/internal/application"
 	"github.com/calmshv-star/ocrypt/backend/internal/auth"
 	"github.com/calmshv-star/ocrypt/backend/internal/config"
+	"github.com/calmshv-star/ocrypt/backend/internal/edition"
 	"github.com/calmshv-star/ocrypt/backend/internal/hostedproviders"
 	"github.com/calmshv-star/ocrypt/backend/internal/httpapi"
 	"github.com/calmshv-star/ocrypt/backend/internal/rategateway"
@@ -42,6 +43,14 @@ func main() {
 	var sandboxService *sandbox.Service
 	var hostedRuntime *hostedproviders.Runtime
 	var nonceCleaner expiredNonceCleaner
+	if edition.NonCustodial {
+		// Reject hosted-provider configuration in every environment, including
+		// local development where the PostgreSQL branch below never runs.
+		if _, err := hostedProviderRuntime(os.Getenv, nil); err != nil {
+			slog.Error("hosted provider runtime configuration failed", "error", err)
+			os.Exit(1)
+		}
+	}
 	if cfg.Environment == "production" || cfg.Environment == "test" || cfg.Environment == "sandbox" {
 		pool, err := postgres.NewPool(context.Background(), cfg.DatabaseURL)
 		if err != nil {
