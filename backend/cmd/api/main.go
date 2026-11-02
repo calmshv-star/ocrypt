@@ -19,6 +19,7 @@ import (
 	"github.com/calmshv-star/ocrypt/backend/internal/application"
 	"github.com/calmshv-star/ocrypt/backend/internal/auth"
 	"github.com/calmshv-star/ocrypt/backend/internal/config"
+	"github.com/calmshv-star/ocrypt/backend/internal/edition"
 	"github.com/calmshv-star/ocrypt/backend/internal/hostedproviders"
 	"github.com/calmshv-star/ocrypt/backend/internal/httpapi"
 	"github.com/calmshv-star/ocrypt/backend/internal/rategateway"
@@ -42,6 +43,14 @@ func main() {
 	var sandboxService *sandbox.Service
 	var hostedRuntime *hostedproviders.Runtime
 	var nonceCleaner expiredNonceCleaner
+	if edition.NonCustodial {
+		// Reject hosted-provider configuration in every environment, including
+		// local development where the PostgreSQL branch below never runs.
+		if _, err := hostedProviderRuntime(os.Getenv, nil); err != nil {
+			slog.Error("hosted provider runtime configuration failed", "error", err)
+			os.Exit(1)
+		}
+	}
 	if cfg.Environment == "production" || cfg.Environment == "test" || cfg.Environment == "sandbox" {
 		pool, err := postgres.NewPool(context.Background(), cfg.DatabaseURL)
 		if err != nil {
@@ -78,22 +87,17 @@ func main() {
 			os.Exit(1)
 		}
 		persistedPlanner := httpapi.PersistedPlanner{Source: postgresStore}
-		hostedMode := os.Getenv("HOSTED_PROVIDER_RUNTIME")
-		hostedSecretDirectory := os.Getenv("HOSTED_PROVIDER_SECRET_DIR")
-		if hostedMode != "" || hostedSecretDirectory != "" {
-			if hostedMode != "postgres" || hostedSecretDirectory == "" {
-				slog.Error("HOSTED_PROVIDER_RUNTIME=postgres and HOSTED_PROVIDER_SECRET_DIR must be configured together")
-				os.Exit(1)
-			}
-			hostedRuntime = &hostedproviders.Runtime{Repository: postgresStore, Adapter: hostedproviders.NewHTTPAdapter(hostedproviders.DirectorySecrets{Root: hostedSecretDirectory}), ClaimLease: 30 * time.Second}
-			persistedPlanner.Hosted = hostedRuntime
-		}
-		if os.Getenv("HOSTED_PROVIDER_REQUIRED") == "true" && hostedRuntime == nil {
-			slog.Error("hosted provider runtime is required but not configured")
+		hostedRuntime, err = hostedProviderRuntime(os.Getenv, postgresStore)
+		if err != nil {
+			slog.Error("hosted provider runtime configuration failed", "error", err)
 			os.Exit(1)
+		}
+		if hostedRuntime != nil {
+			persistedPlanner.Hosted = hostedRuntime
 		}
 		planner = persistedPlanner
 		probes := readinessGroup{pool, postgresStore}
+		probes = append(probes, editionReadiness(postgresStore)...)
 		if hostedRuntime != nil {
 			probes = append(probes, hostedProviderProbe{store: postgresStore})
 		}

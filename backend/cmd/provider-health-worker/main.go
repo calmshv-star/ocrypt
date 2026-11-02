@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/adapters/postgres"
-	"github.com/calmshv-star/ocrypt/backend/internal/hostedproviders"
 	"github.com/calmshv-star/ocrypt/backend/internal/platformadmin"
 	"github.com/calmshv-star/ocrypt/backend/internal/platformruntime"
 	"github.com/calmshv-star/ocrypt/backend/internal/providerconfig"
@@ -64,7 +63,7 @@ func main() {
 		slog.Error("provider configuration probe persistence is not ready", "error", pingErr)
 		os.Exit(1)
 	}
-	configProber, err := providerconfig.NewHTTPProber(hostedproviders.DirectorySecrets{Root: config.secretDir})
+	hostedAdapter, configProber, err := hostedProbeDependencies(config.secretDir)
 	if err != nil {
 		slog.Error("provider configuration prober initialization failed", "error", err)
 		os.Exit(1)
@@ -77,7 +76,10 @@ func main() {
 	if configBatch > 64 {
 		configBatch = 64
 	}
-	configWorker := providerconfig.Worker{Repository: providerConfigRepository, Prober: configProber, Owner: config.workerID, BatchSize: configBatch, Concurrency: configConcurrency}
+	var configWorker *providerconfig.Worker
+	if configProber != nil {
+		configWorker = &providerconfig.Worker{Repository: providerConfigRepository, Prober: configProber, Owner: config.workerID, BatchSize: configBatch, Concurrency: configConcurrency}
+	}
 	platformRepository, err := platformadmin.NewPostgresRepository(pool)
 	if err != nil {
 		slog.Error("provider health runtime reader initialization failed", "error", err)
@@ -93,7 +95,7 @@ func main() {
 		Service: service, Owner: config.workerID, BatchSize: config.batchSize, Concurrency: config.concurrency,
 		Prober: platformruntime.ProviderHealthProber{
 			Reader: platformRepository, SecretDir: config.secretDir, HostedLoader: providerRepository,
-			HostedAdapter: hostedproviders.NewHTTPAdapter(hostedproviders.DirectorySecrets{Root: config.secretDir}),
+			HostedAdapter: hostedAdapter,
 		},
 		Observer: probeMetrics{registry: metrics},
 	}
@@ -111,17 +113,19 @@ func main() {
 	}()
 	run := func() {
 		started := time.Now()
-		configCount, configErr := configWorker.RunOnce(ctx)
-		if configErr != nil {
-			metrics.ObserveCycle("provider_config_probe", "failure", 0, time.Since(started))
-			slog.Error("provider configuration probe cycle failed", "error", configErr)
-			return
+		if configWorker != nil {
+			configCount, configErr := configWorker.RunOnce(ctx)
+			if configErr != nil {
+				metrics.ObserveCycle("provider_config_probe", "failure", 0, time.Since(started))
+				slog.Error("provider configuration probe cycle failed", "error", configErr)
+				return
+			}
+			configOutcome := "idle"
+			if configCount > 0 {
+				configOutcome = "success"
+			}
+			metrics.ObserveCycle("provider_config_probe", configOutcome, configCount, time.Since(started))
 		}
-		configOutcome := "idle"
-		if configCount > 0 {
-			configOutcome = "success"
-		}
-		metrics.ObserveCycle("provider_config_probe", configOutcome, configCount, time.Since(started))
 		count, runErr := worker.RunOnce(ctx)
 		if runErr != nil {
 			metrics.ObserveCycle("provider_health", "failure", 0, time.Since(started))

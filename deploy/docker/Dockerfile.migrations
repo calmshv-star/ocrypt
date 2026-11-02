@@ -7,8 +7,10 @@ LABEL org.opencontainers.image.title="Merchant Platform schema migrator"
 # adds an unused executable to the attack surface.
 # hadolint ignore=DL3018
 RUN apk add --no-cache --upgrade \
+      'brotli-libs>=1.2.1-r0' \
       'c-ares>=1.34.8-r0' \
       'libcrypto3>=3.5.8-r0' \
+      'libcurl>=8.23.0-r0' \
       'libssl3>=3.5.8-r0' \
       'libuuid>=2.42.3-r0' \
     && rm -f /usr/local/bin/gosu

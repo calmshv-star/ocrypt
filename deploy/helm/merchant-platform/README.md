@@ -4,6 +4,17 @@ The chart deploys isolated API/BFF/control/financial/rate/scanner/provider-healt
 one deployment for every queue role. It creates no Secret, database, login role,
 public LoadBalancer, signing key, service identity, or implicit platform-outbox claim.
 
+## Editions
+
+`edition: full` (default) is the self-hosted edition. The hosted SaaS uses the
+noncustodial edition: build every image with `EDITION=noncustodial` and apply
+`values-noncustodial.yaml` after the environment values. The chart then
+rejects financial workloads, `FINANCIAL_*` and `HOSTED_PROVIDER_*`
+configuration, the `hosted` worker role and financial bridge secrets, and
+removes the admin egress rule to `financial-api`. The noncustodial `api`
+keeps `/readyz` closed while any active wallet is not `watch_only` or carries
+a signer reference (migration 000057).
+
 ## Admission prerequisites
 
 - Kubernetes 1.30+, a NetworkPolicy-enforcing CNI, managed PostgreSQL with TLS/PITR, and tested restore evidence.

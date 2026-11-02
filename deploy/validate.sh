@@ -435,6 +435,17 @@ helm lint "$chart_path" --values "$chart_path/ci-values.yaml"
 rendered_manifest="$(mktemp -t merchant-platform-rendered.XXXXXX.yaml)"
 helm template merchant "$chart_path" --namespace merchant --values "$chart_path/ci-values.yaml" >"$rendered_manifest"
 kubeconform -strict -summary "$rendered_manifest"
+helm lint "$chart_path" --values "$chart_path/ci-values.yaml" --values "$chart_path/values-noncustodial.yaml"
+helm template merchant "$chart_path" --namespace merchant --values "$chart_path/ci-values.yaml" --values "$chart_path/values-noncustodial.yaml" >"$rendered_manifest"
+kubeconform -strict -summary "$rendered_manifest"
+if grep -Eq 'FINANCIAL_INTERNAL|merchant-platform-financial|component: financial-api' "$rendered_manifest"; then
+  echo "noncustodial Helm render still references the financial bridge" >&2
+  exit 1
+fi
+if helm template merchant "$chart_path" --namespace merchant --values "$chart_path/ci-values.yaml" --values "$chart_path/values-noncustodial.yaml" --set workloads.financial-worker.enabled=true >/dev/null 2>&1; then
+  echo "noncustodial Helm values unexpectedly admitted financial-worker" >&2
+  exit 1
+fi
 rm -f "$rendered_manifest"
 POSTGRES_PASSWORD=ci docker compose -f infra/compose.yaml config --quiet
 echo "full deployment validation passed"

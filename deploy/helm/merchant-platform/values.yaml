@@ -1,3 +1,7 @@
+# full = self-hosted edition. noncustodial = SaaS edition: images built with
+# EDITION=noncustodial, no financial workloads, no FINANCIAL_* or hosted-provider
+# configuration (see values-noncustodial.yaml).
+edition: full
 nameOverride: ""
 fullnameOverride: ""
 
