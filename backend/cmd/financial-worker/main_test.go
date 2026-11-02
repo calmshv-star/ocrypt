@@ -1,3 +1,5 @@
+//go:build !noncustodial
+
 package main
 
 import "testing"

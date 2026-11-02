@@ -139,30 +139,8 @@ func main() {
 		slog.Error("merchant settings BFF bridge registration failed", "error", err)
 		os.Exit(1)
 	}
-	financialCAPEM, err := os.ReadFile(config.FinancialCAFile)
-	if err != nil {
-		slog.Error("financial BFF CA file is unavailable")
-		os.Exit(1)
-	}
-	financialRoots := x509.NewCertPool()
-	if !financialRoots.AppendCertsFromPEM(financialCAPEM) {
-		slog.Error("financial BFF CA file contains no certificates")
-		os.Exit(1)
-	}
-	financialCertificate, err := tls.LoadX509KeyPair(config.FinancialClientCertFile, config.FinancialClientKeyFile)
-	if err != nil {
-		slog.Error("financial BFF client certificate is unavailable")
-		os.Exit(1)
-	}
-	financialTransport := &http.Transport{Proxy: nil, ForceAttemptHTTP2: true, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, MaxVersion: tls.VersionTLS13, RootCAs: financialRoots, ServerName: config.FinancialServerName, Certificates: []tls.Certificate{financialCertificate}}, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 15 * time.Second}
-	financialClient := &http.Client{Transport: financialTransport, Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	financialProxy, err := admin.NewTrustedFinancialProxy(config.FinancialTarget, config.FinancialAssertionKey, financialClient, repository)
-	if err != nil {
-		slog.Error("financial BFF bridge initialization failed", "error", err)
-		os.Exit(1)
-	}
-	if err = api.EnableFinancialProxy(financialProxy); err != nil {
-		slog.Error("financial BFF bridge registration failed", "error", err)
+	if err = enableFinancialProxy(api, config, repository); err != nil {
+		slog.Error("financial BFF bridge setup failed", "error", err)
 		os.Exit(1)
 	}
 	server := &http.Server{Addr: config.HTTPAddress, Handler: telemetry.New("admin-api").Handler(api.Handler()), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}

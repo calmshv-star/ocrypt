@@ -78,19 +78,13 @@ func main() {
 			os.Exit(1)
 		}
 		persistedPlanner := httpapi.PersistedPlanner{Source: postgresStore}
-		hostedMode := os.Getenv("HOSTED_PROVIDER_RUNTIME")
-		hostedSecretDirectory := os.Getenv("HOSTED_PROVIDER_SECRET_DIR")
-		if hostedMode != "" || hostedSecretDirectory != "" {
-			if hostedMode != "postgres" || hostedSecretDirectory == "" {
-				slog.Error("HOSTED_PROVIDER_RUNTIME=postgres and HOSTED_PROVIDER_SECRET_DIR must be configured together")
-				os.Exit(1)
-			}
-			hostedRuntime = &hostedproviders.Runtime{Repository: postgresStore, Adapter: hostedproviders.NewHTTPAdapter(hostedproviders.DirectorySecrets{Root: hostedSecretDirectory}), ClaimLease: 30 * time.Second}
-			persistedPlanner.Hosted = hostedRuntime
-		}
-		if os.Getenv("HOSTED_PROVIDER_REQUIRED") == "true" && hostedRuntime == nil {
-			slog.Error("hosted provider runtime is required but not configured")
+		hostedRuntime, err = hostedProviderRuntime(os.Getenv, postgresStore)
+		if err != nil {
+			slog.Error("hosted provider runtime configuration failed", "error", err)
 			os.Exit(1)
+		}
+		if hostedRuntime != nil {
+			persistedPlanner.Hosted = hostedRuntime
 		}
 		planner = persistedPlanner
 		probes := readinessGroup{pool, postgresStore}

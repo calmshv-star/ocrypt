@@ -7,10 +7,10 @@ snapshot with the helper before assigning implementation workers.
 
 ## Progress
 
-- [ ] Material questions resolved; specification and acceptance matrix recorded.
-- [ ] Tests authored; expected failures inspected (or artifact validation defined).
-- [ ] Dependencies, writer ownership, and common base assigned.
-- [ ] Implementation complete and focused checks pass.
+- [x] Material questions resolved; specification and acceptance matrix recorded.
+- [x] Tests authored; expected failures inspected (or artifact validation defined).
+- [x] Dependencies, writer ownership, and common base assigned (serial, orchestrator only; base origin/main 1fbfbf1).
+- [x] Implementation complete and focused checks pass.
 - [ ] Integrated diff independently reviewed; relevant checks repeated.
 - [ ] Completion evidence and remaining runtime/deployment limits recorded.
 
@@ -21,9 +21,26 @@ snapshot with the helper before assigning implementation workers.
 
 ## Evidence
 
-Record command, working directory, revision, dirty state, result, skipped checks,
-and a local evidence reference. Never commit credentials or customer records.
+- Before implementation (commit 90f96f5): noncustodial test packages failed to
+  compile (missing seams), the admin permission test failed
+  (`financial:read must not be granted`), and the symbol check reported
+  forbidden clients in `admin-api`, `worker`, `provider-health-worker`, non-stub
+  financial binaries, and a Dockerfile without `EDITION`.
+- After implementation: `go test -tags noncustodial ./...`, `go vet -tags
+  noncustodial ./...`, `go build -tags noncustodial ./cmd/...` pass;
+  `scripts/check-noncustodial-edition.sh` passes for 24 binaries with the
+  full-edition self-test; `check backend`, `check financial`, `check workflow`
+  pass; `deploy/validate.sh static` passes (needs a UTF-8 locale).
+- Dockerfile RUN logic exercised with a fake `go`: full -> `-tags ""`,
+  noncustodial -> `-tags noncustodial`, noncustodial financial-worker and an
+  unknown edition exit 2.
+- Not run locally: `docker build`, hadolint (no Docker on this machine);
+  PHP/Java/.NET and web checks (no change); `pnpm verify` live gate.
 
 ## Resume / next action
 
-Record completed work, unresolved failures/questions, and the next concrete step.
+Implementation done. Next: independent review, PR, then follow-ups —
+DB-level `watch_only` enforcement, Helm/Compose noncustodial profile, CI image
+matrix for the noncustodial edition. Note: every container-image job currently
+fails Trivy on Go 1.26.9 stdlib CVE-2026-111943 (fixed in 1.26.10); this is
+independent of this task.

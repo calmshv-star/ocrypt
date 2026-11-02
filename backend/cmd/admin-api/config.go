@@ -102,26 +102,8 @@ func loadAdminConfig() (adminConfig, error) {
 	if config.MerchantSettingsTarget == "" || merchantSettingsKeyFile == "" || config.MerchantSettingsCAFile == "" || config.MerchantSettingsClientCertFile == "" || config.MerchantSettingsClientKeyFile == "" || config.MerchantSettingsServerName == "" {
 		return adminConfig{}, errors.New("merchant settings internal URL, assertion key, CA, client certificate, client key, and server name are required")
 	}
-	config.FinancialTarget = strings.TrimSpace(os.Getenv("FINANCIAL_INTERNAL_URL"))
-	financialKeyFile := strings.TrimSpace(os.Getenv("FINANCIAL_INTERNAL_ASSERTION_KEY_FILE"))
-	config.FinancialCAFile = strings.TrimSpace(os.Getenv("FINANCIAL_INTERNAL_CA_FILE"))
-	config.FinancialClientCertFile = strings.TrimSpace(os.Getenv("FINANCIAL_INTERNAL_CLIENT_CERT_FILE"))
-	config.FinancialClientKeyFile = strings.TrimSpace(os.Getenv("FINANCIAL_INTERNAL_CLIENT_KEY_FILE"))
-	config.FinancialServerName = strings.TrimSpace(os.Getenv("FINANCIAL_INTERNAL_SERVER_NAME"))
-	if config.FinancialTarget == "" || financialKeyFile == "" || config.FinancialCAFile == "" || config.FinancialClientCertFile == "" || config.FinancialClientKeyFile == "" || config.FinancialServerName == "" {
-		return adminConfig{}, errors.New("financial internal URL, assertion key, CA, client certificate, client key, and server name are required")
-	}
-	financialRaw, financialReadErr := os.ReadFile(financialKeyFile)
-	if financialReadErr != nil {
-		return adminConfig{}, fmt.Errorf("FINANCIAL_INTERNAL_ASSERTION_KEY_FILE: %w", financialReadErr)
-	}
-	config.FinancialAssertionKey, financialReadErr = decodeKey(strings.TrimSpace(string(financialRaw)))
-	if financialReadErr != nil {
-		return adminConfig{}, fmt.Errorf("FINANCIAL_INTERNAL_ASSERTION_KEY_FILE: %w", financialReadErr)
-	}
-	financialURL, financialURLErr := url.Parse(config.FinancialTarget)
-	if financialURLErr != nil || financialURL.Scheme != "https" || financialURL.Host == "" || financialURL.User != nil || financialURL.Path != "" || financialURL.RawQuery != "" || financialURL.Fragment != "" {
-		return adminConfig{}, errors.New("FINANCIAL_INTERNAL_URL must be an HTTPS origin")
+	if err := loadFinancialConfig(&config, os.Getenv); err != nil {
+		return adminConfig{}, err
 	}
 	merchantSettingsRaw, merchantSettingsReadErr := os.ReadFile(merchantSettingsKeyFile)
 	if merchantSettingsReadErr != nil {
