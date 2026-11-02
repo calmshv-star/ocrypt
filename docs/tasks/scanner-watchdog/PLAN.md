@@ -7,10 +7,10 @@ snapshot with the helper before assigning implementation workers.
 
 ## Progress
 
-- [ ] Material questions resolved; specification and acceptance matrix recorded.
-- [ ] Tests authored; expected failures inspected (or artifact validation defined).
-- [ ] Dependencies, writer ownership, and common base assigned.
-- [ ] Implementation complete and focused checks pass.
+- [x] Material questions resolved; specification and acceptance matrix recorded.
+- [x] Tests authored; expected failures inspected (or artifact validation defined).
+- [x] Dependencies, writer ownership, and common base assigned (serial, orchestrator only).
+- [x] Implementation complete and focused checks pass.
 - [ ] Integrated diff independently reviewed; relevant checks repeated.
 - [ ] Completion evidence and remaining runtime/deployment limits recorded.
 
@@ -21,9 +21,13 @@ snapshot with the helper before assigning implementation workers.
 
 ## Evidence
 
-Record command, working directory, revision, dirty state, result, skipped checks,
-and a local evidence reference. Never commit credentials or customer records.
+- Before implementation (3e51450): collection failed, script missing.
+- After: 13 watchdog tests pass (including a real HTTP stalled-scanner probe);
+  `check python` (115 tests), `check workflow`, `deploy/validate.sh static`
+  pass; the script compiles on Python 3.9 and the example config validates.
+- Not run: a live Telegram delivery and a production deployment.
 
 ## Resume / next action
 
-Record completed work, unresolved failures/questions, and the next concrete step.
+Implementation done. Next: independent review; deployment on the standalone
+host needs a Telegram bot token and chat ID from the operator.

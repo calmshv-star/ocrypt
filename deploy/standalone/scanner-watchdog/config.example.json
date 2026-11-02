@@ -1,0 +1,56 @@
+{
+  "targets": [
+    {
+      "name": "ethereum",
+      "url": "http://ocrypt-scanner-ethereum:9091"
+    },
+    {
+      "name": "tron",
+      "url": "http://ocrypt-scanner-tron:9091"
+    },
+    {
+      "name": "solana",
+      "url": "http://ocrypt-scanner-solana:9091"
+    },
+    {
+      "name": "ton",
+      "url": "http://ocrypt-scanner-ton:9091"
+    },
+    {
+      "name": "base",
+      "url": "http://ocrypt-scanner-base:9091"
+    },
+    {
+      "name": "arbitrum",
+      "url": "http://ocrypt-scanner-arbitrum:9091"
+    },
+    {
+      "name": "optimism",
+      "url": "http://ocrypt-scanner-optimism:9091"
+    },
+    {
+      "name": "avalanche",
+      "url": "http://ocrypt-scanner-avalanche:9091"
+    },
+    {
+      "name": "polygon",
+      "url": "http://ocrypt-scanner-polygon:9091"
+    },
+    {
+      "name": "bsc",
+      "url": "http://ocrypt-scanner-bsc:9091"
+    },
+    {
+      "name": "plasma",
+      "url": "http://ocrypt-scanner-plasma:9091"
+    }
+  ],
+  "alert_after_seconds": 300,
+  "repeat_after_seconds": 3600,
+  "state_file": "/var/lib/ocrypt-scanner-watchdog/state.json",
+  "status_file": "/var/lib/ocrypt-scanner-watchdog/status.json",
+  "telegram": {
+    "bot_token_file": "/run/secrets/telegram-bot-token",
+    "chat_id": "REPLACE_WITH_CHAT_ID"
+  }
+}
