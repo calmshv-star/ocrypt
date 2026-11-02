@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/calmshv-star/ocrypt/backend/internal/edition"
 )
 
 func TestLoadAdminConfigFailsClosed(t *testing.T) {
@@ -49,12 +51,14 @@ func TestLoadAdminConfigAcceptsExplicitSecurityPolicy(t *testing.T) {
 	values["MERCHANT_SETTINGS_INTERNAL_CLIENT_CERT_FILE"] = caFile
 	values["MERCHANT_SETTINGS_INTERNAL_CLIENT_KEY_FILE"] = caFile
 	values["MERCHANT_SETTINGS_INTERNAL_SERVER_NAME"] = "merchant-settings.internal"
-	values["FINANCIAL_INTERNAL_URL"] = "https://financial.internal"
-	values["FINANCIAL_INTERNAL_ASSERTION_KEY_FILE"] = keyFile
-	values["FINANCIAL_INTERNAL_CA_FILE"] = caFile
-	values["FINANCIAL_INTERNAL_CLIENT_CERT_FILE"] = caFile
-	values["FINANCIAL_INTERNAL_CLIENT_KEY_FILE"] = caFile
-	values["FINANCIAL_INTERNAL_SERVER_NAME"] = "financial.internal"
+	if !edition.NonCustodial {
+		values["FINANCIAL_INTERNAL_URL"] = "https://financial.internal"
+		values["FINANCIAL_INTERNAL_ASSERTION_KEY_FILE"] = keyFile
+		values["FINANCIAL_INTERNAL_CA_FILE"] = caFile
+		values["FINANCIAL_INTERNAL_CLIENT_CERT_FILE"] = caFile
+		values["FINANCIAL_INTERNAL_CLIENT_KEY_FILE"] = caFile
+		values["FINANCIAL_INTERNAL_SERVER_NAME"] = "financial.internal"
+	}
 	for name, value := range values {
 		t.Setenv(name, value)
 	}

@@ -4,7 +4,20 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/calmshv-star/ocrypt/backend/internal/edition"
 )
+
+// editionAllows reports whether a permission exists in this build. The
+// noncustodial edition has no treasury, refund or hosted-provider control
+// plane, so those grants are dropped before authorization and navigation.
+func editionAllows(permission Permission) bool {
+	if !edition.NonCustodial {
+		return true
+	}
+	name := string(permission)
+	return !strings.HasPrefix(name, "financial:") && !strings.HasPrefix(name, "provider_config:")
+}
 
 func PrincipalFor(identity Identity, session Session) Principal {
 	roles := make(map[Role]bool)
@@ -13,7 +26,7 @@ func PrincipalFor(identity Identity, session Session) Principal {
 	for _, binding := range identity.Bindings {
 		roles[binding.Role] = true
 		for permission, allowed := range binding.Permissions {
-			if allowed {
+			if allowed && editionAllows(permission) {
 				permissions[permission] = true
 			}
 		}
@@ -23,7 +36,7 @@ func PrincipalFor(identity Identity, session Session) Principal {
 	principal := Principal{UserID: identity.UserID, SessionID: session.ID, DisplayName: identity.DisplayName, Email: identity.Email, ACR: session.ACR, AMR: append([]string(nil), session.AMR...), StepUpUntil: session.StepUpUntil}
 	for _, binding := range identity.Bindings {
 		for permission, allowed := range binding.Permissions {
-			if allowed {
+			if allowed && editionAllows(permission) {
 				principal.grants = append(principal.grants, authorizationGrant{Permission: permission, Scope: Scope{TenantID: binding.TenantID, MerchantID: binding.MerchantID}})
 			}
 		}

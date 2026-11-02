@@ -13,7 +13,6 @@ import (
 
 	"github.com/calmshv-star/ocrypt/backend/internal/migrationcontrol"
 	"github.com/calmshv-star/ocrypt/backend/internal/platformadmin"
-	"github.com/calmshv-star/ocrypt/backend/internal/providerconfig"
 	"github.com/calmshv-star/ocrypt/backend/internal/providerops"
 	"github.com/calmshv-star/ocrypt/backend/internal/retentionadmin"
 	"github.com/calmshv-star/ocrypt/backend/internal/telemetry"
@@ -73,18 +72,7 @@ func run(logger *slog.Logger) error {
 	if err = api.EnableProviderOperations(providerService, providerRepository); err != nil {
 		return err
 	}
-	providerConfigRepository, err := providerconfig.NewPostgresRepository(pool)
-	if err != nil {
-		return err
-	}
-	if err = providerConfigRepository.PingControl(ctx); err != nil {
-		return errors.New("validate provider configuration control schema: " + err.Error())
-	}
-	providerConfigService, err := providerconfig.NewService(providerConfigRepository, nil)
-	if err != nil {
-		return err
-	}
-	if err = api.EnableProviderConfiguration(providerConfigService, providerConfigRepository); err != nil {
+	if err = enableProviderConfiguration(ctx, api, pool); err != nil {
 		return err
 	}
 	migrationManifestKeys, err := migrationcontrol.ReadPublicKeyRing(c.migrationManifestPublicKeysFile)
