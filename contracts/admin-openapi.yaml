@@ -23,6 +23,7 @@ tags:
   - name: Provider configuration
   - name: Retention control
   - name: Signup screening
+  - name: Go-live
 paths:
   /admin/v1/auth/login:
     get:
@@ -692,6 +693,68 @@ paths:
       parameters: [{$ref: '#/components/parameters/PlatformTenant'}]
       responses:
         '200': {description: Snapshot page, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/SnapshotPage'}}}}
+  /admin/v1/go-live:
+    get:
+      tags: [Go-live]
+      operationId: goLiveState
+      summary: The merchant's environment and its latest go-live request
+      description: Needs go_live:request on the merchant scope. The operator's reason is never returned.
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
+      responses:
+        '200': {description: Go-live state, content: {application/json: {schema: {$ref: '#/components/schemas/GoLiveState'}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/go-live/address-challenges:
+    post:
+      tags: [Go-live]
+      operationId: createGoLiveAddressChallenge
+      summary: Get the message that proves control of one receiving address
+      description: EVM chains use personal_sign, Solana signMessage, TRON signMessageV2. The message names the cabinet domain, the merchant, the network, the address and a nonce, and is valid for five minutes.
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [chain_id,address], properties: {chain_id: {type: string}, address: {type: string, minLength: 8, maxLength: 256}}}}}}
+      responses:
+        '200': {description: Challenge to sign, content: {application/json: {schema: {$ref: '#/components/schemas/GoLiveProofChallenge'}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/go-live/requests:
+    post:
+      tags: [Go-live]
+      operationId: submitGoLiveRequest
+      summary: Ask to switch the merchant to live payments
+      description: Needs an MFA session. Every proof is verified against its sealed challenge for this merchant. Fast and standard presets also file a matching-policy change that a platform reviewer approves; strict files none.
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/Merchant'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GoLiveSubmission'}}}}
+      responses:
+        '200': {description: Request filed, content: {application/json: {schema: {$ref: '#/components/schemas/GoLiveState'}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/v1/platform/go-live-requests:
+    get:
+      tags: [Go-live]
+      operationId: listGoLiveRequests
+      summary: Pending go-live requests for a global reviewer
+      description: Needs a global binding with go_live_reviews:read. Each address says whether the platform has admitted it as a watch-only receiving address of the merchant.
+      responses:
+        '200': {description: Pending requests, oldest first, content: {application/json: {schema: {type: object, additionalProperties: false, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/GoLiveReview'}}}}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/platform/go-live-requests/{id}/decision:
+    post:
+      tags: [Go-live]
+      operationId: decideGoLiveRequest
+      summary: Approve or reject one go-live request
+      description: Needs a global binding with go_live_reviews:decide and an MFA session. Approval requires every requested address to be admitted, activates the preset policy with the reviewer as approver and switches the merchant to live. A decision is final.
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{name: id, in: path, required: true, schema: {$ref: '#/components/schemas/UUID'}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [decision,reason], properties: {decision: {type: string, enum: [approve, reject]}, reason: {type: string, minLength: 8, maxLength: 1000}}}}}}
+      responses:
+        '200': {description: Decision recorded, content: {application/json: {schema: {type: object, additionalProperties: false, required: [request_id,status], properties: {request_id: {$ref: '#/components/schemas/UUID'}, status: {type: string, enum: [approved, rejected]}}}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
   /admin/v1/platform/signup-reviews:
     get:
       tags: [Signup screening]
@@ -1350,6 +1413,10 @@ components:
     Principal: {type: object, additionalProperties: false, required: [user_id,session_id,display_name,roles,permissions,scopes,amr], properties: {user_id: {$ref: '#/components/schemas/UUID'}, session_id: {$ref: '#/components/schemas/UUID'}, display_name: {type: string}, email: {type: string, format: email}, roles: {type: array, items: {type: string}}, permissions: {type: array, items: {type: string}}, scopes: {type: array, items: {$ref: '#/components/schemas/Scope'}}, acr: {type: string}, amr: {type: array, items: {type: string}}, step_up_until: {type: string, format: date-time}, signup_review: {type: string, enum: [pending, rejected], description: 'Set only while the user''s own self-service signup is held by sanctions screening; never carries reasons.'}}}
     SignupReview: {type: object, additionalProperties: false, required: [merchant_id,tenant_id,company_name,country,business_type,email,display_name,reasons,matches,screened_at], properties: {merchant_id: {$ref: '#/components/schemas/UUID'}, tenant_id: {$ref: '#/components/schemas/UUID'}, company_name: {type: string}, country: {type: string, pattern: '^[A-Z]{2}$'}, business_type: {type: string}, website: {type: string, format: uri}, email: {type: string}, display_name: {type: string}, ip_region: {type: string, pattern: '^[A-Z][A-Z0-9]$'}, reasons: {type: array, items: {type: string, enum: [domain_match, ip_region, ip_region_unknown, name_match, screening_list_stale]}}, matches: {type: array, maxItems: 20, items: {type: object, additionalProperties: false, required: [source,kind,reference], properties: {source: {type: string}, kind: {type: string, enum: [name, domain]}, reference: {type: string}}}}, screened_at: {type: string, format: date-time}}}
     DailyTotal: {type: object, additionalProperties: false, required: [day,currency,currency_scale,paid_count,paid_amount_minor], properties: {day: {type: string, format: date}, currency: {type: string, pattern: '^[A-Z]{3}$'}, currency_scale: {type: integer, minimum: 0, maximum: 9}, paid_count: {type: integer, minimum: 1}, paid_amount_minor: {type: string, pattern: '^[0-9]+$'}}}
+    GoLiveState: {type: object, additionalProperties: false, required: [environment,screening_ready], properties: {environment: {type: string, enum: [test, live]}, request_id: {$ref: '#/components/schemas/UUID'}, request_status: {type: string, enum: [pending, approved, rejected]}, preset: {type: string, enum: [strict, standard, fast]}, requested_at: {type: string, format: date-time}, screening_ready: {type: boolean}}}
+    GoLiveProofChallenge: {type: object, additionalProperties: false, required: [kind,chain_id,address,display_address,tenant_id,merchant_id,nonce,issued_at,expires_at,message,token], properties: {kind: {type: string, enum: [evm_personal_sign, solana_sign_message, tron_sign_message_v2]}, chain_id: {type: string}, address: {type: string}, display_address: {type: string}, tenant_id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, nonce: {$ref: '#/components/schemas/UUID'}, issued_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time}, message: {type: string}, token: {type: string}}}
+    GoLiveSubmission: {type: object, additionalProperties: false, required: [preset,proofs], properties: {preset: {type: string, enum: [strict, standard, fast]}, proofs: {type: array, minItems: 1, maxItems: 16, items: {type: object, additionalProperties: false, required: [token,signature], properties: {token: {type: string}, signature: {type: string}}}}}}
+    GoLiveReview: {type: object, additionalProperties: false, required: [request_id,tenant_id,merchant_id,company_name,owner_email,preset,screening_status,addresses,requested_at], properties: {request_id: {$ref: '#/components/schemas/UUID'}, tenant_id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, company_name: {type: string}, owner_email: {type: string}, preset: {type: string, enum: [strict, standard, fast]}, screening_status: {type: string}, addresses: {type: array, items: {type: object, additionalProperties: false, required: [chain_id,address,proof_kind,admitted], properties: {chain_id: {type: string}, address: {type: string}, proof_kind: {type: string}, admitted: {type: boolean}}}}, requested_at: {type: string, format: date-time}}}
     SignupDecision: {type: object, additionalProperties: false, required: [decision,reason], properties: {decision: {type: string, enum: [approve, reject]}, reason: {type: string, minLength: 3, maxLength: 1000}}}
     OverviewMoney:
       type: object

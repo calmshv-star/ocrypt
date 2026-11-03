@@ -124,7 +124,11 @@ GRANT EXECUTE ON FUNCTION
   list_current_admin_self_service_owner_grants(),
   list_signup_screening_reviews(integer),
   decide_signup_screening(uuid,text,text,timestamptz),
-  current_admin_signup_review_status()
+  current_admin_signup_review_status(),
+  submit_merchant_go_live_request(uuid,uuid,uuid,text,jsonb,uuid,timestamptz),
+  merchant_go_live_state(uuid,uuid),
+  list_go_live_requests(integer),
+  decide_go_live_request(uuid,text,text,timestamptz)
 TO merchant_admin_runtime;
 GRANT SELECT ON signup_business_types,signup_blocked_countries TO merchant_admin_runtime;
 GRANT INSERT ON payment_intent_versions,callback_events,callback_deliveries TO merchant_api_runtime;

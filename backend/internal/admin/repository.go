@@ -27,6 +27,10 @@ type AuthRepository interface {
 	RegisterSelfServiceMerchant(context.Context, LoginAttempt, IDTokenClaims, time.Time) (SelfServiceRegistration, error)
 	ListSignupReviews(context.Context, Principal, int) ([]SignupReview, error)
 	DecideSignupReview(context.Context, Principal, string, SignupDecision, time.Time) (string, error)
+	GoLiveState(context.Context, Principal, Scope) (GoLiveState, error)
+	SubmitGoLive(ctx context.Context, principal Principal, scope Scope, requestID, preset string, addresses []GoLiveProvenAddress, policyChangeID string, at time.Time) error
+	ListGoLiveReviews(context.Context, Principal, int) ([]GoLiveReview, error)
+	DecideGoLiveReview(context.Context, Principal, string, SignupDecision, time.Time) (string, error)
 	// SignupOptions lists the business types open for registration and the
 	// countries registration is closed for.
 	SignupOptions(context.Context) (businessTypes, blockedCountries []string, err error)
