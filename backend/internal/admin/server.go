@@ -676,7 +676,12 @@ func (s *Server) stepUp(w http.ResponseWriter, request *http.Request) {
 // showing a JSON problem; details stay in the server log.
 func (s *Server) callback(w http.ResponseWriter, request *http.Request) {
 	if providerError := request.URL.Query().Get("error"); providerError != "" {
-		slog.Warn("admin authentication rejected by identity provider", "error", providerError)
+		// Unauthenticated input: log only a known OAuth/OIDC error code.
+		code := "other"
+		if oauthErrorCodes[providerError] {
+			code = providerError
+		}
+		slog.Warn("admin authentication rejected by identity provider", "error", code)
 		reason := "provider"
 		if providerError == "access_denied" {
 			reason = "cancelled"
@@ -691,6 +696,8 @@ func (s *Server) callback(w http.ResponseWriter, request *http.Request) {
 		s.callbackFailed(w, request, "expired")
 		return
 	}
+	// Only a callback that matches this browser's correlation may end it; a
+	// stale callback from another tab leaves an in-flight sign-in alone.
 	s.clearOIDCCookie(w)
 	authenticated, returnPath, err := s.service.CompleteCallback(request.Context(), state, request.URL.Query().Get("code"))
 	if err != nil {
@@ -706,9 +713,15 @@ func (s *Server) callback(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) callbackFailed(w http.ResponseWriter, request *http.Request, reason string) {
-	s.clearOIDCCookie(w)
-	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, request, "/#/sign-in-failed?reason="+reason, http.StatusSeeOther)
+}
+
+// RFC 6749 section 4.1.2.1 and OpenID Connect Core section 3.1.2.6 codes.
+var oauthErrorCodes = map[string]bool{
+	"invalid_request": true, "unauthorized_client": true, "access_denied": true, "unsupported_response_type": true,
+	"invalid_scope": true, "server_error": true, "temporarily_unavailable": true, "interaction_required": true,
+	"login_required": true, "account_selection_required": true, "consent_required": true, "invalid_request_uri": true,
+	"invalid_request_object": true, "request_not_supported": true, "request_uri_not_supported": true, "registration_not_supported": true,
 }
 
 // callbackFailureReason maps a callback error to the reason the sign-in
@@ -820,7 +833,7 @@ func (s *Server) dailyTotals(w http.ResponseWriter, request *http.Request) {
 	}
 	from, fromErr := time.Parse(time.DateOnly, query.Get("from"))
 	to, toErr := time.Parse(time.DateOnly, query.Get("to"))
-	if !reportDayPattern.MatchString(query.Get("from")) || !reportDayPattern.MatchString(query.Get("to")) || fromErr != nil || toErr != nil || to.Before(from) || to.Sub(from) > 365*24*time.Hour || len(zone) > 64 || !reportZonePattern.MatchString(zone) {
+	if !reportDayPattern.MatchString(query.Get("from")) || !reportDayPattern.MatchString(query.Get("to")) || fromErr != nil || toErr != nil || from.Year() < 2000 || to.Before(from) || to.Sub(from) > 365*24*time.Hour || len(zone) > 64 || !reportZonePattern.MatchString(zone) {
 		respond[any](w, nil, ErrInvalid)
 		return
 	}

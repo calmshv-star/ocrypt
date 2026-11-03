@@ -7,11 +7,11 @@ snapshot with the helper before assigning implementation workers.
 
 ## Progress
 
-- [ ] Material questions resolved; specification and acceptance matrix recorded.
-- [ ] Tests authored; expected failures inspected (or artifact validation defined).
-- [ ] Dependencies, writer ownership, and common base assigned.
-- [ ] Implementation complete and focused checks pass.
-- [ ] Integrated diff independently reviewed; relevant checks repeated.
+- [x] Material questions resolved; specification and acceptance matrix recorded (agent decisions in DECISIONS.md).
+- [x] Tests authored; expected failures inspected (or artifact validation defined).
+- [x] Dependencies, writer ownership, and common base assigned (single writer, `feat/stage2-completion` from `125e1d9`).
+- [x] Implementation complete and focused checks pass.
+- [x] Integrated diff independently reviewed; relevant checks repeated (findings and fixes in DECISIONS.md).
 - [ ] Completion evidence and remaining runtime/deployment limits recorded.
 
 ## Assignments

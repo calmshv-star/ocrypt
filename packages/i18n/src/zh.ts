@@ -472,7 +472,7 @@ export const zhCN = {
   "checkout.address": "收款地址",
   "checkout.copyAmount": "复制金额",
   "checkout.copyAddress": "复制地址",
-  "checkout.expiresIn": "金额锁定剩余时间：{time}",
+  "checkout.expiresIn": "剩余支付时间：{time}",
   "checkout.intent": "支付意图",
   "checkout.order": "订单引用",
   "checkout.pending": "等待转账",
@@ -1324,7 +1324,7 @@ export const zhCN = {
   "admin.rejectedTitle": "无法开通此账户",
   "admin.rejectedBody": "您的申请未通过审核。如您认为有误，请联系支持团队。",
   "admin.signInFailedTitle": "登录未完成",
-  "admin.signInFailed.cancelled": "登录已取消，您可以重试。",
+  "admin.signInFailed.cancelled": "登录已在身份提供方处取消或被拒绝，您可以重试。",
   "admin.signInFailed.expired": "登录链接已过期或已被使用。登录耗时过长或在其他标签页中继续时会出现这种情况。请重试。",
   "admin.signInFailed.not_allowed": "此账户无权访问控制台。请向管理员申请邀请，或创建账户。",
   "admin.signInFailed.mfa": "需要双重验证。请在身份提供方完成设置后重新登录。",
@@ -1344,7 +1344,7 @@ export const zhCN = {
   "reports.from": "开始",
   "reports.to": "结束",
   "reports.timeZone": "时区",
-  "reports.dailyNote": "付款按所选时区中的付款日计入。超额付款按账单金额计入，不含超出部分。",
+  "reports.dailyNote": "付款按其最后一笔已确认转账上链的日期（所选时区）计入；没有转账的订单（例如迁移订单）按结算日计入。超额付款和在少付容差内接受的付款按账单金额计入，退款不扣除。区块重组或人工审核后，过去的日期数据可能变化。",
   "reports.invalidPeriod": "期间开始日期不能晚于结束日期。",
   "reports.empty": "此期间没有已付款项。",
   "reports.day": "日期",
@@ -1352,5 +1352,10 @@ export const zhCN = {
   "reports.paidAmount": "金额",
   "reports.total": "合计",
   "reports.exportXlsx": "导出 XLSX",
-  "reports.paymentsSheet": "付款"
+  "reports.paymentsSheet": "付款",
+  "checkout.amountLocked": "金额锁定剩余时间：{time}",
+  "reports.periodMissing": "请选择期间的开始和结束日期。",
+  "reports.periodTooLong": "报表最多覆盖 {max} 天，请缩短期间。",
+  "reports.scope": "范围",
+  "reports.generatedAt": "生成时间"
 } satisfies Messages;

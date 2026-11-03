@@ -472,7 +472,7 @@ export const de = {
   "checkout.address": "Empfangsadresse",
   "checkout.copyAmount": "Betrag kopieren",
   "checkout.copyAddress": "Adresse kopieren",
-  "checkout.expiresIn": "Betrag festgelegt für {time}",
+  "checkout.expiresIn": "Verbleibende Zahlungszeit: {time}",
   "checkout.intent": "Zahlungsabsicht",
   "checkout.order": "Bestellreferenz",
   "checkout.pending": "Warte auf Transfer",
@@ -1324,7 +1324,7 @@ export const de = {
   "admin.rejectedTitle": "Dieses Konto konnte nicht eröffnet werden",
   "admin.rejectedBody": "Ihr Antrag hat unsere Prüfung nicht bestanden. Wenden Sie sich an den Support, wenn Sie das für einen Fehler halten.",
   "admin.signInFailedTitle": "Die Anmeldung wurde nicht abgeschlossen",
-  "admin.signInFailed.cancelled": "Die Anmeldung wurde abgebrochen. Sie können es erneut versuchen.",
+  "admin.signInFailed.cancelled": "Die Anmeldung wurde bei Ihrem Identitätsanbieter abgebrochen oder abgelehnt. Sie können es erneut versuchen.",
   "admin.signInFailed.expired": "Der Anmeldelink ist abgelaufen oder wurde bereits verwendet. Das passiert, wenn die Anmeldung zu lange dauert oder in einem anderen Tab weitergeht. Bitte erneut versuchen.",
   "admin.signInFailed.not_allowed": "Dieses Konto hat keinen Zugriff auf das Portal. Bitten Sie Ihren Administrator um eine Einladung oder erstellen Sie ein Konto.",
   "admin.signInFailed.mfa": "Zwei-Faktor-Authentifizierung ist erforderlich. Richten Sie sie bei Ihrem Identitätsanbieter ein und melden Sie sich erneut an.",
@@ -1344,7 +1344,7 @@ export const de = {
   "reports.from": "Von",
   "reports.to": "Bis",
   "reports.timeZone": "Zeitzone",
-  "reports.dailyNote": "Eine Zahlung zählt an dem Tag, an dem sie in dieser Zeitzone bezahlt wurde. Überzahlungen zählen zum Rechnungsbetrag; der Überschuss ist nicht enthalten.",
+  "reports.dailyNote": "Eine Zahlung zählt an dem Tag, an dem ihre letzte bestätigte Überweisung das Netzwerk erreicht hat, in dieser Zeitzone (Bestellungen ohne Überweisung, etwa migrierte, am Tag der Abrechnung). Überzahlungen und innerhalb der Unterzahlungstoleranz angenommene Zahlungen zählen zum Rechnungsbetrag; Erstattungen werden nicht abgezogen. Vergangene Tage können sich nach einer Chain-Reorganisation oder einer manuellen Prüfung ändern.",
   "reports.invalidPeriod": "Der Beginn des Zeitraums darf nicht nach seinem Ende liegen.",
   "reports.empty": "In diesem Zeitraum gibt es keine bezahlten Zahlungen.",
   "reports.day": "Tag",
@@ -1352,5 +1352,10 @@ export const de = {
   "reports.paidAmount": "Betrag",
   "reports.total": "Summe",
   "reports.exportXlsx": "XLSX exportieren",
-  "reports.paymentsSheet": "Zahlungen"
+  "reports.paymentsSheet": "Zahlungen",
+  "checkout.amountLocked": "Betrag festgelegt für {time}",
+  "reports.periodMissing": "Wählen Sie Beginn und Ende des Zeitraums.",
+  "reports.periodTooLong": "Ein Bericht umfasst höchstens {max} Tage. Kürzen Sie den Zeitraum.",
+  "reports.scope": "Bereich",
+  "reports.generatedAt": "Erstellt am"
 } satisfies Messages;

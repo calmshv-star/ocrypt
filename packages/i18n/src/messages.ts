@@ -470,7 +470,7 @@ export const en = {
   "checkout.address": "Receiving address",
   "checkout.copyAmount": "Copy amount",
   "checkout.copyAddress": "Copy address",
-  "checkout.expiresIn": "Amount locked for {time}",
+  "checkout.expiresIn": "Time remaining to pay: {time}",
   "checkout.intent": "Payment intent",
   "checkout.order": "Order reference",
   "checkout.pending": "Waiting for transfer",
@@ -1322,7 +1322,7 @@ export const en = {
   "admin.rejectedTitle": "We could not open this account",
   "admin.rejectedBody": "Your application did not pass our checks. Contact support if you think this is a mistake.",
   "admin.signInFailedTitle": "Sign-in did not complete",
-  "admin.signInFailed.cancelled": "Sign-in was cancelled. You can try again.",
+  "admin.signInFailed.cancelled": "Sign-in was cancelled or declined at your identity provider. You can try again.",
   "admin.signInFailed.expired": "The sign-in link expired or was already used. This happens when sign-in takes too long or continues in another tab. Try again.",
   "admin.signInFailed.not_allowed": "This account has no access to the cabinet. Ask your administrator for an invitation, or create an account.",
   "admin.signInFailed.mfa": "Two-factor authentication is required. Set it up with your identity provider, then sign in again.",
@@ -1342,7 +1342,7 @@ export const en = {
   "reports.from": "From",
   "reports.to": "To",
   "reports.timeZone": "Time zone",
-  "reports.dailyNote": "A payment counts on the day it was paid in this time zone. Overpaid payments count at the invoice amount; the excess is not included.",
+  "reports.dailyNote": "A payment counts on the day its last confirmed transfer reached the network, in this time zone (orders without a transfer, such as migrated ones, count on the day they were settled). Overpaid payments and payments accepted within an underpayment tolerance count at the invoice amount; refunds are not deducted. Past days can change after a chain reorganization or a manual review.",
   "reports.invalidPeriod": "The start of the period must not be after its end.",
   "reports.empty": "No paid payments in this period.",
   "reports.day": "Day",
@@ -1350,7 +1350,12 @@ export const en = {
   "reports.paidAmount": "Amount",
   "reports.total": "Total",
   "reports.exportXlsx": "Export XLSX",
-  "reports.paymentsSheet": "Payments"
+  "reports.paymentsSheet": "Payments",
+  "checkout.amountLocked": "Amount locked for {time}",
+  "reports.periodMissing": "Choose both the start and the end of the period.",
+  "reports.periodTooLong": "A report covers at most {max} days. Shorten the period.",
+  "reports.scope": "Scope",
+  "reports.generatedAt": "Generated at"
 } as const;
 
 export type MessageKey = keyof typeof en;

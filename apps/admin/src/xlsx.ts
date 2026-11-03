@@ -86,37 +86,68 @@ export function columnName(index: number): string {
   return name;
 }
 
-// XML 1.0 forbids most control characters; tab, line feed and carriage return stay.
+// XML 1.0 forbids most control characters; tab, line feed and carriage return
+// stay (a carriage return as a character reference, which parsers keep). An
+// existing _xHHHH_ sequence is escaped so Excel does not decode it.
 function xmlText(value: string): string {
-  return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+  return value.replace(/_x([0-9A-Fa-f]{4})_/g, "_x005F_x$1_").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("\r", "&#13;");
 }
 
 // A spreadsheet stores numbers as doubles: beyond 15 significant digits the
 // value would change, so such an amount stays exact as text.
 function exactNumber(value: string): boolean {
-  if (!/^-?[0-9]+(\.[0-9]+)?$/.test(value)) return false;
-  return value.replace(/^-/, "").replace(".", "").replace(/^0+(?=[0-9])/, "").length <= 15;
+  const match = /^-?([0-9]+)(?:\.([0-9]+))?$/.exec(value);
+  if (!match) return false;
+  const significant = (match[1]!.replace(/^0+/, "") + (match[2] ?? "").replace(/0+$/, "")).replace(/^0+/, "");
+  return significant.length <= 15;
 }
 
-function cell(reference: string, value: XLSXCell): string {
-  if (typeof value !== "string" && exactNumber(value.number)) return `<c r="${reference}"><v>${value.number}</v></c>`;
+function decimalsOf(value: string): number {
+  return value.split(".")[1]?.length ?? 0;
+}
+
+function cell(reference: string, value: XLSXCell, styleFor: (decimals: number) => number): string {
+  if (typeof value !== "string" && exactNumber(value.number)) return `<c r="${reference}" s="${styleFor(decimalsOf(value.number))}"><v>${value.number}</v></c>`;
   const text = typeof value === "string" ? value : value.number;
   const preserve = /^\s|\s$|[\t\n\r]/.test(text) ? ' xml:space="preserve"' : "";
   return `<c r="${reference}" t="inlineStr"><is><t${preserve}>${xmlText(text)}</t></is></c>`;
 }
 
+// Sheet names: no []:*?/\\, no leading or trailing apostrophe, at most 31
+// characters, and never Excel's reserved "History".
+function sheetTitle(value: string): string {
+  const name = value.replace(/[[\]:*?/\\]/g, " ").replace(/\s+/g, " ").replace(/^'+|'+$/g, "").trim().slice(0, 31).trim() || "Sheet1";
+  return name.toLowerCase() === "history" ? "History 1" : name;
+}
+
+// Number cells keep their decimals visible: one cell style per count of
+// decimal places, built-in "0" for integers and custom "0.00…" formats.
+function styles(decimals: number[]): string {
+  const custom = decimals.filter((count) => count > 0);
+  const numFmts = custom.length ? `<numFmts count="${custom.length}">${custom.map((count, index) => `<numFmt numFmtId="${164 + index}" formatCode="0.${"0".repeat(count)}"/>`).join("")}</numFmts>` : "";
+  const xfs = decimals.map((count) => `<xf numFmtId="${count === 0 ? 1 : 164 + custom.indexOf(count)}" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>`).join("");
+  return `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${numFmts}<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${decimals.length + 1}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>${xfs}</cellXfs></styleSheet>`;
+}
+
 export function toXLSX(sheetName: string, rows: XLSXCell[][]): Uint8Array<ArrayBuffer> {
-  const name = xmlText(sheetName.replace(/[[\]:*?/\\]/g, " ").replace(/\s+/g, " ").trim().slice(0, 31) || "Sheet1");
-  const sheetRows = rows.map((row, rowIndex) => `<row r="${rowIndex + 1}">${row.map((value, columnIndex) => cell(`${columnName(columnIndex)}${rowIndex + 1}`, value)).join("")}</row>`).join("");
+  const name = xmlText(sheetTitle(sheetName));
+  const decimals: number[] = [];
+  const styleFor = (count: number) => {
+    let index = decimals.indexOf(count);
+    if (index < 0) index = decimals.push(count) - 1;
+    return index + 1;
+  };
+  const sheetRows = rows.map((row, rowIndex) => `<row r="${rowIndex + 1}">${row.map((value, columnIndex) => cell(`${columnName(columnIndex)}${rowIndex + 1}`, value, styleFor)).join("")}</row>`).join("");
   const header = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
   const main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
   const relationships = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
   return zip([
-    ["[Content_Types].xml", `${header}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`],
+    ["[Content_Types].xml", `${header}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`],
     ["_rels/.rels", `${header}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${relationships}/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
     ["xl/workbook.xml", `${header}<workbook xmlns="${main}" xmlns:r="${relationships}"><sheets><sheet name="${name}" sheetId="1" r:id="rId1"/></sheets></workbook>`],
-    ["xl/_rels/workbook.xml.rels", `${header}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${relationships}/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`],
-    ["xl/worksheets/sheet1.xml", `${header}<worksheet xmlns="${main}"><sheetData>${sheetRows}</sheetData></worksheet>`]
+    ["xl/_rels/workbook.xml.rels", `${header}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${relationships}/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="${relationships}/styles" Target="styles.xml"/></Relationships>`],
+    ["xl/worksheets/sheet1.xml", `${header}<worksheet xmlns="${main}"><sheetData>${sheetRows}</sheetData></worksheet>`],
+    ["xl/styles.xml", `${header}${styles(decimals)}`]
   ]);
 }
 

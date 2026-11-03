@@ -472,7 +472,7 @@ export const fr = {
   "checkout.address": "Adresse de réception",
   "checkout.copyAmount": "Copier le montant",
   "checkout.copyAddress": "Copier l'adresse",
-  "checkout.expiresIn": "Montant bloqué pendant {time}",
+  "checkout.expiresIn": "Temps restant pour payer : {time}",
   "checkout.intent": "Intention de paiement",
   "checkout.order": "Référence de commande",
   "checkout.pending": "En attente du transfert",
@@ -1324,7 +1324,7 @@ export const fr = {
   "admin.rejectedTitle": "Nous n’avons pas pu ouvrir ce compte",
   "admin.rejectedBody": "Votre demande n’a pas passé nos contrôles. Contactez le support si vous pensez qu’il s’agit d’une erreur.",
   "admin.signInFailedTitle": "La connexion n’a pas abouti",
-  "admin.signInFailed.cancelled": "La connexion a été annulée. Vous pouvez réessayer.",
+  "admin.signInFailed.cancelled": "La connexion a été annulée ou refusée par votre fournisseur d’identité. Vous pouvez réessayer.",
   "admin.signInFailed.expired": "Le lien de connexion a expiré ou a déjà été utilisé. Cela arrive si la connexion prend trop de temps ou continue dans un autre onglet. Réessayez.",
   "admin.signInFailed.not_allowed": "Ce compte n’a pas accès à l’espace. Demandez une invitation à votre administrateur ou créez un compte.",
   "admin.signInFailed.mfa": "L’authentification à deux facteurs est requise. Configurez-la chez votre fournisseur d’identité, puis reconnectez-vous.",
@@ -1344,7 +1344,7 @@ export const fr = {
   "reports.from": "Du",
   "reports.to": "Au",
   "reports.timeZone": "Fuseau horaire",
-  "reports.dailyNote": "Un paiement compte le jour où il a été encaissé dans ce fuseau. Un trop-perçu compte au montant de la facture ; l’excédent n’est pas inclus.",
+  "reports.dailyNote": "Un paiement compte le jour où son dernier transfert confirmé a atteint le réseau, dans ce fuseau (les commandes sans transfert, comme les migrées, comptent le jour de leur règlement). Les trop-perçus et les paiements acceptés dans la tolérance de sous-paiement comptent au montant de la facture ; les remboursements ne sont pas déduits. Les jours passés peuvent changer après une réorganisation de la chaîne ou une revue manuelle.",
   "reports.invalidPeriod": "Le début de la période ne peut pas être après sa fin.",
   "reports.empty": "Aucun paiement encaissé sur cette période.",
   "reports.day": "Jour",
@@ -1352,5 +1352,10 @@ export const fr = {
   "reports.paidAmount": "Montant",
   "reports.total": "Total",
   "reports.exportXlsx": "Exporter en XLSX",
-  "reports.paymentsSheet": "Paiements"
+  "reports.paymentsSheet": "Paiements",
+  "checkout.amountLocked": "Montant bloqué pendant {time}",
+  "reports.periodMissing": "Choisissez le début et la fin de la période.",
+  "reports.periodTooLong": "Un rapport couvre au plus {max} jours. Raccourcissez la période.",
+  "reports.scope": "Périmètre",
+  "reports.generatedAt": "Généré le"
 } satisfies Messages;

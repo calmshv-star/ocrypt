@@ -472,7 +472,7 @@ export const es = {
   "checkout.address": "Dirección receptora",
   "checkout.copyAmount": "Copiar importe",
   "checkout.copyAddress": "Copiar dirección",
-  "checkout.expiresIn": "Importe fijado durante {time}",
+  "checkout.expiresIn": "Tiempo restante para pagar: {time}",
   "checkout.intent": "Intención de pago",
   "checkout.order": "Referencia del pedido",
   "checkout.pending": "Esperando transferencia",
@@ -1324,7 +1324,7 @@ export const es = {
   "admin.rejectedTitle": "No pudimos abrir esta cuenta",
   "admin.rejectedBody": "Su solicitud no superó nuestras comprobaciones. Contacte con soporte si cree que es un error.",
   "admin.signInFailedTitle": "No se completó el inicio de sesión",
-  "admin.signInFailed.cancelled": "Se canceló el inicio de sesión. Puede intentarlo de nuevo.",
+  "admin.signInFailed.cancelled": "El inicio de sesión se canceló o fue rechazado por su proveedor de identidad. Puede intentarlo de nuevo.",
   "admin.signInFailed.expired": "El enlace de inicio de sesión caducó o ya se usó. Ocurre si el inicio tarda demasiado o continúa en otra pestaña. Inténtelo de nuevo.",
   "admin.signInFailed.not_allowed": "Esta cuenta no tiene acceso al panel. Pida una invitación a su administrador o cree una cuenta.",
   "admin.signInFailed.mfa": "Se requiere autenticación de dos factores. Configúrela con su proveedor de identidad y vuelva a iniciar sesión.",
@@ -1344,7 +1344,7 @@ export const es = {
   "reports.from": "Desde",
   "reports.to": "Hasta",
   "reports.timeZone": "Zona horaria",
-  "reports.dailyNote": "Un pago cuenta el día en que se cobró en esta zona horaria. Los pagos con exceso cuentan al importe de la factura; el excedente no se incluye.",
+  "reports.dailyNote": "Un pago cuenta el día en que su última transferencia confirmada llegó a la red, en esta zona horaria (los pedidos sin transferencia, como los migrados, cuentan el día en que se liquidaron). Los pagos con exceso y los aceptados dentro de la tolerancia de pago insuficiente cuentan al importe de la factura; los reembolsos no se descuentan. Los días pasados pueden cambiar tras una reorganización de la cadena o una revisión manual.",
   "reports.invalidPeriod": "El inicio del periodo no puede ser posterior a su final.",
   "reports.empty": "No hay pagos cobrados en este periodo.",
   "reports.day": "Día",
@@ -1352,5 +1352,10 @@ export const es = {
   "reports.paidAmount": "Importe",
   "reports.total": "Total",
   "reports.exportXlsx": "Exportar XLSX",
-  "reports.paymentsSheet": "Pagos"
+  "reports.paymentsSheet": "Pagos",
+  "checkout.amountLocked": "Importe fijado durante {time}",
+  "reports.periodMissing": "Elija el inicio y el final del periodo.",
+  "reports.periodTooLong": "Un informe abarca como máximo {max} días. Acorte el periodo.",
+  "reports.scope": "Ámbito",
+  "reports.generatedAt": "Generado el"
 } satisfies Messages;

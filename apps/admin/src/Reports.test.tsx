@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { AdminClient } from "./api/client";
-import { addMinor, totalsByCurrency } from "./ReportsPage";
+import { addMinor, daysInPeriod, totalsByCurrency } from "./ReportsPage";
 
 const accountant = { user_id: "10000000-0000-4000-8000-000000000001", session_id: "10000000-0000-4000-8000-000000000002", display_name: "Accountant", roles: ["auditor"], permissions: ["dashboard:read", "payments:read"], scopes: [{ tenant_id: "10000000-0000-4000-8000-000000000003" }], amr: ["otp"] };
 const report = { from: "2026-10-01", to: "2026-10-02", time_zone: "UTC", data: [
@@ -23,6 +23,12 @@ function wrap(node: React.ReactNode) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("daily totals report", () => {
+  it("counts calendar days, including across a clock change", () => {
+    expect(daysInPeriod("2026-10-01", "2026-10-01")).toBe(1);
+    expect(daysInPeriod("2026-10-24", "2026-10-26")).toBe(3);
+    expect(daysInPeriod("2025-01-01", "2025-12-31")).toBe(365);
+  });
+
   it("adds exact minor units beyond floating point", () => {
     expect(addMinor("123456789012345678901234567890", "10000")).toBe("123456789012345678901234577890");
     expect(totalsByCurrency(report.data)).toEqual([
@@ -56,6 +62,10 @@ describe("daily totals report", () => {
     dailyTotals.mockClear();
     fireEvent.change(from, { target: { value: "2999-01-01" } });
     expect(await screen.findByText("The start of the period must not be after its end.")).toBeInTheDocument();
+    fireEvent.change(from, { target: { value: "2000-01-01" } });
+    expect(await screen.findByText("A report covers at most 366 days. Shorten the period.")).toBeInTheDocument();
+    fireEvent.change(from, { target: { value: "" } });
+    expect(await screen.findByText("Choose both the start and the end of the period.")).toBeInTheDocument();
     expect(dailyTotals).not.toHaveBeenCalled();
   });
 });

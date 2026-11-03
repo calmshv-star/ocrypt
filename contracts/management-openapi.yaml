@@ -692,7 +692,7 @@ components:
           not: { anyOf: [ { required: [provider_id] }, { required: [payment_url] } ] }
         - required: [provider_id, payment_url]
           properties: { provider: { const: hosted_gateway } }
-          not: { anyOf: [ { required: [network] }, { required: [address] }, { required: [transaction_hash] }, { required: [explorer_url] }, { required: [received_amount] }, { required: [remaining_amount] }, { required: [payment_count] }, { required: [top_up_allowed] }, { required: [payment_uri] }, { required: [network_name] }, { required: [asset_symbol] } ] }
+          not: { anyOf: [ { required: [network] }, { required: [address] }, { required: [transaction_hash] }, { required: [explorer_url] }, { required: [received_amount] }, { required: [remaining_amount] }, { required: [payment_count] }, { required: [top_up_allowed] }, { required: [payment_uri] }, { required: [network_name] }, { required: [asset_symbol] }, { required: [expires_at] } ] }
       properties:
         id: { type: string, format: uuid }
         provider: { type: string, enum: [on_chain, hosted_gateway] }
@@ -711,6 +711,7 @@ components:
         payment_uri: { type: string, maxLength: 2048, pattern: '^(?:ethereum:0x[0-9a-fA-F]{40}@[1-9][0-9]*|solana:[1-9A-HJ-NP-Za-km-z]{32,44}\?amount=|ton://transfer/)[^\s]*$', description: 'Wallet deep link for an on-chain route (EIP-681, Solana Pay, ton://transfer) carrying the address and the amount still due. Present only while the route accepts a transfer (active, before its deadline, untouched while pending or open for a top-up) and the network has a widely supported standard.' }
         transaction_hash: { type: string }
         explorer_url: { type: string, format: uri, pattern: '^https://' }
+        expires_at: { type: string, format: date-time, description: 'On-chain routes only: the last moment the route accepts a transfer for its fixed amount (the grace end when the frozen policy accepts late payments). It can be earlier than the session expiry.' }
     SelectRouteInput: { type: object, additionalProperties: false, required: [route_id], properties: { route_id: { type: string, format: uuid } } }
     PaymentLinkInput:
       type: object

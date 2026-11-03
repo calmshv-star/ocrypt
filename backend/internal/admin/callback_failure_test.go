@@ -35,10 +35,27 @@ func TestCallbackFailuresRedirectToAPlainPage(t *testing.T) {
 			if cookie.Name == sessionCookieName && cookie.MaxAge >= 0 && cookie.Value != "" {
 				t.Fatalf("%s: a failed callback set a session cookie", name)
 			}
+			// A stale callback must not end another tab's sign-in in flight.
+			if cookie.Name == oidcCookieName {
+				t.Fatalf("%s: an unmatched callback touched the correlation cookie", name)
+			}
 		}
 		if strings.Contains(response.Body.String(), "boom") {
 			t.Fatalf("%s: provider detail leaked", name)
 		}
+	}
+}
+
+func TestReportRefusesYearsPostgreSQLCannotStore(t *testing.T) {
+	handler, repo, raw, csrf, tenant := serverFixture(t, false)
+	repo.identity.Bindings[0].Permissions[PermissionPaymentsRead] = true
+	request := httptest.NewRequest(http.MethodGet, "https://admin.example/admin/v1/reports/daily-totals?from=0000-01-01&to=0000-01-02", nil)
+	addAuth(request, raw, csrf)
+	request.Header.Set("X-Admin-Tenant-ID", tenant)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || repo.dailyTotalsArgs != nil {
+		t.Fatalf("year 0 must be refused before the database: %d", response.Code)
 	}
 }
 

@@ -11,6 +11,8 @@ const TIERS: Record<string, NetworkFeeTier> = {
   "eip155:1": "high"
 };
 
-export function networkFeeTier(chainId: string): NetworkFeeTier | undefined {
+export function networkFeeTier(chainId: string, assetSymbol = ""): NetworkFeeTier | undefined {
+  // Native TRX moves on free daily bandwidth; only TRON tokens burn energy.
+  if (chainId === "tron:mainnet" && assetSymbol.toUpperCase() === "TRX") return "low";
   return TIERS[chainId];
 }

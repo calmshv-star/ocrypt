@@ -331,6 +331,8 @@ func loadPublicCheckout(ctx context.Context, tx pgx.Tx, hash [32]byte, tenantID,
 		}
 		if route.Provider == "on_chain" {
 			route.NetworkName, route.AssetSymbol = networkName, assetSymbol
+			deadline := collectionDeadline.UTC()
+			route.ExpiresAt = &deadline
 			if routeAcceptsTransfer(routeStatus, result.Status, route.ReceivedAmount != "", topUpAllowed, collectionDeadline, now) {
 				route.PaymentURI = paymentURI(chainFamily, route.Network, assetKind, assetContract, route.Address, paymentURIAmount(expectedAtomic, receivedAtomic), assetDecimals)
 			}

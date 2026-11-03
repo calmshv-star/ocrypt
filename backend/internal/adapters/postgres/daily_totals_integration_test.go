@@ -87,4 +87,41 @@ func (f *faultDatabase) dailyTotals(t *testing.T) {
 	// The BFF authorizes the requested scope before this call (as for every
 	// admin read); the tenant case above shows another tenant's payment is
 	// never summed into this tenant's report.
+
+	// A payment counts on the day its last finalized transfer reached the
+	// chain, not the day the platform processed it.
+	p := f.seed(t)
+	transferAt, processedAt := at("2026-10-04T23:00:00Z"), at("2026-10-05T01:00:00Z")
+	faultExec(t, f.ctx, f.admin, `INSERT INTO transfer_events(id,chain_id,transaction_id,event_identity,event_kind,asset_id,from_address,to_address,amount_atomic,asset_decimals,block_hash,block_height,on_chain_time,status,parser_version,evidence_hash,created_at,updated_at)
+VALUES($1,$2,$3,'native:0','native_top_level',$4,$5,$6,$7::numeric,18,'report-block',2,$8,'finalized','report-fixture-v1',$9,$10,$10)`,
+		p.event.ID, p.chain, "0x"+strings.Repeat("b", 64), p.asset, p.event.FromAddress, p.event.Identity.ToAddress, p.event.Amount.String(), transferAt, make([]byte, 32), processedAt)
+	faultExec(t, f.ctx, f.admin, `INSERT INTO payment_matches(id,tenant_id,event_id,route_id,intent_id,match_kind,expected_atomic,received_atomic,credited_atomic,state,evidence,policy_version,created_at,finalized_at)
+VALUES($1,$2,$3,$4,$5,'exact',$6::numeric,$6::numeric,$6::numeric,'finalized','{}'::jsonb,1,$7,$7)`, faultID(t), p.tenant, p.event.ID, p.route, p.intent, p.event.Amount.String(), processedAt)
+	faultExec(t, f.ctx, f.admin, `UPDATE payment_intents SET status='settled',settled_at=$2,updated_at=$2,version=version+1 WHERE id=$1`, p.intent, processedAt)
+	// A reorged payment keeps its old settled_at but is no longer paid.
+	reorged := at("2026-10-04T12:00:00Z")
+	intent(p.tenant, p.merchant, "777", "USD", "reorg_review", &reorged)
+	// The last Sunday of October in Berlin has 25 hours: 22:30 UTC on 25
+	// October is still that local day.
+	dst := at("2026-10-25T22:30:00Z")
+	intent(p.tenant, p.merchant, "300", "EUR", "settled", &dst)
+
+	merchantUser := faultID(t)
+	faultExec(t, f.ctx, f.admin, `INSERT INTO admin_users(id,oidc_issuer,oidc_subject,display_name,email,status,created_at,updated_at,version) VALUES($1,'https://id.example',$2,'Merchant accountant','m-accountant@report.example','active',$3,$3,1)`, merchantUser, "report-m-"+merchantUser, now)
+	merchantPrincipal := admin.PrincipalFor(admin.Identity{UserID: merchantUser, Status: "active", Bindings: []admin.Binding{{Role: "auditor", TenantID: p.tenant, MerchantID: p.merchant, Permissions: map[admin.Permission]bool{admin.PermissionPaymentsRead: true}}}}, admin.Session{})
+	for name, c := range map[string]struct {
+		zone, from, to, want string
+	}{
+		"transfer day, not processing day": {"UTC", "2026-10-04", "2026-10-05", "2026-10-04 USD/2 1=12345"},
+		"Berlin 25-hour day":               {"Europe/Berlin", "2026-10-25", "2026-10-25", "2026-10-25 EUR/2 1=300"},
+		"after the Berlin long day":        {"Europe/Berlin", "2026-10-26", "2026-10-26", ""},
+	} {
+		rows, err := repository.DailyTotals(f.ctx, merchantPrincipal, admin.Scope{TenantID: p.tenant, MerchantID: p.merchant}, c.from, c.to, c.zone)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := render(rows); got != c.want {
+			t.Fatalf("%s:\n got %s\nwant %s", name, got, c.want)
+		}
+	}
 }

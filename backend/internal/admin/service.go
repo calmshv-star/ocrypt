@@ -318,6 +318,10 @@ func (s *Service) CompleteCallback(ctx context.Context, state, code string) (Aut
 		return s.completeSignup(ctx, attempt, claims, now)
 	}
 	identity, err := s.repository.FindIdentity(ctx, claims.Issuer, claims.Subject)
+	// An outage is not "no access": only an unknown or inactive identity is.
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return AuthResult{}, "", fmt.Errorf("resolve admin identity: %w", err)
+	}
 	if err != nil || identity.Status != "active" {
 		return AuthResult{}, "", fmt.Errorf("resolve active admin identity (%v): %w", err, ErrForbidden)
 	}
