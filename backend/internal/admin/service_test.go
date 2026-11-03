@@ -25,6 +25,11 @@ type repositoryStub struct {
 	signupOptionCalls int
 	signupRegions     []SignupRegion
 	dailyTotalsArgs   []string
+	// session list and revocations as the repository received them
+	audit                                   AuditEntry
+	userSessions                            []SessionSummary
+	revokedSession, revokedFor, keptSession string
+	revokeErr                               error
 	// go-live submission and decision as the repository received them
 	goLiveRequestID, goLivePreset, goLivePrepared string
 	goLiveAddresses                               []GoLiveProvenAddress
@@ -230,8 +235,26 @@ func (r *repositoryStub) ImportWatchWallets(_ context.Context, _ Principal, _ Sc
 	}
 	return result, nil
 }
-func (r *repositoryStub) AppendAudit(context.Context, AuditEntry) error { return nil }
-func (r *repositoryStub) Ping(context.Context) error                    { return nil }
+func (r *repositoryStub) AppendAudit(_ context.Context, entry AuditEntry) error {
+	r.audit = entry
+	return nil
+}
+func (r *repositoryStub) LabelSession(context.Context, string, string) error { return nil }
+func (r *repositoryStub) ListUserSessions(context.Context, string, time.Time) ([]SessionSummary, error) {
+	return append([]SessionSummary(nil), r.userSessions...), nil
+}
+func (r *repositoryStub) RevokeUserSession(_ context.Context, userID, sessionID, _ string, _ time.Time) error {
+	if r.revokeErr != nil {
+		return r.revokeErr
+	}
+	r.revokedFor, r.revokedSession = userID, sessionID
+	return nil
+}
+func (r *repositoryStub) RevokeOtherSessions(_ context.Context, _ string, keep, _ string, _ time.Time) (int64, error) {
+	r.keptSession = keep
+	return 1, nil
+}
+func (r *repositoryStub) Ping(context.Context) error { return nil }
 
 func testIdentityAndSession(now time.Time, token, csrf string) (Identity, Session) {
 	tenant := "018f22b0-4db4-7c58-8f18-4d2f9d7b6a11"

@@ -613,6 +613,48 @@ func (r *PostgresRepository) RotateSession(ctx context.Context, old [32]byte, se
 	}))
 }
 
+func (r *PostgresRepository) LabelSession(ctx context.Context, sessionID, label string) error {
+	_, err := r.pool.Exec(ctx, `UPDATE admin_sessions SET device_label=$2 WHERE id=$1 AND device_label IS NULL`, sessionID, label)
+	return classifyAdminDB(err)
+}
+
+func (r *PostgresRepository) ListUserSessions(ctx context.Context, userID string, now time.Time) ([]SessionSummary, error) {
+	rows, err := r.pool.Query(ctx, `SELECT id::text,created_at,last_seen_at,least(idle_expires_at,absolute_expires_at),coalesce(device_label,''),amr
+FROM admin_sessions WHERE user_id=$1 AND purpose='admin' AND revoked_at IS NULL AND idle_expires_at>$2 AND absolute_expires_at>$2
+ORDER BY last_seen_at DESC,id LIMIT 50`, userID, now)
+	if err != nil {
+		return nil, classifyAdminDB(err)
+	}
+	defer rows.Close()
+	sessions := []SessionSummary{}
+	for rows.Next() {
+		var session SessionSummary
+		if err := rows.Scan(&session.ID, &session.CreatedAt, &session.LastSeenAt, &session.ExpiresAt, &session.Device, &session.AMR); err != nil {
+			return nil, classifyAdminDB(err)
+		}
+		sessions = append(sessions, session)
+	}
+	return sessions, classifyAdminDB(rows.Err())
+}
+
+// RevokeUserSession ends one active session of the user; another user's or
+// an ended session is not found.
+func (r *PostgresRepository) RevokeUserSession(ctx context.Context, userID, sessionID, reason string, now time.Time) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE admin_sessions SET revoked_at=$3,revocation_reason=$4 WHERE id=$2 AND user_id=$1 AND revoked_at IS NULL`, userID, sessionID, now, reason)
+	if err == nil && tag.RowsAffected() != 1 {
+		return ErrNotFound
+	}
+	return classifyAdminDB(err)
+}
+
+func (r *PostgresRepository) RevokeOtherSessions(ctx context.Context, userID, keepSessionID, reason string, now time.Time) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `UPDATE admin_sessions SET revoked_at=$3,revocation_reason=$4 WHERE user_id=$1 AND id<>$2 AND revoked_at IS NULL`, userID, keepSessionID, now, reason)
+	if err != nil {
+		return 0, classifyAdminDB(err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 func (r *PostgresRepository) RevokeSession(ctx context.Context, hash [32]byte, reason string, now time.Time) error {
 	tag, err := r.pool.Exec(ctx, `UPDATE admin_sessions SET revoked_at=$2,revocation_reason=$3 WHERE session_hash=$1 AND revoked_at IS NULL`, hash[:], now, reason)
 	if err == nil && tag.RowsAffected() != 1 {

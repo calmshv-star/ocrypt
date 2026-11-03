@@ -170,6 +170,34 @@ paths:
       responses:
         '204': {description: Session revoked and cookies cleared}
         '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/session/sessions:
+    get:
+      tags: [Authentication]
+      operationId: listMySessions
+      summary: The signed-in user's active cabinet sessions
+      description: Newest activity first, at most 50. The device is a coarse browser/system label taken at sign-in; the raw User-Agent is never stored.
+      responses:
+        '200': {description: Sessions, content: {application/json: {schema: {type: object, additionalProperties: false, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/SessionSummary'}}}}}}}
+  /admin/v1/session/sessions/{id}/revoke:
+    post:
+      tags: [Authentication]
+      operationId: revokeMySession
+      summary: End one of the user's other sessions
+      description: The current session ends by signing out. Another user's or an already ended session is not found. Audited.
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{name: id, in: path, required: true, schema: {$ref: '#/components/schemas/UUID'}}]
+      responses:
+        '204': {description: Session ended}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /admin/v1/session/sessions/revoke-others:
+    post:
+      tags: [Authentication]
+      operationId: revokeOtherSessions
+      summary: End every session of the user except the current one
+      security: [{sessionCookie: [], csrfHeader: []}]
+      responses:
+        '200': {description: Sessions ended, content: {application/json: {schema: {type: object, additionalProperties: false, required: [revoked], properties: {revoked: {type: integer, minimum: 0}}}}}}
   /admin/v1/session/csrf:
     post:
       tags: [Authentication]
@@ -1429,6 +1457,7 @@ components:
     GoLiveProofChallenge: {type: object, additionalProperties: false, required: [kind,chain_id,address,display_address,tenant_id,merchant_id,nonce,issued_at,expires_at,message,token], properties: {kind: {type: string, enum: [evm_personal_sign, solana_sign_message, tron_sign_message_v2]}, chain_id: {type: string}, address: {type: string}, display_address: {type: string}, tenant_id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, nonce: {$ref: '#/components/schemas/UUID'}, issued_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time}, message: {type: string}, token: {type: string}}}
     GoLiveSubmission: {type: object, additionalProperties: false, required: [preset,proofs], properties: {preset: {type: string, enum: [strict, standard, fast]}, proofs: {type: array, minItems: 1, maxItems: 16, items: {type: object, additionalProperties: false, required: [token,signature], properties: {token: {type: string}, signature: {type: string}}}}}}
     GoLiveReview: {type: object, additionalProperties: false, required: [request_id,tenant_id,merchant_id,company_name,owner_email,preset,screening_status,addresses,requested_at], properties: {request_id: {$ref: '#/components/schemas/UUID'}, tenant_id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, company_name: {type: string}, owner_email: {type: string}, preset: {type: string, enum: [strict, standard, fast]}, screening_status: {type: string}, addresses: {type: array, items: {type: object, additionalProperties: false, required: [chain_id,address,canonical_address,proof_kind,admitted,routes_admitted], properties: {chain_id: {type: string}, address: {type: string}, canonical_address: {type: string}, proof_kind: {type: string}, wallet_id: {$ref: '#/components/schemas/UUID'}, admitted: {type: boolean}, routes_admitted: {type: boolean}}}}, requested_at: {type: string, format: date-time}}}
+    SessionSummary: {type: object, additionalProperties: false, required: [id,created_at,last_seen_at,expires_at,device,amr,current], properties: {id: {$ref: '#/components/schemas/UUID'}, created_at: {type: string, format: date-time}, last_seen_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time}, device: {type: string, pattern: '^([A-Za-z]{1,16}/[A-Za-z]{0,16})?$'}, amr: {type: array, items: {type: string}}, current: {type: boolean}}}
     SignupDecision: {type: object, additionalProperties: false, required: [decision,reason], properties: {decision: {type: string, enum: [approve, reject]}, reason: {type: string, minLength: 3, maxLength: 1000}}}
     OverviewMoney:
       type: object

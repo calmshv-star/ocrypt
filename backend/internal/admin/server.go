@@ -139,6 +139,9 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /admin/v1/session/me", s.authenticated(http.HandlerFunc(s.me)))
 	s.mux.Handle("POST /admin/v1/session/csrf", s.authenticated(s.sameOrigin(http.HandlerFunc(s.refreshCSRF))))
 	s.mux.Handle("POST /admin/v1/session/logout", s.authenticated(s.mutating(http.HandlerFunc(s.logout))))
+	s.mux.Handle("GET /admin/v1/session/sessions", s.authenticated(http.HandlerFunc(s.mySessions)))
+	s.mux.Handle("POST /admin/v1/session/sessions/revoke-others", s.authenticated(s.mutating(http.HandlerFunc(s.revokeOtherSessions))))
+	s.mux.Handle("POST /admin/v1/session/sessions/{id}/revoke", s.authenticated(s.mutating(http.HandlerFunc(s.revokeMySession))))
 	s.mux.Handle("GET /admin/v1/overview", s.authenticated(http.HandlerFunc(s.overview)))
 	s.mux.Handle("GET /admin/v1/intents", s.authenticated(http.HandlerFunc(s.intents)))
 	s.mux.Handle("GET /admin/v1/transfers", s.authenticated(http.HandlerFunc(s.transfers)))
@@ -712,6 +715,7 @@ func (s *Server) callback(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	s.setCookies(w, *authenticated.Tokens, authenticated.Session.AbsoluteExpiresAt)
+	s.service.LabelSession(request.Context(), authenticated.Session, request.UserAgent())
 	if returnPath == "" {
 		returnPath = "/"
 	}
@@ -884,6 +888,24 @@ func (s *Server) refreshCSRF(w http.ResponseWriter, request *http.Request) {
 	}
 	s.setCSRFCookie(w, csrfToken, authenticated.Session.AbsoluteExpiresAt)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) mySessions(w http.ResponseWriter, request *http.Request) {
+	sessions, err := s.service.ListMySessions(request.Context(), authenticatedFrom(request.Context()))
+	respond(w, map[string][]SessionSummary{"data": sessions}, err)
+}
+
+func (s *Server) revokeMySession(w http.ResponseWriter, request *http.Request) {
+	if err := s.service.RevokeMySession(request.Context(), authenticatedFrom(request.Context()), request.PathValue("id")); err != nil {
+		respond[any](w, nil, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) revokeOtherSessions(w http.ResponseWriter, request *http.Request) {
+	count, err := s.service.RevokeOtherSessions(request.Context(), authenticatedFrom(request.Context()))
+	respond(w, map[string]int64{"revoked": count}, err)
 }
 
 func (s *Server) logout(w http.ResponseWriter, request *http.Request) {
