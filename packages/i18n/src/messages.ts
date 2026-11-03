@@ -1484,7 +1484,9 @@ export const en = {
   "sanctions.from": "From",
   "sanctions.to": "to",
   "sanctions.transaction": "Transaction",
-  "notifications.sanctionedAlways": "Payments from a sanctioned address are always reported to everyone who gets this merchant's notifications."
+  "notifications.sanctionedAlways": "Payments from a sanctioned address are always reported to everyone who gets this merchant's notifications.",
+  "goLive.addressNotAccepted": "One of the addresses cannot be used for live payments. Use a different address or contact support.",
+  "sanctions.operatorList": "Operator list"
 } as const;
 
 export type MessageKey = keyof typeof en;

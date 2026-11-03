@@ -41,13 +41,16 @@ Download the files yourself from the official sources, then pipe the
 importer's SQL into `psql` as the **database owner** (the runtime roles can
 neither read the lists nor replace them):
 
-- OFAC: `SDN.CSV` and `ALT.CSV` (legacy flat files) from the Sanctions List
-  Service, https://ofac.treasury.gov/sanctions-list-service
+- OFAC: `SDN.CSV`, `ALT.CSV` and `SDN_COMMENTS.CSV` (legacy flat files) from
+  the Sanctions List Service, https://ofac.treasury.gov/sanctions-list-service.
+  OFAC cuts long remarks at 1000 characters and continues them in
+  `SDN_COMMENTS.CSV`; without it, most addresses of entities with many
+  addresses are lost.
 - UN Security Council consolidated list:
   https://scsanctions.un.org/resources/xml/en/consolidated.xml
 
 ```sh
-python3 scripts/signup_screening_import.py ofac --sdn SDN.CSV --alt ALT.CSV | psql "$OWNER_DATABASE_URL"
+python3 scripts/signup_screening_import.py ofac --sdn SDN.CSV --alt ALT.CSV --comments SDN_COMMENTS.CSV | psql "$OWNER_DATABASE_URL"
 python3 scripts/signup_screening_import.py un --xml consolidated.xml | psql "$OWNER_DATABASE_URL"
 # Optional names, domains or crypto addresses your compliance team blocks
 # (header kind,value,reference; an address row is "address,TRX T…,case-9"):
@@ -60,16 +63,25 @@ The same runs load the list's crypto addresses ("Digital Currency Address -
 ETH 0x…" in the OFAC remarks; operator rows of kind `address`) through
 `replace_sanctioned_addresses`, in the same transaction as the names. Only
 the families the platform watches are kept: EVM (one 0x account on every EVM
-chain), TRON (base58check, verified, with its 20 bytes in hex) and Solana;
-Bitcoin, Monero and other chains are skipped.
+chain), TRON (base58check, verified, with its 20 bytes in hex) and Solana (a
+32-byte base58 key, whatever the tag); Bitcoin, Monero and other chains are
+skipped. One account listed under several tags is one entry. An official
+list's addresses, like its names, cannot be emptied or shrunk below half in
+one load.
 
 Every new transfer's sender is checked when the scanner records it. A hit is
-an alert for each merchant whose payment address received it (cabinet page
-"Sanctions alerts") and a notification to everyone who gets that merchant's
-notifications. The payment is not changed: the platform holds no funds and
+an alert for the merchant the transfer was for: the merchants whose route for
+that asset covers the transfer's time, else the merchant that owns the deposit
+address (a tenant-shared address without such a route alerts nobody, so no
+merchant sees another's payment). The cabinet page "Sanctions alerts" lists
+them, and everyone who gets that merchant's notifications is told, at most
+once per sender and hour (every transfer is still an alert). Operator case
+references are shown to merchants only as "operator list". The payment is not changed: the platform holds no funds and
 the merchant decides. A failing check logs `sanctions screening skipped for
 transfer` and never blocks the scanner; alert on that log line. A listed
-address cannot be submitted as a go-live receiving address.
+address cannot be a go-live receiving address or become a deposit address
+(SQLSTATE OCP04; the merchant sees only that the address is not accepted).
+Alerts are kept for transfers a later reorg removes.
 
 Transfers are screened against the list loaded when they arrive; a refresh
 does not re-screen earlier transfers.

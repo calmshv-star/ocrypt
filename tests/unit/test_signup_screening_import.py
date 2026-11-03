@@ -161,6 +161,24 @@ def test_addresses_of_watched_families_only(tmp_path):
     ], "Bitcoin is not watched and a TRON address with a bad checksum is dropped"
 
 
+def test_long_remarks_continue_in_sdn_comments(tmp_path):
+    evm = [f"0x{index:040x}" for index in range(1, 16)]
+    remarks = "; ".join(f"Digital Currency Address - ETH {value}" for value in evm)
+    cut = 1000 - 37  # the cut falls inside an address
+    sdn = write(tmp_path, "SDN.CSV", f'302,"MANY ADDRESSES LLC",-0- ,"CYBER2",-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,"{remarks[:cut]}"\r\n')
+    comments = write(tmp_path, "SDN_COMMENTS.CSV", f'302,"{remarks[cut:]}"\r\n')
+    assert len(module.ofac_addresses(sdn)) < len(evm), "without the overflow file the tail is lost"
+    assert [item["address"] for item in module.ofac_addresses(sdn, comments)] == evm
+
+
+def test_one_account_under_several_tags_and_solana_by_format(tmp_path):
+    remarks = f"Digital Currency Address - ETH 0x{'2' * 40}; Digital Currency Address - USDT 0x{'2' * 40}; Digital Currency Address - USDC {SOLANA}"
+    sdn = write(tmp_path, "SDN.CSV", f'303,"EXCHANGE",-0- ,"CYBER2",-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,"{remarks}"\r\n')
+    assert [(item["family"], item["currency"]) for item in module.ofac_addresses(sdn)] == [("evm", "ETH"), ("evm", "USDT"), ("solana", "USDC")]
+    with pytest.raises(ValueError):
+        module.operator_entries(write(tmp_path, "op.csv", f"kind,value,reference\r\naddress,USDT-TRC20 {TRON},x\r\n"))
+
+
 def test_operator_csv(tmp_path):
     path = write(tmp_path, "operator.csv", f"kind,value,reference\r\ndomain,blocked.example,case-7\r\nname,Bad Actor Ltd,case-8\r\naddress,TRX {TRON},case-9\r\n")
     entries, addresses = module.operator_entries(path)
@@ -190,7 +208,7 @@ def test_sql_is_one_transaction_and_quotes_any_text(tmp_path):
 
 
 def test_cli_prints_sql_for_psql(tmp_path, capsys):
-    assert module.main(["ofac", "--sdn", str(write(tmp_path, "SDN.CSV", SDN)), "--alt", str(write(tmp_path, "ALT.CSV", ALT))]) == 0
+    assert module.main(["ofac", "--sdn", str(write(tmp_path, "SDN.CSV", SDN)), "--alt", str(write(tmp_path, "ALT.CSV", ALT)), "--comments", str(write(tmp_path, "SDN_COMMENTS.CSV", '101,"Digital Currency Address - ETH 0x' + '9' * 40 + '"\r\n'))]) == 0
     sql = capsys.readouterr().out
     assert ("name", "ROGUE COMMERCE", "SDN-101") in entries_of(sql) and "'ofac_sdn'" in sql
     assert module.main(["un", "--xml", str(write(tmp_path, "un.xml", UN))]) == 0

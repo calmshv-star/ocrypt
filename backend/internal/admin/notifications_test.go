@@ -3,12 +3,15 @@ package admin
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func notificationFixture(t *testing.T) (http.Handler, *repositoryStub, *Service, string, string, string, string) {
@@ -145,5 +148,12 @@ func TestSanctionsAlertsNeedPaymentAccessOnTheMerchant(t *testing.T) {
 	}
 	if response := get("018f22b0-4db4-7c58-8f18-4d2f9d7b6a99"); response.Code != http.StatusForbidden {
 		t.Fatalf("another merchant: %d", response.Code)
+	}
+}
+
+func TestRefusedAddressHasItsOwnProblemCode(t *testing.T) {
+	err := classifyAdminDB(&pgconn.PgError{Code: "OCP04"})
+	if !errors.Is(err, ErrAddressNotAccepted) || statusFor(err) != http.StatusBadRequest || problemCode(err) != "address_not_accepted" {
+		t.Fatalf("%v %d %s", err, statusFor(err), problemCode(err))
 	}
 }

@@ -1486,5 +1486,7 @@ export const zhCN = {
   "sanctions.from": "来自",
   "sanctions.to": "至",
   "sanctions.transaction": "交易",
-  "notifications.sanctionedAlways": "来自受制裁地址的付款总会通知给所有接收此商户通知的人。"
+  "notifications.sanctionedAlways": "来自受制裁地址的付款总会通知给所有接收此商户通知的人。",
+  "goLive.addressNotAccepted": "其中一个地址不能用于正式付款。请使用其他地址或联系支持。",
+  "sanctions.operatorList": "运营方名单"
 } satisfies Messages;

@@ -8,7 +8,7 @@ through replace_sanctioned_addresses (migration 000064). Apply it with the
 database owner role, for example:
 
   python3 scripts/signup_screening_import.py ofac --sdn SDN.CSV --alt ALT.CSV \
-    | psql "$OWNER_DATABASE_URL"
+    --comments SDN_COMMENTS.CSV | psql "$OWNER_DATABASE_URL"
 
 The script never connects to the network or the database. Names are sent as
 published; the database computes every match key, so the importer and the
@@ -119,6 +119,8 @@ def address(currency, value, reference):
     its 20 bytes in hex for senders reported in hex) and Solana. Others
     (Bitcoin, Monero, ...) are skipped: no such payments arrive here."""
     currency = currency.upper()
+    if not re.fullmatch(r"[A-Z0-9]{2,10}", currency):
+        return None
     if re.fullmatch(r"0x[0-9a-fA-F]{40}", value):
         return {"family": "evm", "address": value.lower(), "currency": currency, "reference": reference}
     if re.fullmatch(r"T[1-9A-HJ-NP-Za-km-z]{33}", value):
@@ -126,18 +128,29 @@ def address(currency, value, reference):
         if raw and len(raw) == 25 and raw[0] == 0x41 and hashlib.sha256(hashlib.sha256(raw[:21]).digest()).digest()[:4] == raw[21:]:
             return {"family": "tron", "address": value, "hex": raw[1:21].hex(), "currency": currency, "reference": reference}
         return None
-    if currency == "SOL" and re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{32,44}", value):
+    # Solana by format, whatever the tag (USDC and USDT live there too): a
+    # base58 string of exactly 32 bytes. Bitcoin's base58check is 25 bytes.
+    if re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{32,44}", value):
         raw = base58_decode(value)
         if raw and len(raw) == 32:
             return {"family": "solana", "address": value, "currency": currency, "reference": reference}
     return None
 
 
-def ofac_addresses(sdn_path):
-    """The "Digital Currency Address - XBT …" remarks of SDN.CSV."""
+def ofac_addresses(sdn_path, comments_path=None):
+    """The "Digital Currency Address - XBT …" remarks of SDN.CSV. OFAC cuts
+    Remarks at 1000 characters and continues them in SDN_COMMENTS.CSV
+    (ent_num, remarks_extended); the parts are joined as published, so an
+    address split at the cut is whole again."""
+    overflow = {}
+    if comments_path:
+        for ent_num, extended in ofac_rows(comments_path, 2):
+            if extended != OFAC_NULL:
+                overflow[ent_num] = overflow.get(ent_num, "") + extended
     found = []
     for ent_num, _name, sdn_type, *_, remarks in ofac_rows(sdn_path, 12):
-        if remarks == OFAC_NULL:
+        remarks = ("" if remarks == OFAC_NULL else remarks) + overflow.get(ent_num, "")
+        if not remarks:
             continue
         for currency, value in DIGITAL_CURRENCY.findall(remarks):
             item = address(currency, value, f"SDN-{ent_num}")
@@ -193,7 +206,7 @@ def operator_entries(path):
             currency, _, value = value.partition(" ")
             item = address(currency, value.strip(), reference)
             if item is None:
-                raise ValueError(f"{path}: line {reader.line_num} is not an EVM, TRON or Solana address")
+                raise ValueError(f"{path}: line {reader.line_num} needs a currency tag (2-10 letters or digits) and an EVM, TRON or Solana address")
             addresses.append(item)
         else:
             entries.append(entry(kind, value, reference))
@@ -244,6 +257,7 @@ def main(argv=None):
     ofac = commands.add_parser("ofac", help="OFAC SDN.CSV and ALT.CSV (legacy flat files)")
     ofac.add_argument("--sdn", required=True)
     ofac.add_argument("--alt")
+    ofac.add_argument("--comments", help="SDN_COMMENTS.CSV, the continuation of long remarks")
     ofac.add_argument("--published", help="publication time, ISO 8601")
     un = commands.add_parser("un", help="UN Security Council consolidated list XML")
     un.add_argument("--xml", required=True)
@@ -252,7 +266,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.command == "ofac":
-            sql = render_sql("ofac_sdn", "OFAC Specially Designated Nationals (SDN.CSV, ALT.CSV)", args.published, OFFICIAL_STALE_AFTER, ofac_entries(args.sdn, args.alt), ofac_addresses(args.sdn))
+            sql = render_sql("ofac_sdn", "OFAC Specially Designated Nationals (SDN.CSV, ALT.CSV)", args.published, OFFICIAL_STALE_AFTER, ofac_entries(args.sdn, args.alt), ofac_addresses(args.sdn, args.comments))
         elif args.command == "un":
             published, entries = un_entries(args.xml)
             sql = render_sql("un_consolidated", "UN Security Council Consolidated List", published, OFFICIAL_STALE_AFTER, entries)

@@ -81,7 +81,7 @@ func Render(event, locale string, raw json.RawMessage, cabinetURL string) (Messa
 		values["network"] = plain(p.Network, 64, "—")
 		values["sender"] = plain(p.Sender, 128, "—")
 		values["transaction"] = plain(p.Transaction, 128, "—")
-		values["reference"] = plain(p.Reference, 128, "—")
+		values["reference"] = plain(p.Reference, 128, words["operator_list"])
 	}
 	values["status"] = ""
 	if p.HTTPStatus >= 100 && p.HTTPStatus <= 599 {
@@ -182,6 +182,7 @@ func deviceText(label, unknown string) string {
 
 var catalog = map[string]map[string]string{
 	"en": {
+		"operator_list":          "the operator's list",
 		"sanctioned.subject":     "Payment from a sanctioned address",
 		"sanctioned.body":        "{merchant}: {amount} ({asset}) on {network} came from {sender}, which is on a sanctions list ({reference}). Transaction {transaction}. The payment is not changed automatically: review it before you fulfil the order or return funds.",
 		"paid.subject":           "Payment received: {amount} {currency}",
@@ -203,6 +204,7 @@ var catalog = map[string]map[string]string{
 		"telegram.start":         "To get Ocrypt notifications here, open the cabinet, go to Notifications and press Connect Telegram.",
 	},
 	"ru": {
+		"operator_list":          "список оператора",
 		"sanctioned.subject":     "Платёж с адреса из санкционного списка",
 		"sanctioned.body":        "{merchant}: {amount} ({asset}) в сети {network} пришли с адреса {sender}, который есть в санкционном списке ({reference}). Транзакция {transaction}. Платёж автоматически не меняется: проверьте его, прежде чем выполнять заказ или возвращать средства.",
 		"paid.subject":           "Платёж получен: {amount} {currency}",
@@ -224,6 +226,7 @@ var catalog = map[string]map[string]string{
 		"telegram.start":         "Чтобы получать сюда уведомления Ocrypt, откройте кабинет, раздел «Уведомления», и нажмите «Подключить Telegram».",
 	},
 	"zh": {
+		"operator_list":          "运营方名单",
 		"sanctioned.subject":     "来自受制裁地址的付款",
 		"sanctioned.body":        "{merchant}：{network} 上的 {amount}（{asset}）来自 {sender}，该地址在制裁名单中（{reference}）。交易 {transaction}。付款不会被自动更改：请在履行订单或退回资金前进行审查。",
 		"paid.subject":           "已收到付款：{amount} {currency}",
@@ -245,6 +248,7 @@ var catalog = map[string]map[string]string{
 		"telegram.start":         "要在此接收 Ocrypt 通知，请打开后台，进入“通知”，然后点击“连接 Telegram”。",
 	},
 	"es": {
+		"operator_list":          "la lista del operador",
 		"sanctioned.subject":     "Pago desde una dirección sancionada",
 		"sanctioned.body":        "{merchant}: {amount} ({asset}) en {network} llegaron desde {sender}, que figura en una lista de sanciones ({reference}). Transacción {transaction}. El pago no se modifica automáticamente: revíselo antes de cumplir el pedido o devolver fondos.",
 		"paid.subject":           "Pago recibido: {amount} {currency}",
@@ -266,6 +270,7 @@ var catalog = map[string]map[string]string{
 		"telegram.start":         "Para recibir aquí las notificaciones de Ocrypt, abra el panel, vaya a Notificaciones y pulse Conectar Telegram.",
 	},
 	"fr": {
+		"operator_list":          "la liste de l'opérateur",
 		"sanctioned.subject":     "Paiement depuis une adresse sanctionnée",
 		"sanctioned.body":        "{merchant} : {amount} ({asset}) sur {network} proviennent de {sender}, qui figure sur une liste de sanctions ({reference}). Transaction {transaction}. Le paiement n'est pas modifié automatiquement : examinez-le avant d'exécuter la commande ou de restituer des fonds.",
 		"paid.subject":           "Paiement reçu : {amount} {currency}",
@@ -287,6 +292,7 @@ var catalog = map[string]map[string]string{
 		"telegram.start":         "Pour recevoir ici les notifications Ocrypt, ouvrez l'espace marchand, rubrique Notifications, et appuyez sur Connecter Telegram.",
 	},
 	"de": {
+		"operator_list":          "der Liste des Betreibers",
 		"sanctioned.subject":     "Zahlung von einer sanktionierten Adresse",
 		"sanctioned.body":        "{merchant}: {amount} ({asset}) im Netz {network} kamen von {sender}, die auf einer Sanktionsliste steht ({reference}). Transaktion {transaction}. Die Zahlung wird nicht automatisch geändert: Prüfen Sie sie, bevor Sie die Bestellung ausführen oder Geld zurückgeben.",
 		"paid.subject":           "Zahlung erhalten: {amount} {currency}",

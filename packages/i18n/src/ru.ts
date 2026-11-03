@@ -1486,5 +1486,7 @@ export const ru = {
   "sanctions.from": "От",
   "sanctions.to": "на",
   "sanctions.transaction": "Транзакция",
-  "notifications.sanctionedAlways": "О платежах с санкционных адресов всегда сообщается всем, кто получает уведомления этого магазина."
+  "notifications.sanctionedAlways": "О платежах с санкционных адресов всегда сообщается всем, кто получает уведомления этого магазина.",
+  "goLive.addressNotAccepted": "Один из адресов нельзя использовать для боевых платежей. Укажите другой адрес или обратитесь в поддержку.",
+  "sanctions.operatorList": "Список оператора"
 } satisfies Messages;

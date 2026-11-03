@@ -1486,5 +1486,7 @@ export const de = {
   "sanctions.from": "Von",
   "sanctions.to": "an",
   "sanctions.transaction": "Transaktion",
-  "notifications.sanctionedAlways": "Zahlungen von sanktionierten Adressen werden immer allen gemeldet, die Benachrichtigungen dieses Händlers erhalten."
+  "notifications.sanctionedAlways": "Zahlungen von sanktionierten Adressen werden immer allen gemeldet, die Benachrichtigungen dieses Händlers erhalten.",
+  "goLive.addressNotAccepted": "Eine der Adressen kann nicht für Live-Zahlungen verwendet werden. Verwenden Sie eine andere Adresse oder wenden Sie sich an den Support.",
+  "sanctions.operatorList": "Liste des Betreibers"
 } satisfies Messages;

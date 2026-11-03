@@ -1551,6 +1551,8 @@ func problemCode(err error) string {
 		return "not_found"
 	case errors.Is(err, ErrConflict), errors.Is(err, ErrExpired):
 		return "conflict"
+	case errors.Is(err, ErrAddressNotAccepted):
+		return "address_not_accepted"
 	case errors.Is(err, ErrInvalid):
 		return "invalid_request"
 	default:
@@ -1561,7 +1563,7 @@ func publicDetail(err error) string {
 	if statusFor(err) >= 500 {
 		return "The request could not be completed."
 	}
-	return map[string]string{"step_up_required": "Recent multi-factor authentication is required.", "separation_of_duty": "A different authorized operator must approve this action.", "forbidden": "Permission denied.", "authentication_required": "Authentication is required.", "not_found": "Resource was not found.", "conflict": "The resource changed or the operation is no longer available.", "invalid_request": "Request is invalid."}[problemCode(err)]
+	return map[string]string{"step_up_required": "Recent multi-factor authentication is required.", "separation_of_duty": "A different authorized operator must approve this action.", "forbidden": "Permission denied.", "authentication_required": "Authentication is required.", "not_found": "Resource was not found.", "conflict": "The resource changed or the operation is no longer available.", "invalid_request": "Request is invalid.", "address_not_accepted": "A receiving address is not accepted."}[problemCode(err)]
 }
 
 func writeProblem(w http.ResponseWriter, status int, code, detail string) {

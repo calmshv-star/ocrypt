@@ -1828,6 +1828,8 @@ func classifyAdminDB(err error) error {
 			return ErrInvalid
 		case "OCP01":
 			return ErrForbidden
+		case "OCP04":
+			return ErrAddressNotAccepted
 		}
 	}
 	return fmt.Errorf("admin persistence operation failed: %w", err)

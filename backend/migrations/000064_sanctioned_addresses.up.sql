@@ -9,7 +9,8 @@
 -- payment itself is not changed: the platform holds no funds, the merchant
 -- decides. A failing check only logs a warning and never blocks the scanner.
 --
--- A sanctioned address cannot be a go-live receiving address.
+-- A sanctioned address cannot be a go-live or deposit receiving address
+-- (SQLSTATE OCP04, shown to the merchant as "address not accepted").
 BEGIN;
 
 CREATE TABLE sanctioned_addresses (
@@ -20,7 +21,8 @@ CREATE TABLE sanctioned_addresses (
   -- The 20-byte account as 40 lowercase hex digits (EVM and TRON), so a
   -- sender reported in hex form matches too.
   address_hex text,
-  currency text NOT NULL CHECK (currency ~ '^[A-Z0-9]{2,10}$'),
+  -- OFAC lists one account under several tags (ETH and USDT, say).
+  currencies text[] NOT NULL CHECK (cardinality(currencies) BETWEEN 1 AND 20),
   reference text NOT NULL CHECK (length(reference) BETWEEN 1 AND 128),
   PRIMARY KEY (source,family,address_key,reference),
   CHECK ((family='evm' AND address_key ~ '^0x[0-9a-f]{40}$' AND address_hex=substr(address_key,3))
@@ -59,25 +61,36 @@ ALTER TABLE notification_jobs ADD CONSTRAINT notification_jobs_event_check
 
 -- Replaces the addresses of one source; the source row must have been
 -- (re)loaded by replace_signup_screening_source in the same transaction.
--- Owner only: the importer runs as the database owner.
+-- Like the names, an official list (one with stale_after) may not be
+-- emptied or shrunk below half, so a changed remark format or a truncated
+-- download cannot silently drop the addresses. Owner only: the importer runs
+-- as the database owner.
 CREATE FUNCTION replace_sanctioned_addresses(p_source text,p_entries jsonb) RETURNS integer
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path=pg_catalog,public SET row_security=off AS $$
-DECLARE loaded integer;
+DECLARE loaded integer; previous integer; official boolean;
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM public.signup_screening_sources WHERE source=p_source) THEN
+  SELECT stale_after IS NOT NULL INTO official FROM public.signup_screening_sources WHERE source=p_source;
+  IF NOT FOUND THEN
     RAISE EXCEPTION 'load the screening source % first',p_source USING ERRCODE='OCP02';
   END IF;
   IF p_entries IS NULL OR jsonb_typeof(p_entries)<>'array' THEN
     RAISE EXCEPTION 'address entries must be a JSON array' USING ERRCODE='OCP02';
   END IF;
+  SELECT count(*) INTO previous FROM public.sanctioned_addresses WHERE source=p_source;
   DELETE FROM public.sanctioned_addresses WHERE source=p_source;
-  INSERT INTO public.sanctioned_addresses(source,family,address_key,address_hex,currency,reference)
-  SELECT DISTINCT p_source,x.family,CASE WHEN x.family='evm' THEN lower(x.address) ELSE x.address END,
-         CASE WHEN x.family='evm' THEN substr(lower(x.address),3) WHEN x.family='tron' THEN lower(x.hex) END,
-         upper(x.currency),x.reference
-    FROM jsonb_to_recordset(p_entries) AS x(family text,address text,hex text,currency text,reference text);
+  INSERT INTO public.sanctioned_addresses(source,family,address_key,address_hex,currencies,reference)
+  SELECT p_source,x.family,x.address_key,min(x.address_hex),array_agg(DISTINCT x.currency ORDER BY x.currency),x.reference
+    FROM (SELECT y.family,CASE WHEN y.family='evm' THEN lower(y.address) ELSE y.address END AS address_key,
+                 CASE WHEN y.family='evm' THEN substr(lower(y.address),3) WHEN y.family='tron' THEN lower(y.hex) END AS address_hex,
+                 upper(y.currency) AS currency,y.reference
+            FROM jsonb_to_recordset(p_entries) AS y(family text,address text,hex text,currency text,reference text)) x
+   WHERE x.currency ~ '^[A-Z0-9]{2,10}$'
+   GROUP BY x.family,x.address_key,x.reference;
   GET DIAGNOSTICS loaded=ROW_COUNT;
+  IF official AND previous>0 AND loaded*2<previous THEN
+    RAISE EXCEPTION 'refusing to replace % addresses of % with %',previous,p_source,loaded USING ERRCODE='55000';
+  END IF;
   RETURN loaded;
 END $$;
 
@@ -99,8 +112,10 @@ $$;
 
 -- Everyone who receives this merchant's notifications (saved preferences or
 -- the owner defaults) gets a sanctions alert whatever events they chose:
--- by email, and by Telegram when linked.
-CREATE FUNCTION enqueue_sanctioned_transfer_notification(p_tenant uuid,p_merchant uuid,p_alert uuid,p_payload jsonb) RETURNS integer
+-- by email, and by Telegram when linked. The dedupe key (merchant, sender,
+-- UTC hour) keeps dust from a listed address from flooding the inbox; every
+-- alert is still recorded.
+CREATE FUNCTION enqueue_sanctioned_transfer_notification(p_tenant uuid,p_merchant uuid,p_dedupe text,p_payload jsonb) RETURNS integer
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path=pg_catalog,public SET row_security=off AS $$
 DECLARE inserted integer; now_at timestamptz:=clock_timestamp();
@@ -118,17 +133,21 @@ BEGIN
     ) w ORDER BY w.user_id,w.channel,w.locale
   )
   INSERT INTO public.notification_jobs(id,user_id,tenant_id,merchant_id,channel,event,dedupe_key,payload,locale,status,available_at,created_at,updated_at)
-  SELECT gen_random_uuid(),w.user_id,p_tenant,p_merchant,w.channel,'sanctioned','sanctioned:'||p_alert::text,p_payload,w.locale,'pending',now_at,now_at,now_at
+  SELECT gen_random_uuid(),w.user_id,p_tenant,p_merchant,w.channel,'sanctioned',p_dedupe,p_payload,w.locale,'pending',now_at,now_at,now_at
     FROM wanted w WHERE public.notification_recipient_allowed(w.user_id,p_tenant,p_merchant,'payments:read')
   ON CONFLICT (user_id,channel,dedupe_key) DO NOTHING;
   GET DIAGNOSTICS inserted=ROW_COUNT;
   RETURN inserted;
 END $$;
 
+-- The merchants a transfer was meant for: routes on that address for that
+-- asset whose window covers the transfer (as matching uses them), else the
+-- merchant that owns the deposit address. A tenant-shared address without a
+-- covering route alerts nobody: no merchant can be told another's payment.
 CREATE FUNCTION screen_transfer_sender() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path=pg_catalog,public SET row_security=off AS $$
-DECLARE hits jsonb; route record; alert uuid; merchant_name text;
+DECLARE hits jsonb; route record; alert uuid; merchant_name text; shown jsonb;
 BEGIN
   BEGIN
     SELECT jsonb_agg(DISTINCT jsonb_build_object('source',m.source,'reference',m.reference)) INTO hits
@@ -137,18 +156,29 @@ BEGIN
       IF jsonb_array_length(hits)>20 THEN
         hits := (SELECT jsonb_agg(h) FROM (SELECT h FROM jsonb_array_elements(hits) h LIMIT 20) x);
       END IF;
-      FOR route IN SELECT DISTINCT r.tenant_id,r.merchant_id FROM public.payment_routes r
-                    WHERE r.chain_id=NEW.chain_id AND r.receiving_address=NEW.to_address LOOP
+      -- Operator case references stay internal; merchants see the list.
+      shown := (SELECT jsonb_agg(CASE WHEN h->>'source'='operator' THEN jsonb_build_object('source','operator','reference','') ELSE h END) FROM jsonb_array_elements(hits) h);
+      FOR route IN
+        SELECT DISTINCT r.tenant_id,r.merchant_id FROM public.payment_routes r
+         WHERE r.chain_id=NEW.chain_id AND r.receiving_address=NEW.to_address AND r.asset_id=NEW.asset_id
+           AND NEW.on_chain_time>=r.starts_at AND NEW.on_chain_time<r.grace_ends_at
+        UNION
+        SELECT w.tenant_id,w.merchant_id FROM public.addresses a JOIN public.wallets w ON w.id=a.wallet_id
+         WHERE a.chain_id=NEW.chain_id AND a.canonical_address=NEW.to_address AND a.purpose='deposit' AND w.merchant_id IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM public.payment_routes r2 WHERE r2.chain_id=NEW.chain_id AND r2.receiving_address=NEW.to_address AND r2.asset_id=NEW.asset_id
+                             AND NEW.on_chain_time>=r2.starts_at AND NEW.on_chain_time<r2.grace_ends_at)
+      LOOP
         alert := NULL;
         INSERT INTO public.sanctioned_transfer_alerts(id,tenant_id,merchant_id,event_id,chain_id,transaction_id,asset_id,from_address,to_address,amount_atomic,asset_decimals,matches,detected_at)
-        VALUES(gen_random_uuid(),route.tenant_id,route.merchant_id,NEW.id,NEW.chain_id,NEW.transaction_id,NEW.asset_id,NEW.from_address,NEW.to_address,NEW.amount_atomic,NEW.asset_decimals,hits,clock_timestamp())
+        VALUES(gen_random_uuid(),route.tenant_id,route.merchant_id,NEW.id,NEW.chain_id,NEW.transaction_id,NEW.asset_id,NEW.from_address,NEW.to_address,NEW.amount_atomic,NEW.asset_decimals,shown,clock_timestamp())
         ON CONFLICT (event_id,merchant_id) DO NOTHING RETURNING id INTO alert;
         IF alert IS NOT NULL THEN
           SELECT m.display_name INTO merchant_name FROM public.merchants m WHERE m.id=route.merchant_id AND m.tenant_id=route.tenant_id;
-          PERFORM public.enqueue_sanctioned_transfer_notification(route.tenant_id,route.merchant_id,alert,
-            jsonb_build_object('merchant',left(merchant_name,200),'network',left(NEW.chain_id,64),'sender',left(NEW.from_address,128),
+          PERFORM public.enqueue_sanctioned_transfer_notification(route.tenant_id,route.merchant_id,
+            'sanctioned:'||route.merchant_id::text||':'||lower(left(NEW.from_address,128))||':'||to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYYMMDDHH24'),
+            jsonb_strip_nulls(jsonb_build_object('merchant',left(merchant_name,200),'network',left(NEW.chain_id,64),'sender',left(NEW.from_address,128),
               'transaction',left(NEW.transaction_id,128),'amount_atomic',NEW.amount_atomic::text,'asset_decimals',NEW.asset_decimals,
-              'asset',left(NEW.asset_id,128),'reference',left(hits->0->>'reference',128)));
+              'asset',left(NEW.asset_id,128),'reference',left(nullif(shown->0->>'reference',''),128))));
         END IF;
       END LOOP;
     END IF;
@@ -159,17 +189,39 @@ BEGIN
 END $$;
 CREATE TRIGGER transfer_events_screen_sender AFTER INSERT ON transfer_events FOR EACH ROW EXECUTE FUNCTION screen_transfer_sender();
 
--- A receiving address on a sanctions list cannot go live.
-CREATE FUNCTION refuse_sanctioned_go_live_address() RETURNS trigger
+-- A receiving address on a sanctions list can neither go live nor become a
+-- deposit address later (a wallet's address replacement included).
+CREATE FUNCTION refuse_sanctioned_receiving_address() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path=pg_catalog,public SET row_security=off AS $$
 BEGIN
   IF EXISTS (SELECT 1 FROM public.sanctioned_address_matches(NEW.chain_id,NEW.canonical_address)) THEN
-    RAISE EXCEPTION 'receiving address is on a sanctions list' USING ERRCODE='OCP02';
+    RAISE EXCEPTION 'receiving address is not accepted' USING ERRCODE='OCP04';
   END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER merchant_go_live_addresses_screen BEFORE INSERT ON merchant_go_live_addresses FOR EACH ROW EXECUTE FUNCTION refuse_sanctioned_go_live_address();
+CREATE TRIGGER merchant_go_live_addresses_screen BEFORE INSERT ON merchant_go_live_addresses FOR EACH ROW EXECUTE FUNCTION refuse_sanctioned_receiving_address();
+CREATE TRIGGER addresses_screen_deposit BEFORE INSERT OR UPDATE OF canonical_address,purpose ON addresses FOR EACH ROW
+  WHEN (NEW.purpose='deposit') EXECUTE FUNCTION refuse_sanctioned_receiving_address();
+
+-- Align the notification access check with the cabinet's: a global binding
+-- that carries the permission counts too (it already opens the pages).
+CREATE OR REPLACE FUNCTION notification_recipient_allowed(p_user uuid,p_tenant uuid,p_merchant uuid,p_permission text) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path=pg_catalog,public SET row_security=off AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.admin_users u
+      JOIN public.tenants t ON t.id=p_tenant AND t.status='active'
+      JOIN public.merchants m ON m.id=p_merchant AND m.tenant_id=p_tenant AND m.status='active'
+     WHERE u.id=p_user AND u.status='active' AND p_permission IN ('payments:read','webhooks:read') AND (
+       EXISTS (SELECT 1 FROM public.admin_role_bindings b
+                 JOIN public.admin_role_permissions rp ON rp.role_key=b.role_key AND rp.permission_key=p_permission
+                WHERE b.user_id=u.id AND b.revoked_at IS NULL AND (b.expires_at IS NULL OR b.expires_at>now())
+                  AND (b.tenant_id IS NULL OR (b.tenant_id=p_tenant AND (b.merchant_id IS NULL OR b.merchant_id=p_merchant))))
+       OR EXISTS (SELECT 1 FROM public.notification_default_owners(p_tenant,p_merchant) o
+                    JOIN public.admin_role_permissions rp ON rp.role_key='merchant_owner' AND rp.permission_key=p_permission
+                   WHERE o.user_id=u.id)))
+$$;
 
 -- The merchant's alerts, newest first, for a user who reads its payments.
 CREATE FUNCTION list_sanctioned_transfer_alerts(p_tenant uuid,p_merchant uuid,p_limit integer)
@@ -189,9 +241,9 @@ END $$;
 
 REVOKE ALL ON FUNCTION replace_sanctioned_addresses(text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION sanctioned_address_matches(text,text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION enqueue_sanctioned_transfer_notification(uuid,uuid,uuid,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION enqueue_sanctioned_transfer_notification(uuid,uuid,text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION screen_transfer_sender() FROM PUBLIC;
-REVOKE ALL ON FUNCTION refuse_sanctioned_go_live_address() FROM PUBLIC;
+REVOKE ALL ON FUNCTION refuse_sanctioned_receiving_address() FROM PUBLIC;
 REVOKE ALL ON FUNCTION list_sanctioned_transfer_alerts(uuid,uuid,integer) FROM PUBLIC;
 
 DO $$

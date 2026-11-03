@@ -3,8 +3,14 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 )
+
+// ErrAddressNotAccepted is a receiving address the database refuses (it is
+// on a sanctions list). It is a 400 with its own problem code; the message
+// does not say why, so the platform neither accuses nor tips off.
+var ErrAddressNotAccepted = fmt.Errorf("receiving address not accepted: %w", ErrInvalid)
 
 // SanctionsAlert is a transfer to one of the merchant's payment addresses
 // whose sender is on a sanctions list. The payment itself is unchanged.

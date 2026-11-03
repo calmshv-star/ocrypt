@@ -28,12 +28,14 @@ Behaviour:
 2. An AFTER INSERT trigger on `transfer_events` matches the sender on the
    chain's family (EVM by account in any case or hex; TRON in base58 or hex;
    Solana exactly). A hit records one alert per merchant whose route address
-   received it and queues a `sanctioned` notification to everyone who gets
+   received it (routes for that asset covering the transfer, else the deposit
+   address owner) and queues a `sanctioned` notification to everyone who gets
    that merchant's notifications. The check runs in a guarded block and never
    blocks the scanner.
 3. The payment is not changed (non-custodial; the merchant decides). The
    cabinet page "Sanctions alerts" lists alerts with guidance.
-4. A listed address cannot be a go-live receiving address (OCP02).
+4. A listed address cannot be a go-live receiving address or a deposit
+   address (OCP04, "address not accepted").
 
 ## Acceptance matrix
 

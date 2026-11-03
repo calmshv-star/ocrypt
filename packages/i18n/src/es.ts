@@ -1486,5 +1486,7 @@ export const es = {
   "sanctions.from": "Desde",
   "sanctions.to": "a",
   "sanctions.transaction": "Transacción",
-  "notifications.sanctionedAlways": "Los pagos desde una dirección sancionada siempre se notifican a todos los que reciben las notificaciones de este comercio."
+  "notifications.sanctionedAlways": "Los pagos desde una dirección sancionada siempre se notifican a todos los que reciben las notificaciones de este comercio.",
+  "goLive.addressNotAccepted": "Una de las direcciones no se puede usar para pagos reales. Use otra dirección o contacte con soporte.",
+  "sanctions.operatorList": "Lista del operador"
 } satisfies Messages;

@@ -30,7 +30,7 @@ export function SanctionsAlertsPage() {
           <small>{t("sanctions.from")} <code title={alert.from_address}>{shortenMiddle(alert.from_address, 10, 8)}</code> · {t("sanctions.to")} <code title={alert.to_address}>{shortenMiddle(alert.to_address, 10, 8)}</code></small>
           <small>{t("sanctions.transaction")} <code title={alert.transaction_id}>{shortenMiddle(alert.transaction_id, 10, 8)}</code> · {when(alert.detected_at)}</small>
         </div>
-        <div className="sanctions__refs">{alert.matches.map((match) => <Badge key={match.source + match.reference} tone="negative">{match.reference}</Badge>)}</div>
+        <div className="sanctions__refs">{alert.matches.map((match) => <Badge key={match.source + match.reference} tone="negative">{match.source === "operator" ? t("sanctions.operatorList") : match.reference}</Badge>)}</div>
       </li>)}</ul>
     </SectionCard>}
   </div>;
