@@ -472,7 +472,7 @@ export const de = {
   "checkout.address": "Empfangsadresse",
   "checkout.copyAmount": "Betrag kopieren",
   "checkout.copyAddress": "Adresse kopieren",
-  "checkout.expiresIn": "Verbleibende Zahlungszeit: {time}",
+  "checkout.expiresIn": "Betrag festgelegt für {time}",
   "checkout.intent": "Zahlungsabsicht",
   "checkout.order": "Bestellreferenz",
   "checkout.pending": "Warte auf Transfer",
@@ -1330,5 +1330,11 @@ export const de = {
   "admin.signInFailed.mfa": "Zwei-Faktor-Authentifizierung ist erforderlich. Richten Sie sie bei Ihrem Identitätsanbieter ein und melden Sie sich erneut an.",
   "admin.signInFailed.provider": "Der Identitätsanbieter konnte die Anmeldung nicht abschließen. Versuchen Sie es in einigen Minuten erneut.",
   "admin.signInFailed.failed": "Die Anmeldung konnte nicht abgeschlossen werden. Bitte erneut versuchen.",
-  "admin.signInFailed.back": "Zurück zum Portal"
+  "admin.signInFailed.back": "Zurück zum Portal",
+  "checkout.fee.low": "niedrige Netzwerkgebühr",
+  "checkout.fee.medium": "mittlere Netzwerkgebühr",
+  "checkout.fee.high": "hohe Netzwerkgebühr",
+  "checkout.feeHint.low": "Eine Überweisung in diesem Netzwerk kostet meist nur wenige Cent.",
+  "checkout.feeHint.medium": "Dieses Netzwerk verlangt beim Senden meist eine spürbare Gebühr. Sie ist niedriger, wenn Ihre Wallet gestakte Ressourcen hat, etwa Energie bei TRON.",
+  "checkout.feeHint.high": "Dieses Netzwerk ist beim Senden meist am teuersten. Unterstützt Ihre Wallet ein günstigeres Netzwerk aus der Liste, wählen Sie dieses."
 } satisfies Messages;

@@ -472,7 +472,7 @@ export const ru = {
   "checkout.address": "Адрес получения",
   "checkout.copyAmount": "Скопировать сумму",
   "checkout.copyAddress": "Скопировать адрес",
-  "checkout.expiresIn": "Осталось времени на оплату: {time}",
+  "checkout.expiresIn": "Сумма зафиксирована ещё на {time}",
   "checkout.intent": "Платёжное намерение",
   "checkout.order": "Номер заказа",
   "checkout.pending": "Ожидается перевод",
@@ -1330,5 +1330,11 @@ export const ru = {
   "admin.signInFailed.mfa": "Нужна двухфакторная аутентификация. Настройте её у провайдера входа и войдите снова.",
   "admin.signInFailed.provider": "Провайдер входа не смог завершить вход. Попробуйте через несколько минут.",
   "admin.signInFailed.failed": "Не удалось завершить вход. Попробуйте ещё раз.",
-  "admin.signInFailed.back": "Вернуться в кабинет"
+  "admin.signInFailed.back": "Вернуться в кабинет",
+  "checkout.fee.low": "низкая комиссия сети",
+  "checkout.fee.medium": "средняя комиссия сети",
+  "checkout.fee.high": "высокая комиссия сети",
+  "checkout.feeHint.low": "Перевод в этой сети обычно стоит несколько центов.",
+  "checkout.feeHint.medium": "В этой сети за перевод обычно берут заметную комиссию. Она ниже, если в кошельке есть застейканные ресурсы, например энергия в TRON.",
+  "checkout.feeHint.high": "В этой сети перевод обычно стоит дороже всего. Если ваш кошелёк поддерживает более дешёвую сеть из списка, выберите её."
 } satisfies Messages;

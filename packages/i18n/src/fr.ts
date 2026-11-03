@@ -472,7 +472,7 @@ export const fr = {
   "checkout.address": "Adresse de réception",
   "checkout.copyAmount": "Copier le montant",
   "checkout.copyAddress": "Copier l'adresse",
-  "checkout.expiresIn": "Temps restant pour payer : {time}",
+  "checkout.expiresIn": "Montant bloqué pendant {time}",
   "checkout.intent": "Intention de paiement",
   "checkout.order": "Référence de commande",
   "checkout.pending": "En attente du transfert",
@@ -1330,5 +1330,11 @@ export const fr = {
   "admin.signInFailed.mfa": "L’authentification à deux facteurs est requise. Configurez-la chez votre fournisseur d’identité, puis reconnectez-vous.",
   "admin.signInFailed.provider": "Le fournisseur d’identité n’a pas pu terminer la connexion. Réessayez dans quelques minutes.",
   "admin.signInFailed.failed": "La connexion n’a pas pu être terminée. Réessayez.",
-  "admin.signInFailed.back": "Retour à l’espace"
+  "admin.signInFailed.back": "Retour à l’espace",
+  "checkout.fee.low": "frais de réseau faibles",
+  "checkout.fee.medium": "frais de réseau moyens",
+  "checkout.fee.high": "frais de réseau élevés",
+  "checkout.feeHint.low": "Un envoi sur ce réseau coûte en général quelques centimes.",
+  "checkout.feeHint.medium": "Ce réseau prélève en général des frais notables à l’envoi. Ils sont plus bas si votre portefeuille dispose de ressources mises en jeu, comme l’énergie sur TRON.",
+  "checkout.feeHint.high": "Ce réseau est en général le plus cher pour un envoi. Si votre portefeuille prend en charge un réseau moins cher de la liste, choisissez-le."
 } satisfies Messages;

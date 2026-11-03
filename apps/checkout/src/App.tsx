@@ -3,6 +3,7 @@ import { Badge, Button, PRODUCT_NAME, Select, ThemeToggle } from "@merchant/ui";
 import { Check, CheckCircle2, ChevronDown, CircleAlert, Clock3, Copy, ExternalLink, FileCheck2, Info, LockKeyhole, RadioTower, RefreshCw, ShieldCheck, Upload } from "lucide-react";
 import QRCode from "qrcode";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { networkFeeTier } from "./networkFee";
 
 type CheckoutStatus = "pending" | "detected" | "partially_paid" | "confirming" | "needs_review" | "settled" | "expired" | "preparing_payment_route" | "payment_route_failed";
 type OnChainRoute = { id: string; provider: "on_chain"; network: string; networkName?: string; asset: string; assetSymbol?: string; amount: string; address: string; receivedAmount?: string; remainingAmount?: string; paymentCount?: number; topUpAllowed?: boolean; transactionHash?: string; paymentURI?: string };
@@ -21,6 +22,7 @@ const checkoutTokenPattern = /^cs_[A-Za-z0-9_-]{43}$/;
 const paymentURIPattern = /^(?:ethereum:0x[0-9a-fA-F]{40}@[1-9][0-9]*|solana:[1-9A-HJ-NP-Za-km-z]{32,44}\?amount=|ton:\/\/transfer\/)[^\s]*$/;
 // Human names from the server; raw identifiers only as a fallback.
 const displayName = (value: unknown) => typeof value === "string" && value.trim() !== "" && 64 >= value.length ? value.trim() : undefined;
+function routeFeeTier(route: Route) { return route.provider === "on_chain" ? networkFeeTier(route.network) : undefined; }
 function routeNetwork(route: Route) { return route.provider === "on_chain" ? route.networkName ?? route.network : ""; }
 function routeAsset(route: Route) { return route.provider === "on_chain" ? route.assetSymbol ?? route.asset : route.asset; }
 // A wallet link must name this route's own receiving address.
@@ -426,7 +428,7 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
     <div className="checkout-layout">
       <section className="checkout-card checkout-card--payment">
         <div className="checkout-route-head">
-          {routeSelectable ? <label><span>{selecting ? t("checkout.selectingRoute") : t("checkout.selectRoute")}</span><Select aria-label={t("checkout.selectRoute")} disabled={selecting} onChange={(event) => void selectRoute(event.target.value)} value={route.id}>{session.routes.map((item) => <option key={item.id} value={item.id}>{item.provider === "on_chain" ? `${routeNetwork(item)} · ${routeAsset(item)}` : `${t("checkout.provider")} · ${routeAsset(item)}`}</option>)}</Select></label> : <div className="checkout-route-fixed"><small>{t("checkout.selectRoute")}</small><strong><ShieldCheck size={16} />{routeLabel}</strong></div>}
+          {routeSelectable ? <label><span>{selecting ? t("checkout.selectingRoute") : t("checkout.selectRoute")}</span><Select aria-label={t("checkout.selectRoute")} disabled={selecting} onChange={(event) => void selectRoute(event.target.value)} value={route.id}>{session.routes.map((item) => { const tier = routeFeeTier(item); return <option key={item.id} value={item.id}>{item.provider === "on_chain" ? `${routeNetwork(item)} · ${routeAsset(item)}${tier ? ` · ${t(`checkout.fee.${tier}` as MessageKey)}` : ""}` : `${t("checkout.provider")} · ${routeAsset(item)}`}</option>; })}</Select>{routeFeeTier(route) && <small className="checkout-fee-tier" data-testid="network-fee-tier">{t(`checkout.feeHint.${routeFeeTier(route)}` as MessageKey)}</small>}</label> : <div className="checkout-route-fixed"><small>{t("checkout.selectRoute")}</small><strong><ShieldCheck size={16} />{routeLabel}</strong></div>}
           <Badge tone={badgeTone}>{t(routeStatusTitle)}</Badge>
         </div>
         {isPartial && <div className="checkout-progress" data-testid="payment-progress">

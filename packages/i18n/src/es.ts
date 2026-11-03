@@ -472,7 +472,7 @@ export const es = {
   "checkout.address": "Dirección receptora",
   "checkout.copyAmount": "Copiar importe",
   "checkout.copyAddress": "Copiar dirección",
-  "checkout.expiresIn": "Tiempo restante para pagar: {time}",
+  "checkout.expiresIn": "Importe fijado durante {time}",
   "checkout.intent": "Intención de pago",
   "checkout.order": "Referencia del pedido",
   "checkout.pending": "Esperando transferencia",
@@ -1330,5 +1330,11 @@ export const es = {
   "admin.signInFailed.mfa": "Se requiere autenticación de dos factores. Configúrela con su proveedor de identidad y vuelva a iniciar sesión.",
   "admin.signInFailed.provider": "El proveedor de identidad no pudo completar el inicio de sesión. Inténtelo en unos minutos.",
   "admin.signInFailed.failed": "No se pudo completar el inicio de sesión. Inténtelo de nuevo.",
-  "admin.signInFailed.back": "Volver al panel"
+  "admin.signInFailed.back": "Volver al panel",
+  "checkout.fee.low": "comisión de red baja",
+  "checkout.fee.medium": "comisión de red media",
+  "checkout.fee.high": "comisión de red alta",
+  "checkout.feeHint.low": "Enviar en esta red suele costar unos céntimos.",
+  "checkout.feeHint.medium": "Esta red suele cobrar una comisión notable por enviar. Es menor si su monedero tiene recursos en staking, como energía en TRON.",
+  "checkout.feeHint.high": "Esta red suele ser la más cara para enviar. Si su monedero admite una red más barata de la lista, elíjala."
 } satisfies Messages;

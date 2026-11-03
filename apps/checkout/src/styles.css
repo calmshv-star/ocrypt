@@ -853,3 +853,4 @@
 .checkout-wallet-link { display: grid; gap: 6px; justify-items: start; }
 .checkout-wallet-link a { text-decoration: none; }
 .checkout-wallet-link small { color: var(--mp-muted); font-size: 12px; line-height: 1.45; }
+.checkout-fee-tier { display: block; margin-top: 6px; color: var(--mp-muted); font-size: 12px; line-height: 1.45; }

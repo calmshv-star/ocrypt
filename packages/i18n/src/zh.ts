@@ -472,7 +472,7 @@ export const zhCN = {
   "checkout.address": "收款地址",
   "checkout.copyAmount": "复制金额",
   "checkout.copyAddress": "复制地址",
-  "checkout.expiresIn": "剩余支付时间：{time}",
+  "checkout.expiresIn": "金额锁定剩余时间：{time}",
   "checkout.intent": "支付意图",
   "checkout.order": "订单引用",
   "checkout.pending": "等待转账",
@@ -1330,5 +1330,11 @@ export const zhCN = {
   "admin.signInFailed.mfa": "需要双重验证。请在身份提供方完成设置后重新登录。",
   "admin.signInFailed.provider": "身份提供方无法完成登录，请几分钟后重试。",
   "admin.signInFailed.failed": "无法完成登录，请重试。",
-  "admin.signInFailed.back": "返回控制台"
+  "admin.signInFailed.back": "返回控制台",
+  "checkout.fee.low": "网络费用低",
+  "checkout.fee.medium": "网络费用中等",
+  "checkout.fee.high": "网络费用高",
+  "checkout.feeHint.low": "在此网络上转账通常只需几美分。",
+  "checkout.feeHint.medium": "此网络的转账费用通常较明显。如果钱包中有质押资源（例如 TRON 的能量），费用会更低。",
+  "checkout.feeHint.high": "此网络的转账费用通常最高。如果您的钱包支持列表中更便宜的网络，请选择它。"
 } satisfies Messages;

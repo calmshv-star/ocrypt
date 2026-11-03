@@ -87,7 +87,7 @@ describe("hosted checkout", () => {
     expect(screen.getByTestId("checkout-disclaimer")).toHaveTextContent("payment software, not the recipient of funds");
     expect(screen.getByText("The payment goes directly to Demo Store.")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("update the payment status automatically");
-    expect(screen.getByText(/Time remaining to pay:/)).toBeInTheDocument();
+    expect(screen.getByText(/Amount locked for/)).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Select a payment route" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Copy address" }));
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("TWb4A6kVtQJ4z9Yp2mR7sX8cN1hL5uD3eF");
@@ -152,6 +152,22 @@ describe("hosted checkout", () => {
       expect(screen.queryByTestId("open-in-wallet")).not.toBeInTheDocument();
       next.unmount();
     }
+  });
+
+  it("tells the payer how expensive each network usually is before choosing (CHK-1)", async () => {
+    vi.stubEnv("VITE_CHECKOUT_FIXTURE_MODE", "false"); vi.stubEnv("VITE_CHECKOUT_API_URL", "https://merchant-api.example");
+    const base = session("pending", "");
+    const named = { ...base, routes: [{ ...base.routes[0]!, network_name: "TRON", asset_symbol: "USDT" }, { ...base.routes[1]!, network_name: "Ethereum", asset_symbol: "USDC" }, { ...base.routes[1]!, id: "10000000-0000-4000-8000-0000000000b3", network: "eip155:56", network_name: "BNB Smart Chain", asset: "usdt-bsc", asset_symbol: "USDT" }] };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(named)));
+    window.history.replaceState({}, "", `/checkout?token=${csToken}`);
+    renderCheckout();
+    const select = await screen.findByRole("combobox", { name: "Select a payment route" });
+    expect(Array.from((select as HTMLSelectElement).options).map((option) => option.textContent)).toEqual([
+      "TRON · USDT · medium network fee",
+      "Ethereum · USDC · high network fee",
+      "BNB Smart Chain · USDT · low network fee"
+    ]);
+    expect(screen.getByTestId("network-fee-tier")).toHaveTextContent(/noticeable fee/);
   });
 
   it("uses canonical EVM chain identifiers for the transaction explorer", async () => {

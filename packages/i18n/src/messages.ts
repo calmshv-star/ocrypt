@@ -470,7 +470,7 @@ export const en = {
   "checkout.address": "Receiving address",
   "checkout.copyAmount": "Copy amount",
   "checkout.copyAddress": "Copy address",
-  "checkout.expiresIn": "Time remaining to pay: {time}",
+  "checkout.expiresIn": "Amount locked for {time}",
   "checkout.intent": "Payment intent",
   "checkout.order": "Order reference",
   "checkout.pending": "Waiting for transfer",
@@ -1328,7 +1328,13 @@ export const en = {
   "admin.signInFailed.mfa": "Two-factor authentication is required. Set it up with your identity provider, then sign in again.",
   "admin.signInFailed.provider": "The identity provider could not complete sign-in. Try again in a few minutes.",
   "admin.signInFailed.failed": "Sign-in could not be completed. Try again.",
-  "admin.signInFailed.back": "Back to the cabinet"
+  "admin.signInFailed.back": "Back to the cabinet",
+  "checkout.fee.low": "low network fee",
+  "checkout.fee.medium": "medium network fee",
+  "checkout.fee.high": "high network fee",
+  "checkout.feeHint.low": "Sending on this network usually costs a few cents.",
+  "checkout.feeHint.medium": "This network usually charges a noticeable fee to send. It is lower if your wallet has staked resources, such as energy on TRON.",
+  "checkout.feeHint.high": "This network usually charges the most to send. If your wallet supports a cheaper network from the list, choose it."
 } as const;
 
 export type MessageKey = keyof typeof en;
