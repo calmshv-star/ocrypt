@@ -15,6 +15,7 @@ SDN = (
     '102,"IVANOV, Ivan Petrovich","individual","UKRAINE-EO13660",-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,"DOB 01 Jan 1970."\r\n'
     '103,"SEA PHANTOM","vessel","IRAN",-0- ,"9XYZ","Crude Oil Tanker",-0- ,-0- ,"Panama",-0- ,"Website www.not-a-company.example"\r\n'
     '104,"QUOTE ""INSIDE"" HOLDING",-0- ,"SDGT",-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,-0- \r\n'
+    '106,"FRONT MEDIA",-0- ,"SDGT",-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,"Website www.facebook.com/frontmedia; Website https://t.me/frontmedia; Website front-media.example/about."\r\n'
 )
 ALT = (
     '101,201,"aka","ROGUE COMMERCE",-0- \r\n'
@@ -67,13 +68,17 @@ def entries_of(sql):
 
 def test_ofac_names_aliases_and_websites(tmp_path):
     entries = module.ofac_entries(write(tmp_path, "SDN.CSV", SDN), write(tmp_path, "ALT.CSV", ALT))
+    # Entities (SDN_Type null) are matched by any single listed word too;
+    # individuals are not, so a common given name never holds everyone.
     assert entries == [
-        {"kind": "name", "value": "ROGUE TRADING COMPANY LTD", "reference": "SDN-101"},
+        {"kind": "name", "value": "ROGUE TRADING COMPANY LTD", "reference": "SDN-101", "whole_word": True},
         {"kind": "domain", "value": "www.rogue-trading.example", "reference": "SDN-101"},
         {"kind": "domain", "value": "rogue-shop.example", "reference": "SDN-101"},
         {"kind": "name", "value": "IVANOV, Ivan Petrovich", "reference": "SDN-102"},
-        {"kind": "name", "value": 'QUOTE "INSIDE" HOLDING', "reference": "SDN-104"},
-        {"kind": "name", "value": "ROGUE COMMERCE", "reference": "SDN-101"},
+        {"kind": "name", "value": 'QUOTE "INSIDE" HOLDING', "reference": "SDN-104", "whole_word": True},
+        {"kind": "name", "value": "FRONT MEDIA", "reference": "SDN-106", "whole_word": True},
+        {"kind": "domain", "value": "front-media.example", "reference": "SDN-106"},
+        {"kind": "name", "value": "ROGUE COMMERCE", "reference": "SDN-101", "whole_word": True},
         {"kind": "name", "value": "IVANOV, Vanya", "reference": "SDN-102"},
     ]
 
@@ -83,11 +88,13 @@ def test_ofac_never_lists_free_mail_or_vessels(tmp_path):
     values = {e["value"] for e in entries}
     assert "gmail.com" not in values and "SEA PHANTOM" not in values and "OCEAN PHANTOM" not in values
     assert "www.not-a-company.example" not in values
+    # A page on a shared platform must not block the whole platform.
+    assert not {"facebook.com", "www.facebook.com", "t.me"} & values
 
 
 def test_ofac_reads_windows_1252_and_rejects_wrong_layout(tmp_path):
     cp1252 = write(tmp_path, "SDN.CSV", '105,"CAFÉ NOIR SARL",-0- ,"SDGT",-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,-0- \r\n', "cp1252")
-    assert module.ofac_entries(cp1252, None) == [{"kind": "name", "value": "CAFÉ NOIR SARL", "reference": "SDN-105"}]
+    assert module.ofac_entries(cp1252, None) == [{"kind": "name", "value": "CAFÉ NOIR SARL", "reference": "SDN-105", "whole_word": True}]
     with pytest.raises(ValueError):
         module.ofac_entries(write(tmp_path, "BAD.CSV", "ent_num,SDN_Name\r\n1,X\r\n"), None)
 
@@ -95,14 +102,28 @@ def test_ofac_reads_windows_1252_and_rejects_wrong_layout(tmp_path):
 def test_un_individuals_entities_scripts_and_good_aliases(tmp_path):
     published, entries = module.un_entries(write(tmp_path, "un.xml", UN))
     assert published == "2026-11-02T23:00:04.371Z"
-    assert {(e["kind"], e["value"], e["reference"]) for e in entries} == {
-        ("name", "PLACEHOLDER PERSON", "UN-EXi.001"),
-        ("name", "Плейсхолдер Персон", "UN-EXi.001"),
-        ("name", "PLACE HOLDER", "UN-EXi.001"),
-        ("name", "PLACEHOLDER COMPANY LTD", "UN-EXe.001"),
-        ("name", "PLACEHOLDER ALIAS CO", "UN-EXe.001"),
-        ("name", "NO REFERENCE TRADING", "UN-2000002"),
+    assert {(e["kind"], e["value"], e["reference"], e.get("whole_word", False)) for e in entries} == {
+        ("name", "PLACEHOLDER PERSON", "UN-EXi.001", False),
+        ("name", "Плейсхолдер Персон", "UN-EXi.001", False),
+        ("name", "PLACE HOLDER", "UN-EXi.001", False),
+        ("name", "PLACEHOLDER COMPANY LTD", "UN-EXe.001", True),
+        ("name", "PLACEHOLDER ALIAS CO", "UN-EXe.001", True),
+        ("name", "NO REFERENCE TRADING", "UN-2000002", True),
     }
+
+
+def test_un_date_parses_on_python_before_3_11(tmp_path, monkeypatch):
+    # dateGenerated ends in Z, which datetime.fromisoformat rejects before 3.11.
+    real = module.datetime
+
+    class OldDatetime:
+        @staticmethod
+        def fromisoformat(value):
+            if value.endswith("Z"):
+                raise ValueError(f"Invalid isoformat string: {value!r}")
+            return real.fromisoformat(value)
+    monkeypatch.setattr(module, "datetime", OldDatetime)
+    assert module.main(["un", "--xml", str(write(tmp_path, "un.xml", UN))]) == 0
 
 
 def test_un_refuses_entity_declarations(tmp_path):

@@ -1,5 +1,14 @@
 BEGIN;
 
+-- Without the screening table a held merchant has no admit path left, so
+-- refuse to roll back while any signup still awaits review.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM merchant_signup_screenings WHERE status='review') THEN
+    RAISE EXCEPTION 'decide every held signup before rolling back 000059';
+  END IF;
+END $$;
+
 DROP FUNCTION IF EXISTS current_admin_signup_review_status();
 DROP FUNCTION IF EXISTS decide_signup_screening(uuid,text,text,timestamptz);
 DROP FUNCTION IF EXISTS list_signup_screening_reviews(integer);
@@ -11,7 +20,10 @@ DROP TABLE IF EXISTS merchant_signup_screenings;
 ALTER TABLE admin_signup_requests DROP COLUMN IF EXISTS ip_screened, DROP COLUMN IF EXISTS ip_region;
 DROP FUNCTION IF EXISTS replace_signup_screening_source(text,text,timestamptz,interval,jsonb);
 DROP FUNCTION IF EXISTS signup_screening_domain_key(text);
+DROP FUNCTION IF EXISTS signup_screening_name_squash(text);
 DROP FUNCTION IF EXISTS signup_screening_name_key(text);
+DROP FUNCTION IF EXISTS signup_screening_name_words(text);
+DROP TABLE IF EXISTS signup_screening_required_sources;
 DROP TABLE IF EXISTS signup_screened_ip_regions;
 DROP TABLE IF EXISTS signup_screening_entries;
 DROP TABLE IF EXISTS signup_screening_sources;

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/ids"
 )
@@ -540,8 +541,6 @@ func AuthorizeWallets(principal Principal, scope Scope, write bool) (Scope, erro
 	return principal.Authorize(merchant, scope)
 }
 
-// authorizeWalletWrite also requires recent MFA: changing where customers pay
-// must not be possible with only a stolen or long-lived session cookie.
 // ListSignupReviews returns signups held by sanctions screening to a global
 // reviewer; a tenant-scoped grant never sees other tenants' registrations.
 func (s *Service) ListSignupReviews(ctx context.Context, principal Principal) ([]SignupReview, error) {
@@ -562,12 +561,14 @@ func (s *Service) DecideSignupReview(ctx context.Context, principal Principal, m
 		return "", err
 	}
 	input.Reason = strings.TrimSpace(input.Reason)
-	if !ids.Valid(merchantID) || (input.Decision != "approve" && input.Decision != "reject") || len([]rune(input.Reason)) < 3 || len(input.Reason) > 1000 || strings.IndexFunc(input.Reason, func(r rune) bool { return unicode.In(r, unicode.Cc, unicode.Cf) }) >= 0 {
+	if !ids.Valid(merchantID) || (input.Decision != "approve" && input.Decision != "reject") || utf8.RuneCountInString(input.Reason) < 3 || utf8.RuneCountInString(input.Reason) > 1000 || strings.IndexFunc(input.Reason, func(r rune) bool { return unicode.In(r, unicode.Cc, unicode.Cf) }) >= 0 {
 		return "", ErrInvalid
 	}
 	return s.repository.DecideSignupReview(ctx, principal, merchantID, input, s.now())
 }
 
+// authorizeWalletWrite also requires recent MFA: changing where customers pay
+// must not be possible with only a stolen or long-lived session cookie.
 func (s *Service) authorizeWalletWrite(principal Principal, scope Scope) (Scope, error) {
 	resolved, err := AuthorizeWallets(principal, scope, true)
 	if err != nil {

@@ -24,11 +24,13 @@ registration transaction:
 - `domain_match`: the website host or the email domain equals a listed
   domain or is a subdomain of one;
 - `ip_region`: the client region is a closed signup country or a screened
-  pseudo-region (`T1` Tor, `XX` unknown);
-- `ip_region_unknown`: the header is configured but missing, repeated or not
-  a single region code;
-- `screening_list_stale`: no official list is loaded, or an official list is
-  older than its refresh window (8 days by default).
+  pseudo-region (`T1` Tor);
+- `ip_region_unknown`: the header is configured but missing, repeated, not a
+  single region code, or `XX` (unknown to the edge);
+- `screening_list_stale`: a required official list (`ofac_sdn`,
+  `un_consolidated`) is not loaded, or an official list is older than its
+  refresh window (8 days by default), counted from its publication time when
+  the file states one.
 
 No reason: the merchant is created `active` in test mode as today. Any
 reason: the tenant, owner identity and membership are created, but the
@@ -37,10 +39,14 @@ projected (the owner projection requires an active merchant). The screening
 record keeps the reasons and the matched list references. The registrant
 sees only "your application is being reviewed", never the reasons.
 
-Matching is exact on a normalized key, not fuzzy: casefold, NFKD with
-combining marks removed, punctuation to spaces, legal-form words (LLC, Ltd,
-GmbH, OOO, ООО, АО and similar) and "the/of/and" removed, then the distinct
-words sorted. So "ООО «Рога и Копыта»" equals "Копыта и Рога", and "Société
+Matching is on normalized words, not fuzzy: casefold, dots and apostrophes
+(including ‘ ʼ ` ´) dropped, NFKD with every combining mark removed, other
+punctuation to spaces, legal-form words (LLC, Ltd, GmbH, OOO, ООО, АО and
+similar) and "the/of/and" removed. A name matches when its distinct sorted
+words are equal, when its words joined without spaces are equal (catching
+"Mel-li"), when at least two words of one name all appear in the other, or
+when an entity listed under one word of four or more letters appears as a
+word of the signup name. Homoglyphs from other scripts are not folded. So "ООО «Рога и Копыта»" equals "Копыта и Рога", and "Société
 Générale S.A." equals "societe generale". Keys shorter than 3 characters are
 not stored or matched. The key is computed only in PostgreSQL
 (`signup_screening_name_key`, `COLLATE pg_unicode_fast`), so importer and
@@ -98,6 +104,7 @@ when a list changes, automatic list download, KYC documents.
 | G9 | Held registration callback and later sign-in | Redirect to the review screen; `/session/me` reports `signup_review: pending` or `rejected`, never the reasons | `TestHeldSignupLandsOnTheReviewScreen`, `Signup.test.tsx` | |
 | G10 | Importer: OFAC SDN/ALT rows with nulls, quotes, vessels, Website remarks; UN XML individuals, entities, aliases, empty placeholders; operator CSV; SQL quoting | Exact entry set; SQL safe for any input text | `tests/unit/test_signup_screening_import.py` | |
 | G11 | Review page | Lists reasons in plain language; decision needs a reason; step-up prompt on `step_up_required`; hidden without permission | `SignupReviews.test.tsx` | |
+| G12 | Review findings: reasons and reviewer notes in a later-admitted owner's audit; one-word entity plus a word; split or apostrophe variants; missing UN list; old publication re-imported; quoted email local part; operator list shrink; Python 3.9 importer; non-ASCII reason length; 42501 mapping; rollback with held signups | Hold and decision audit only in the global log; held; held; held; refused; screened by the last `@`; allowed; loads; counted in characters; stays a server error; rollback refused | live `S2`, `TestSignupReviewRoutes`, `TestSignupReviewRepositoryErrorsStayGeneric`, importer tests, manual down-migration run | |
 
 ## Runtime prerequisites
 

@@ -29,41 +29,68 @@ CREATE TABLE signup_screening_entries (
   kind text NOT NULL CHECK (kind IN ('name','domain')),
   match_key text NOT NULL CHECK (length(match_key) BETWEEN 3 AND 255),
   reference text NOT NULL CHECK (length(reference) BETWEEN 1 AND 128),
+  -- An entity listed under one word (whole_word) is a hit wherever that word
+  -- appears; a one-word alias of a person only matches exactly.
+  whole_word boolean NOT NULL DEFAULT false,
+  -- The name's words in their original order without spaces, so a split
+  -- inside a word (Mel-li) cannot evade the match.
+  match_squash text CHECK (match_squash IS NULL OR (kind='name' AND length(match_squash) BETWEEN 6 AND 255)),
   match_words text[] GENERATED ALWAYS AS (string_to_array(match_key,' ')) STORED,
   PRIMARY KEY (source,kind,match_key,reference)
 );
 CREATE INDEX signup_screening_entries_match_idx ON signup_screening_entries(kind,match_key);
 CREATE INDEX signup_screening_entries_words_idx ON signup_screening_entries USING gin(match_words) WHERE kind='name';
+CREATE INDEX signup_screening_entries_squash_idx ON signup_screening_entries(match_squash) WHERE match_squash IS NOT NULL;
+-- Official lists that must be loaded and fresh, or every signup is held.
+CREATE TABLE signup_screening_required_sources (
+  source text PRIMARY KEY CHECK (source ~ '^[a-z][a-z0-9_]{1,31}$')
+);
+INSERT INTO signup_screening_required_sources(source) VALUES ('ofac_sdn'),('un_consolidated');
 -- Pseudo-regions an edge proxy reports besides country codes.
 CREATE TABLE signup_screened_ip_regions (
   region text PRIMARY KEY CHECK (region ~ '^[A-Z][A-Z0-9]$'),
   reason text NOT NULL CHECK (length(reason) BETWEEN 1 AND 200)
 );
 INSERT INTO signup_screened_ip_regions(region,reason) VALUES ('T1','Tor exit node');
-REVOKE ALL ON signup_screening_sources,signup_screening_entries,signup_screened_ip_regions FROM PUBLIC;
+REVOKE ALL ON signup_screening_sources,signup_screening_entries,signup_screened_ip_regions,signup_screening_required_sources FROM PUBLIC;
 
--- One key per name, computed only here so lists and signups cannot disagree:
--- casefold, NFKD without combining marks, dots and apostrophes dropped (S.A.,
--- O'Neil), other punctuation to spaces, legal forms and joining words dropped, distinct words sorted. The builtin collation
+-- The words of a name in their original order, computed only here so lists
+-- and signups cannot disagree: casefold; dots and apostrophes dropped (S.A.,
+-- O'Neil, Qa‘ida); NFKD with every combining mark removed; other punctuation
+-- to spaces; legal forms and joining words dropped. The builtin collation
 -- keeps it independent of the database locale.
-CREATE FUNCTION signup_screening_name_key(p_name text) RETURNS text
+CREATE FUNCTION signup_screening_name_words(p_name text) RETURNS text[]
 LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
 SET search_path=pg_catalog AS $$
-  SELECT CASE WHEN length(k)>=3 THEN k END FROM (
-    SELECT string_agg(w,' ' ORDER BY w COLLATE "C") AS k FROM (
-      SELECT DISTINCT w FROM regexp_split_to_table(
-        regexp_replace(
-          regexp_replace(normalize(casefold(p_name COLLATE pg_unicode_fast),NFKD) COLLATE pg_unicode_fast,'[̀-ͯ.''’]','','g'),
-          '[^[:alnum:]]+',' ','g'),
-        ' ') AS w
-       WHERE w<>'' AND w NOT IN (
-         'llc','ltd','limited','inc','incorporated','corp','corporation','co','company','plc','llp','lp',
-         'gmbh','ag','kg','sa','sas','sarl','srl','spa','bv','nv','oy','oyj','ab','as','asa','aps',
-         'jsc','pjsc','ojsc','cjsc','oao','zao','pao','ooo','fze','fzco','fzc','fzllc','pte','pty',
-         'the','of','and','und','et',
-         'ооо','оао','зао','пао','ао','ип','тов','чп','и')
-    ) words
-  ) joined
+  SELECT coalesce(array_agg(t.w ORDER BY t.n),ARRAY[]::text[]) FROM regexp_split_to_table(
+    regexp_replace(
+      regexp_replace(
+        normalize(regexp_replace(casefold(p_name COLLATE pg_unicode_fast),'[.''`\u00b4\u02bb\u02bc\u2018\u2019]','','g'),NFKD) COLLATE pg_unicode_fast,
+        '[\u0300-\u036f\u1ab0-\u1aff\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f]','','g'),
+      '[^[:alnum:]]+',' ','g'),
+    ' ') WITH ORDINALITY AS t(w,n)
+   WHERE t.w<>'' AND t.w NOT IN (
+     'llc','ltd','limited','inc','incorporated','corp','corporation','co','company','plc','llp','lp',
+     'gmbh','ag','kg','sa','sas','sarl','srl','spa','bv','nv','oy','oyj','ab','as','asa','aps',
+     'jsc','pjsc','ojsc','cjsc','oao','zao','pao','ooo','fze','fzco','fzc','fzllc','pte','pty',
+     'the','of','and','und','et',
+     'ооо','оао','зао','пао','ао','ип','тов','чп','и')
+$$;
+
+-- The match key: distinct words, sorted, so word order does not matter.
+CREATE FUNCTION signup_screening_name_key(p_name text) RETURNS text
+LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+SET search_path=pg_catalog,public AS $$
+  SELECT CASE WHEN length(k)>=3 THEN k END
+    FROM (SELECT string_agg(w,' ' ORDER BY w COLLATE "C") AS k FROM (SELECT DISTINCT w FROM unnest(public.signup_screening_name_words(p_name)) w) words) joined
+$$;
+
+-- The squashed key: the words in their original order without spaces.
+CREATE FUNCTION signup_screening_name_squash(p_name text) RETURNS text
+LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+SET search_path=pg_catalog,public AS $$
+  SELECT CASE WHEN length(k) BETWEEN 6 AND 255 THEN k END
+    FROM (SELECT array_to_string(public.signup_screening_name_words(p_name),'') AS k) joined
 $$;
 
 -- A bare lowercase host: scheme, credentials, port, path and a leading www.
@@ -76,15 +103,16 @@ SET search_path=pg_catalog AS $$
            lower(btrim(p_value) COLLATE "C"),'^[a-z][a-z0-9+.-]*://',''),'^[^/?#]*@',''),'[/?#:].*$',''),'.'),'^www\.','') AS h) host
 $$;
 
--- Replaces one source atomically. An official list may not be emptied or
--- shrink below half of what is loaded, so a truncated download cannot
--- silently switch screening off; delete the source row to start over.
+-- Replaces one source atomically. An official list may not be emptied,
+-- shrink below half of what is loaded, or be replaced by an older
+-- publication, so a truncated or stale download cannot silently weaken
+-- screening; delete the source row to start over.
 CREATE FUNCTION replace_signup_screening_source(
   p_source text,p_description text,p_published_at timestamptz,p_stale_after interval,p_entries jsonb
 ) RETURNS integer
 LANGUAGE plpgsql
 SET search_path=pg_catalog,public AS $$
-DECLARE previous integer; loaded integer;
+DECLARE previous integer; previous_published timestamptz; loaded integer;
 BEGIN
   IF p_source IS NULL OR p_source !~ '^[a-z][a-z0-9_]{1,31}$' THEN
     RAISE EXCEPTION 'screening source name is invalid' USING ERRCODE='22023';
@@ -92,27 +120,33 @@ BEGIN
   IF p_entries IS NULL OR jsonb_typeof(p_entries)<>'array' OR EXISTS (
        SELECT 1 FROM jsonb_array_elements(p_entries) e
         WHERE jsonb_typeof(e)<>'object' OR coalesce(e->>'kind','') NOT IN ('name','domain')
-           OR coalesce(e->>'value','')='' OR length(coalesce(e->>'reference','')) NOT BETWEEN 1 AND 128) THEN
+           OR coalesce(e->>'value','')='' OR length(coalesce(e->>'reference','')) NOT BETWEEN 1 AND 128
+           OR coalesce(jsonb_typeof(e->'whole_word'),'boolean')<>'boolean') THEN
     RAISE EXCEPTION 'screening entries must be objects with kind name or domain, value and reference' USING ERRCODE='22023';
   END IF;
-  SELECT s.entry_count INTO previous FROM public.signup_screening_sources s WHERE s.source=p_source FOR UPDATE;
+  SELECT s.entry_count,s.published_at INTO previous,previous_published FROM public.signup_screening_sources s WHERE s.source=p_source FOR UPDATE;
+  IF p_published_at<previous_published THEN
+    RAISE EXCEPTION 'screening list % published at % is older than the loaded one', p_source, p_published_at USING ERRCODE='22023';
+  END IF;
   INSERT INTO public.signup_screening_sources(source,description,published_at,loaded_at,stale_after,entry_count)
     VALUES(p_source,p_description,p_published_at,clock_timestamp(),p_stale_after,0)
     ON CONFLICT (source) DO UPDATE SET description=excluded.description,published_at=excluded.published_at,
       loaded_at=excluded.loaded_at,stale_after=excluded.stale_after;
   DELETE FROM public.signup_screening_entries WHERE source=p_source;
-  INSERT INTO public.signup_screening_entries(source,kind,match_key,reference)
-    SELECT DISTINCT p_source,x.kind,x.match_key,x.reference FROM (
-      SELECT e->>'kind' AS kind,e->>'reference' AS reference,
+  INSERT INTO public.signup_screening_entries(source,kind,match_key,reference,whole_word,match_squash)
+    SELECT p_source,x.kind,x.match_key,x.reference,bool_or(x.whole_word),min(x.match_squash) FROM (
+      SELECT e->>'kind' AS kind,e->>'reference' AS reference,coalesce((e->>'whole_word')::boolean,false) AS whole_word,
              CASE e->>'kind' WHEN 'name' THEN public.signup_screening_name_key(e->>'value')
-                             ELSE public.signup_screening_domain_key(e->>'value') END AS match_key
+                             ELSE public.signup_screening_domain_key(e->>'value') END AS match_key,
+             CASE e->>'kind' WHEN 'name' THEN public.signup_screening_name_squash(e->>'value') END AS match_squash
         FROM jsonb_array_elements(p_entries) e) x
-     WHERE x.match_key IS NOT NULL AND length(x.match_key)<=255;
+     WHERE x.match_key IS NOT NULL AND length(x.match_key)<=255
+     GROUP BY x.kind,x.match_key,x.reference;
   GET DIAGNOSTICS loaded = ROW_COUNT;
   IF p_stale_after IS NOT NULL AND loaded=0 THEN
     RAISE EXCEPTION 'an official screening list cannot be empty' USING ERRCODE='22023';
   END IF;
-  IF previous IS NOT NULL AND loaded*2<previous THEN
+  IF p_stale_after IS NOT NULL AND previous IS NOT NULL AND loaded*2<previous THEN
     RAISE EXCEPTION 'screening list % would shrink from % to % entries', p_source, previous, loaded USING ERRCODE='22023';
   END IF;
   UPDATE public.signup_screening_sources SET entry_count=loaded WHERE source=p_source;
@@ -162,7 +196,7 @@ BEGIN
      WHERE x.consumed_at IS NULL AND x.expires_at<p_created
      ORDER BY x.expires_at LIMIT 100 FOR UPDATE SKIP LOCKED);
   IF length(company) NOT BETWEEN 2 AND 120 OR coalesce(p_country,'') !~ '^[A-Z]{2}$'
-     OR company ~ '[[:cntrl:]­؜᠎​-‏‪-‮⁠-⁯﻿]'
+     OR company ~ '[[:cntrl:]\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]'
      OR EXISTS (SELECT 1 FROM public.signup_blocked_countries c WHERE c.country=p_country)
      OR NOT EXISTS (SELECT 1 FROM public.signup_business_types b WHERE b.business_type=p_business AND b.allowed)
      OR (p_website IS NOT NULL AND (p_website !~ '^https://[^[:space:]/?#]+(/[^[:space:]]*)?$' OR length(p_website)>255))
@@ -183,10 +217,12 @@ RETURNS TABLE(reasons text[],matches jsonb)
 LANGUAGE sql STABLE
 SET search_path=pg_catalog,public AS $$
   WITH names AS (
-    SELECT DISTINCT k,string_to_array(k,' ') AS words FROM (VALUES (public.signup_screening_name_key(req.company_name)),(public.signup_screening_name_key(p_display_name))) v(k)
+    SELECT DISTINCT k,string_to_array(k,' ') AS words,public.signup_screening_name_squash(v.name) AS squash
+      FROM (VALUES (req.company_name),(p_display_name)) v(name), public.signup_screening_name_key(v.name) k
      WHERE k IS NOT NULL
   ), hosts AS (
-    SELECT DISTINCT h FROM (VALUES (public.signup_screening_domain_key(req.website)),(public.signup_screening_domain_key(split_part(p_email,'@',2)))) v(h)
+    -- the email domain follows the last @, even after a quoted local part
+    SELECT DISTINCT h FROM (VALUES (public.signup_screening_domain_key(req.website)),(public.signup_screening_domain_key(regexp_replace(p_email,'^.*@','')))) v(h)
      WHERE h IS NOT NULL
   ), suffixes AS (
     -- every parent domain of each host, so a listed domain also catches its subdomains
@@ -194,10 +230,14 @@ SET search_path=pg_catalog,public AS $$
       FROM (SELECT string_to_array(h,'.') AS labels FROM hosts) x, generate_subscripts(labels,1) i
      WHERE i<cardinality(labels)
   ), hits AS (
-    -- Same words, or at least two words of one name all found in the other
-    -- (a listed person without the patronymic, a listed company plus words).
+    -- Same words; the same letters with the spaces removed (Mel-li); or at
+    -- least two words of one name all found in the other (a listed person
+    -- without the patronymic, a listed company plus words). An entity listed
+    -- under one word of four or more letters is a hit wherever it appears.
     SELECT 'name_match' AS reason,e.source,e.kind,e.reference FROM public.signup_screening_entries e JOIN names n ON e.kind='name'
-       AND (e.match_key=n.k OR (cardinality(n.words)>=2 AND e.match_words@>n.words) OR (cardinality(e.match_words)>=2 AND e.match_words<@n.words))
+       AND (e.match_key=n.k OR e.match_squash=n.squash
+            OR (cardinality(n.words)>=2 AND e.match_words@>n.words)
+            OR ((cardinality(e.match_words)>=2 OR (e.whole_word AND length(e.match_key)>=4)) AND e.match_words<@n.words))
     UNION
     SELECT 'domain_match',e.source,e.kind,e.reference FROM public.signup_screening_entries e JOIN suffixes s ON e.kind='domain' AND e.match_key=s.d
   ), flags AS (
@@ -206,8 +246,12 @@ SET search_path=pg_catalog,public AS $$
       EXISTS (SELECT 1 FROM public.signup_blocked_countries c WHERE c.country=req.ip_region)
       OR EXISTS (SELECT 1 FROM public.signup_screened_ip_regions r WHERE r.region=req.ip_region))
     UNION SELECT 'ip_region_unknown' WHERE req.ip_screened AND (req.ip_region IS NULL OR req.ip_region='XX')
+    -- every required list loaded, and no official list older than its window
+    -- counted from publication (or from loading when no date was given)
     UNION SELECT 'screening_list_stale' WHERE NOT EXISTS (SELECT 1 FROM public.signup_screening_sources s WHERE s.stale_after IS NOT NULL)
-       OR EXISTS (SELECT 1 FROM public.signup_screening_sources s WHERE s.stale_after IS NOT NULL AND s.loaded_at+s.stale_after<p_at)
+       OR EXISTS (SELECT 1 FROM public.signup_screening_required_sources r
+                   WHERE NOT EXISTS (SELECT 1 FROM public.signup_screening_sources s WHERE s.source=r.source AND s.stale_after IS NOT NULL))
+       OR EXISTS (SELECT 1 FROM public.signup_screening_sources s WHERE s.stale_after IS NOT NULL AND coalesce(s.published_at,s.loaded_at)+s.stale_after<p_at)
   )
   SELECT coalesce((SELECT array_agg(reason ORDER BY reason) FROM flags),ARRAY[]::text[]),
          coalesce((SELECT jsonb_agg(jsonb_build_object('source',source,'kind',kind,'reference',reference) ORDER BY source,kind,reference)
@@ -240,8 +284,8 @@ BEGIN
   IF display='' THEN display := normalized_email; END IF;
   -- A disposable mailbox neither registers nor consumes the request.
   IF EXISTS (SELECT 1 FROM public.signup_blocked_email_domains d
-              WHERE split_part(normalized_email,'@',2)=d.domain
-                 OR split_part(normalized_email,'@',2) LIKE '%.'||d.domain) THEN
+              WHERE regexp_replace(normalized_email,'^.*@','')=d.domain
+                 OR regexp_replace(normalized_email,'^.*@','') LIKE '%.'||d.domain) THEN
     RETURN;
   END IF;
   SELECT * INTO req FROM public.admin_signup_requests r
@@ -286,8 +330,10 @@ BEGIN
   PERFORM public.append_admin_audit(gen_random_uuid(),p_tenant,p_merchant,p_user,NULL,
     'admin.self_service.registered','merchant',p_merchant::text,req.id::text,'self-service registration',NULL,NULL,
     jsonb_build_object('country',req.country,'business_type',req.business_type,'terms_version',req.terms_version),NULL,NULL,p_at);
+  -- Reasons go only to the global audit log: an owner admitted later reads
+  -- its tenant's audit and must not learn what matched.
   IF held THEN
-    PERFORM public.append_admin_audit(gen_random_uuid(),p_tenant,p_merchant,p_user,NULL,
+    PERFORM public.append_admin_audit(gen_random_uuid(),NULL,NULL,p_user,NULL,
       'admin.self_service.screening_hold','merchant',p_merchant::text,req.id::text,'held for sanctions screening review',NULL,NULL,
       jsonb_build_object('reasons',to_jsonb(found_reasons),'matches',found_matches),NULL,NULL,p_at);
   END IF;
@@ -319,7 +365,7 @@ LANGUAGE plpgsql STABLE SECURITY DEFINER
 SET search_path=pg_catalog,public SET row_security=off AS $$
 BEGIN
   IF NOT public.current_admin_has_global_permission('signup_reviews:read') THEN
-    RAISE EXCEPTION 'signup review requires a global signup_reviews:read binding' USING ERRCODE='42501';
+    RAISE EXCEPTION 'signup review requires a global signup_reviews:read binding' USING ERRCODE='OCP01';
   END IF;
   RETURN QUERY
     SELECT s.merchant_id,s.tenant_id,m.display_name,ms.country::text,ms.business_type,ms.website,
@@ -336,6 +382,8 @@ REVOKE ALL ON FUNCTION list_signup_screening_reviews(integer) FROM PUBLIC;
 
 -- Admits (merchant review -> active) or rejects (-> disabled) one held
 -- signup, once, with a reason. The registrant can never decide its own.
+-- Errors use OCP01 (not a global reviewer, or the registrant) and OCP02
+-- (invalid decision), so a missing GRANT still surfaces as a server error.
 CREATE FUNCTION decide_signup_screening(p_merchant uuid,p_decision text,p_reason text,p_at timestamptz)
 RETURNS text
 LANGUAGE plpgsql SECURITY DEFINER
@@ -345,10 +393,10 @@ DECLARE actor uuid := nullif(current_setting('app.admin_user_id',true),'')::uuid
   reason text := btrim(coalesce(p_reason,'')); outcome text;
 BEGIN
   IF NOT public.current_admin_has_global_permission('signup_reviews:decide') THEN
-    RAISE EXCEPTION 'signup decision requires a global signup_reviews:decide binding' USING ERRCODE='42501';
+    RAISE EXCEPTION 'signup decision requires a global signup_reviews:decide binding' USING ERRCODE='OCP01';
   END IF;
   IF p_decision NOT IN ('approve','reject') OR length(reason) NOT BETWEEN 3 AND 1000 THEN
-    RAISE EXCEPTION 'decision must be approve or reject with a reason of 3 to 1000 characters' USING ERRCODE='22023';
+    RAISE EXCEPTION 'decision must be approve or reject with a reason of 3 to 1000 characters' USING ERRCODE='OCP02';
   END IF;
   SELECT * INTO screening FROM public.merchant_signup_screenings s WHERE s.merchant_id=p_merchant FOR UPDATE;
   IF NOT FOUND OR screening.status<>'review' THEN
@@ -356,7 +404,7 @@ BEGIN
   END IF;
   SELECT * INTO signup FROM public.merchant_signups s WHERE s.merchant_id=p_merchant;
   IF signup.admin_user_id=actor OR EXISTS (SELECT 1 FROM public.merchant_members m WHERE m.merchant_id=p_merchant AND m.admin_user_id=actor) THEN
-    RAISE EXCEPTION 'a registrant cannot review its own signup' USING ERRCODE='42501';
+    RAISE EXCEPTION 'a registrant cannot review its own signup' USING ERRCODE='OCP01';
   END IF;
   outcome := CASE p_decision WHEN 'approve' THEN 'approved' ELSE 'rejected' END;
   UPDATE public.merchants SET status=CASE outcome WHEN 'approved' THEN 'active' ELSE 'disabled' END,updated_at=p_at,version=version+1
@@ -366,7 +414,7 @@ BEGIN
   END IF;
   UPDATE public.merchant_signup_screenings SET status=outcome,decided_by=actor,decided_at=p_at,decision_reason=reason
    WHERE merchant_id=p_merchant;
-  PERFORM public.append_admin_audit(gen_random_uuid(),screening.tenant_id,p_merchant,actor,NULL,
+  PERFORM public.append_admin_audit(gen_random_uuid(),NULL,NULL,actor,NULL,
     'admin.signup_review.'||outcome,'merchant',p_merchant::text,p_merchant::text,reason,NULL,NULL,
     jsonb_build_object('reasons',to_jsonb(screening.reasons)),NULL,NULL,p_at);
   RETURN outcome;

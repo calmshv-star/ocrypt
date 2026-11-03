@@ -22,6 +22,7 @@ tags:
   - name: Migration control
   - name: Provider configuration
   - name: Retention control
+  - name: Signup screening
 paths:
   /admin/v1/auth/login:
     get:

@@ -160,6 +160,7 @@ func TestSignupReviewRoutes(t *testing.T) {
 		"unknown decision": {merchant, `{"decision":"maybe","reason":"false positive"}`},
 		"short reason":     {merchant, `{"decision":"approve","reason":"ok"}`},
 		"control reason":   {merchant, `{"decision":"approve","reason":"false\u0007positive"}`},
+		"reason too long":  {merchant, `{"decision":"approve","reason":"` + strings.Repeat("я", 1001) + `"}`},
 		"extra field":      {merchant, `{"decision":"approve","reason":"false positive","status":"active"}`},
 	} {
 		if response := decide(handler, raw, csrf, c.id, c.body); response.Code != http.StatusBadRequest && response.Code != http.StatusUnprocessableEntity {
@@ -183,6 +184,10 @@ func TestSignupReviewRoutes(t *testing.T) {
 	if repo.signupDecision != (SignupDecision{Decision: "approve", Reason: "Different company, alias is a false positive"}) || repo.signupDecisionMerchant != merchant {
 		t.Fatalf("decision reached the repository as %+v for %s", repo.signupDecision, repo.signupDecisionMerchant)
 	}
+	// The limit counts characters: 1000 Cyrillic letters are 2000 bytes.
+	if response := decide(handler, raw, csrf, merchant, `{"decision":"reject","reason":"`+strings.Repeat("я", 1000)+`"}`); response.Code != http.StatusOK {
+		t.Fatalf("a 1000-character reason must be accepted: %d", response.Code)
+	}
 	repo.signupDecisionErr = ErrConflict
 	if response := decide(handler, raw, csrf, merchant, `{"decision":"reject","reason":"second decision"}`); response.Code != http.StatusConflict {
 		t.Fatalf("a second decision must conflict: %d", response.Code)
@@ -190,7 +195,11 @@ func TestSignupReviewRoutes(t *testing.T) {
 }
 
 func TestSignupReviewRepositoryErrorsStayGeneric(t *testing.T) {
-	if !errors.Is(classifyAdminDB(&pgconn.PgError{Code: "42501"}), ErrForbidden) || !errors.Is(classifyAdminDB(&pgconn.PgError{Code: "22023"}), ErrInvalid) || !errors.Is(classifyAdminDB(&pgconn.PgError{Code: "55000"}), ErrConflict) {
+	if !errors.Is(classifyAdminDB(&pgconn.PgError{Code: "OCP01"}), ErrForbidden) || !errors.Is(classifyAdminDB(&pgconn.PgError{Code: "OCP02"}), ErrInvalid) || !errors.Is(classifyAdminDB(&pgconn.PgError{Code: "55000"}), ErrConflict) {
 		t.Fatal("screening function errors must map to forbidden, invalid and conflict")
+	}
+	// A missing GRANT is a deployment error, never an ordinary 403.
+	if err := classifyAdminDB(&pgconn.PgError{Code: "42501"}); errors.Is(err, ErrForbidden) || errors.Is(err, ErrInvalid) {
+		t.Fatalf("permission denied must stay a server error: %v", err)
 	}
 }

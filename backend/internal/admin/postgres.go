@@ -46,7 +46,13 @@ func (r *PostgresRepository) Ping(ctx context.Context) error {
   to_regprocedure('public.admin_watch_wallet_inventory(uuid,uuid)') IS NOT NULL AND
   has_function_privilege(current_user,to_regprocedure('public.admin_watch_wallet_inventory(uuid,uuid)'),'EXECUTE') AND
   to_regprocedure('public.admin_replace_watch_wallet_address(uuid,uuid,uuid,uuid,uuid,text,text,text,bigint,text)') IS NOT NULL AND
-  has_function_privilege(current_user,to_regprocedure('public.admin_replace_watch_wallet_address(uuid,uuid,uuid,uuid,uuid,text,text,text,bigint,text)'),'EXECUTE')`).Scan(&ready)
+  has_function_privilege(current_user,to_regprocedure('public.admin_replace_watch_wallet_address(uuid,uuid,uuid,uuid,uuid,text,text,text,bigint,text)'),'EXECUTE') AND
+  to_regprocedure('public.current_admin_signup_review_status()') IS NOT NULL AND
+  has_function_privilege(current_user,to_regprocedure('public.current_admin_signup_review_status()'),'EXECUTE') AND
+  to_regprocedure('public.list_signup_screening_reviews(integer)') IS NOT NULL AND
+  has_function_privilege(current_user,to_regprocedure('public.list_signup_screening_reviews(integer)'),'EXECUTE') AND
+  to_regprocedure('public.decide_signup_screening(uuid,text,text,timestamp with time zone)') IS NOT NULL AND
+  has_function_privilege(current_user,to_regprocedure('public.decide_signup_screening(uuid,text,text,timestamp with time zone)'),'EXECUTE')`).Scan(&ready)
 	if err != nil || !ready {
 		return errors.New("required admin migrations or runtime grants are unavailable")
 	}
@@ -1522,9 +1528,9 @@ func classifyAdminDB(err error) error {
 		switch pgErr.Code {
 		case "23505", "40001", "40P01", "55000":
 			return ErrConflict
-		case "23503", "23514", "22P02", "22023":
+		case "23503", "23514", "22P02", "OCP02":
 			return ErrInvalid
-		case "42501":
+		case "OCP01":
 			return ErrForbidden
 		}
 	}

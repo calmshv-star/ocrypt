@@ -55,3 +55,42 @@ match goes to manual operator review, never automatic admission.
 11. **The cabinet scope model is unchanged.** Cabinet scopes come only from
     tenant bindings, so a reviewer also needs a tenant binding to open the
     cabinet; the queue itself sends no scope header and refuses one.
+
+## 2026-11-03 — independent review of 3ac9f03
+
+No critical or high finding. Fixed, each with a test written first:
+
+- **M1** Hold and decision audit events carried the held merchant's tenant
+  and merchant, so an owner admitted later could read the screening reasons,
+  matched references and the reviewer's note through `audit:read`. Both now
+  go to the global audit log only (tenant and merchant NULL); the tenant keeps
+  the reason-free `admin.self_service.registered`. Live `S2` checks the rows.
+- **M2** A one-word listed name was evaded by adding any word, and a hyphen,
+  a ‘/ʼ/`/´ apostrophe or a combining mark outside U+0300–U+036F split words.
+  Entities are now flagged `whole_word` by the importer (OFAC null SDN_Type,
+  UN ENTITY) and a one-word entity of four or more letters hits wherever it
+  appears; individuals are not flagged, so one given name never holds
+  everyone. A squashed key (words joined without spaces) catches splits;
+  every apostrophe variant and every combining-mark block is dropped.
+  Homoglyphs from other scripts remain out of scope (documented).
+- **M3** A missing UN list did not count as stale and freshness counted from
+  load time. `signup_screening_required_sources` (OFAC SDN, UN) must all be
+  loaded; freshness uses the publication time when the file states one; an
+  older publication cannot replace a newer one.
+- **M4** The UN date `…Z` failed on Python before 3.11. The importer now
+  converts the `Z`; checked with the macOS Python 3.9.6.
+- **Lows:** the email domain is taken after the last `@` (also in the
+  disposable-mailbox check); Website remarks pointing to a page on a shared
+  platform (Facebook, Telegram, X, …) are skipped; the down migration refuses
+  to run while signups await review; the reason limit counts characters, not
+  bytes; screening functions raise `OCP01`/`OCP02` instead of `42501`/`22023`
+  so a missing GRANT stays a server error; the shrink guard applies only to
+  official lists; the admin readiness check now requires the new functions, so
+  a new admin API never serves against an old schema; invisible characters in
+  the migration are escaped again; the OpenAPI tag is declared; SPEC's `XX`
+  wording is corrected.
+- **Accepted as limits:** the queue shows the oldest 100 held signups, and
+  signups held only for stale lists are not re-screened automatically; both
+  are documented for operators. The two-word subset rule will hold some
+  honest names ("International Trading"); that is the intended fail-safe
+  direction.

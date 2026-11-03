@@ -11,7 +11,7 @@ snapshot with the helper before assigning implementation workers.
 - [x] Tests authored; expected failures inspected: live S1/S2 failed on the missing functions, then on `S.A.` splitting into two words, then on word-set matching; BFF tests failed on the missing routes and contract.
 - [x] Dependencies, writer ownership, and common base assigned (single writer, branch `feat/stage2-screening` from `16e75c3`).
 - [x] Implementation complete and focused checks pass.
-- [ ] Integrated diff independently reviewed; relevant checks repeated.
+- [x] Integrated diff independently reviewed; relevant checks repeated (findings and fixes in DECISIONS.md).
 - [ ] Completion evidence and remaining runtime/deployment limits recorded.
 
 ## Assignments
@@ -28,6 +28,8 @@ and a local evidence reference. Never commit credentials or customer records.
 - 2026-11-03: importer SQL for the OFAC and UN fixtures piped into `psql` on that database loads 7 and 6 entries with the expected keys (for example `commerce rogue`, `персон плеисхолдер`).
 - 2026-11-03: `go test ./internal/admin/ ./cmd/admin-api/` pass; `go build -tags noncustodial ./...` pass; admin `tsc -p tsconfig.app.json` clean, vitest 80/80; i18n 3/3; `pytest tests/unit/test_signup_screening_import.py` 8/8.
 
+- 2026-11-03, after review fixes: live suite on fresh `ocrypt_fault_test_20261103_18`, 14/14 including `S1` and `S2`; `000059` down refused with held signups, then down, up and runtime grants after deciding them; importer output via `psql` loads `whole_word` and squashed keys; importer runs on Python 3.9.6 and 3.12; `go vet ./...`, admin and admin-api tests, noncustodial build and edition check pass; `check workflow`, `check web` (one pre-existing locale-switch race in `App.test.tsx` fixed by waiting for the label) and `check backend` pass; `pytest tests` 208 passed; gitleaks clean.
+
 ## Resume / next action
 
-Independent review of the integrated diff, then the PR for the rest of stage 2.
+PR #126 is open. Next stage-2 item: acceptance presets for the onboarding wizard.
