@@ -5,6 +5,7 @@ import { BellRing, Send } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAdmin } from "./AdminProvider";
 import type { NotificationEvent, NotificationSettings } from "./api/types";
+import { toggled, type NotificationSection, type SaveAction } from "./notifications";
 
 const EVENTS: NotificationEvent[] = ["paid", "underpaid", "review", "webhook_failed"];
 const SETTINGS_KEY = ["admin", "notifications"];
@@ -27,7 +28,7 @@ export function NotificationsPage() {
   const [telegram, setTelegram] = useState<Set<NotificationEvent>>(new Set());
   const [signIn, setSignIn] = useState({ email: true, telegram: true });
   const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<{ section: "events" | "account" | "telegram"; kind: Outcome }>({ section: "events", kind: null });
+  const [outcome, setOutcome] = useState<{ section: NotificationSection; kind: Outcome }>({ section: "events", kind: null });
   const [link, setLink] = useState<{ url: string; expires_at: string } | null>(null);
   const current = settings.data;
   // A one-time link lasts ten minutes; afterwards offer a new one.
@@ -43,7 +44,7 @@ export function NotificationsPage() {
     setSignIn({ email: current.account.sign_in_email, telegram: current.account.sign_in_telegram });
   }, [current]);
 
-  const run = async (section: "events" | "account" | "telegram", action: () => Promise<unknown>, failure: Outcome = "failed") => {
+  const run = async (section: NotificationSection, action: SaveAction, failure: Outcome = "failed") => {
     if (busy) return;
     setBusy(true);
     setOutcome({ section, kind: null });
@@ -64,12 +65,10 @@ export function NotificationsPage() {
   const saveAccount = () => run("account", () => admin.client!.saveAccountNotifications(scope, signIn.email, signIn.telegram, locale));
   const connect = () => run("telegram", async () => setLink(await admin.client!.createTelegramLink()), "linkFailed");
   const disconnect = () => run("telegram", async () => { await admin.client!.unlinkTelegram(); setLink(null); });
-  const toggle = (set: Set<NotificationEvent>, update: (next: Set<NotificationEvent>) => void, event: NotificationEvent) => {
-    const next = new Set(set);
-    if (next.has(event)) next.delete(event); else next.add(event);
-    update(next);
+  const message = (section: NotificationSection) => {
+    if (outcome.section !== section || !outcome.kind) return null;
+    return <p className="security__outcome" role={outcome.kind === "saved" ? "status" : "alert"}>{t(`notifications.${outcome.kind}` as MessageKey)}</p>;
   };
-  const message = (section: "events" | "account" | "telegram") => outcome.section === section && outcome.kind && <p className="security__outcome" role={outcome.kind === "saved" ? "status" : "alert"}>{t(`notifications.${outcome.kind}` as MessageKey)}</p>;
   const telegramReady = Boolean(current?.telegram.available && current.telegram.linked);
 
   return <div className="admin-page" data-testid="notifications-page">
@@ -103,8 +102,8 @@ export function NotificationsPage() {
             const locked = event === "webhook_failed" && !current.merchant!.webhooks_allowed;
             return <tr key={event}>
               <th scope="row">{name}{locked && <small>{t("notifications.webhookNoAccess")}</small>}</th>
-              <td><input aria-label={`${name}: ${t("notifications.email")}`} checked={email.has(event)} disabled={locked || busy} onChange={() => toggle(email, setEmail, event)} type="checkbox" /></td>
-              <td><input aria-label={`${name}: ${t("notifications.telegram")}`} checked={telegram.has(event)} disabled={locked || busy || !current.telegram.available} onChange={() => toggle(telegram, setTelegram, event)} type="checkbox" /></td>
+              <td><input aria-label={`${name}: ${t("notifications.email")}`} checked={email.has(event)} disabled={locked || busy} onChange={() => setEmail(toggled(email, event))} type="checkbox" /></td>
+              <td><input aria-label={`${name}: ${t("notifications.telegram")}`} checked={telegram.has(event)} disabled={locked || busy || !current.telegram.available} onChange={() => setTelegram(toggled(telegram, event))} type="checkbox" /></td>
             </tr>;
           })}</tbody>
         </table>
