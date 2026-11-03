@@ -69,4 +69,28 @@ func TestLoadAdminConfigAcceptsExplicitSecurityPolicy(t *testing.T) {
 	if !config.AcceptedAMR["otp"] || !config.AcceptedAMR["hwk"] {
 		t.Fatalf("unexpected AMR policy: %#v", config.AcceptedAMR)
 	}
+	// REG-3: open signup must screen the client region or opt out explicitly.
+	t.Setenv("ADMIN_SELF_SERVICE_SIGNUP", "true")
+	t.Setenv("ADMIN_SIGNUP_TERMS_VERSION", "2026-11")
+	for name, c := range map[string]struct {
+		header, unscreened string
+		ok                 bool
+	}{
+		"neither":   {"", "", false},
+		"both":      {"CF-IPCountry", "true", false},
+		"bad name":  {"CF IPCountry", "", false},
+		"bad bool":  {"", "maybe", false},
+		"header":    {"CF-IPCountry", "", true},
+		"opted out": {"", "true", true},
+	} {
+		t.Setenv("ADMIN_SIGNUP_REGION_HEADER", c.header)
+		t.Setenv("ADMIN_SIGNUP_UNSCREENED_IP", c.unscreened)
+		config, err := loadAdminConfig()
+		if (err == nil) != c.ok {
+			t.Fatalf("%s: accepted=%v, want %v (%v)", name, err == nil, c.ok, err)
+		}
+		if c.ok && (config.SignupRegionHeader != c.header || config.SignupUnscreenedIP != (c.unscreened == "true")) {
+			t.Fatalf("%s: parsed %+v", name, config)
+		}
+	}
 }

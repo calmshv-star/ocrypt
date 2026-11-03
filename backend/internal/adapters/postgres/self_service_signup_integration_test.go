@@ -15,11 +15,12 @@ import (
 func (f *faultDatabase) selfServiceSignup(t *testing.T) {
 	admin := f.pool(t, "merchant_admin_runtime")
 	now := time.Now().UTC().Truncate(time.Microsecond)
+	f.freshOfficialScreeningList(t)
 	request := func(company, country, business, website string) (string, bool) {
 		t.Helper()
 		id := faultID(t)
 		var ok bool
-		if err := admin.QueryRow(f.ctx, `SELECT create_admin_signup_request($1,$2,$3,$4,NULLIF($5,''),'2026-11-terms',$6,$7)`, id, company, country, business, website, now, now.Add(15*time.Minute)).Scan(&ok); err != nil {
+		if err := admin.QueryRow(f.ctx, `SELECT create_admin_signup_request($1,$2,$3,$4,NULLIF($5,''),'2026-11-terms',$6,$7,'DE',true)`, id, company, country, business, website, now, now.Add(15*time.Minute)).Scan(&ok); err != nil {
 			t.Fatal(err)
 		}
 		return id, ok
@@ -200,7 +201,7 @@ WHERE m.admin_user_id=$1 AND m.merchant_id=$2 AND m.status='active' AND b.role_k
 		t.Fatal("an ordinary login attempt longer than 15 minutes was accepted")
 	}
 	var denied bool
-	err := f.pool(t, "merchant_scanner_worker").QueryRow(f.ctx, `SELECT create_admin_signup_request($1,'X Ltd','DE','saas',NULL,'v',$2,$3)`, faultID(t), now, now.Add(time.Minute)).Scan(&denied)
+	err := f.pool(t, "merchant_scanner_worker").QueryRow(f.ctx, `SELECT create_admin_signup_request($1,'X Ltd','DE','saas',NULL,'v',$2,$3,NULL,false)`, faultID(t), now, now.Add(time.Minute)).Scan(&denied)
 	if err == nil || !strings.Contains(err.Error(), "permission denied") {
 		t.Fatalf("only the admin runtime may create signup requests: %v", err)
 	}

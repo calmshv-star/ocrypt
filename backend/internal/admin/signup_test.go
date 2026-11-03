@@ -18,7 +18,7 @@ func signupService(t *testing.T, repo *repositoryStub, enabled bool) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewService(repo, provider, box, ServiceConfig{LoginTTL: 5 * time.Minute, IdleTTL: 15 * time.Minute, AbsoluteTTL: 8 * time.Hour, RotationInterval: 5 * time.Minute, StepUpTTL: 10 * time.Minute, RequiredACR: "urn:mfa", AcceptedAMR: map[string]bool{"otp": true}, SelfServiceSignup: enabled, SignupTermsVersion: "2026-11", SignupTTL: 30 * time.Minute})
+	service, err := NewService(repo, provider, box, ServiceConfig{LoginTTL: 5 * time.Minute, IdleTTL: 15 * time.Minute, AbsoluteTTL: 8 * time.Hour, RotationInterval: 5 * time.Minute, StepUpTTL: 10 * time.Minute, RequiredACR: "urn:mfa", AcceptedAMR: map[string]bool{"otp": true}, SelfServiceSignup: enabled, SignupTermsVersion: "2026-11", SignupTTL: 30 * time.Minute, SignupRegionHeader: "CF-IPCountry"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestSignupRequiresATermsVersionWhenEnabled(t *testing.T) {
 func TestSignupNeedsABoundedTTLAndMFA(t *testing.T) {
 	provider, _ := testOIDCProvider(t)
 	box, _ := NewAESGCMSecretBox(make([]byte, 32))
-	base := ServiceConfig{LoginTTL: 5 * time.Minute, IdleTTL: 15 * time.Minute, AbsoluteTTL: 8 * time.Hour, RotationInterval: 5 * time.Minute, StepUpTTL: 10 * time.Minute, RequiredACR: "urn:mfa", AcceptedAMR: map[string]bool{"otp": true}, SelfServiceSignup: true, SignupTermsVersion: "2026-11", SignupTTL: 30 * time.Minute}
+	base := ServiceConfig{LoginTTL: 5 * time.Minute, IdleTTL: 15 * time.Minute, AbsoluteTTL: 8 * time.Hour, RotationInterval: 5 * time.Minute, StepUpTTL: 10 * time.Minute, RequiredACR: "urn:mfa", AcceptedAMR: map[string]bool{"otp": true}, SelfServiceSignup: true, SignupTermsVersion: "2026-11", SignupTTL: 30 * time.Minute, SignupRegionHeader: "CF-IPCountry"}
 	for name, mutate := range map[string]func(*ServiceConfig){
 		"no ttl":       func(c *ServiceConfig) { c.SignupTTL = 0 },
 		"ttl too long": func(c *ServiceConfig) { c.SignupTTL = 2 * time.Hour },
@@ -59,14 +59,14 @@ func TestSignupNeedsABoundedTTLAndMFA(t *testing.T) {
 
 func TestBeginSignupIsClosedByDefault(t *testing.T) {
 	repo := &repositoryStub{signupOK: true}
-	if _, _, err := signupService(t, repo, false).BeginSignup(context.Background(), validForm()); !errors.Is(err, ErrNotFound) || len(repo.signupForms) != 0 {
+	if _, _, err := signupService(t, repo, false).BeginSignup(context.Background(), validForm(), SignupRegion{Code: "DE", Screened: true}); !errors.Is(err, ErrNotFound) || len(repo.signupForms) != 0 {
 		t.Fatalf("disabled signup must be invisible, got %v", err)
 	}
 }
 
 func TestBeginSignupNormalizesScreensAndRequiresMFA(t *testing.T) {
 	repo := &repositoryStub{signupOK: true}
-	location, state, err := signupService(t, repo, true).BeginSignup(context.Background(), validForm())
+	location, state, err := signupService(t, repo, true).BeginSignup(context.Background(), validForm(), SignupRegion{Code: "DE", Screened: true})
 	if err != nil || state == "" {
 		t.Fatalf("valid signup rejected: %v", err)
 	}
@@ -99,12 +99,12 @@ func TestBeginSignupRejectsInvalidOrScreenedForms(t *testing.T) {
 		"control":        {CompanyName: "Acme\x07Ltd", Country: "DE", BusinessType: "ecommerce", TermsVersion: "2026-11"},
 	} {
 		repo := &repositoryStub{signupOK: true}
-		if _, _, err := signupService(t, repo, true).BeginSignup(context.Background(), form); !errors.Is(err, ErrInvalid) || len(repo.signupForms) != 0 {
+		if _, _, err := signupService(t, repo, true).BeginSignup(context.Background(), form, SignupRegion{Code: "DE", Screened: true}); !errors.Is(err, ErrInvalid) || len(repo.signupForms) != 0 {
 			t.Fatalf("%s: expected local rejection before screening, got %v", name, err)
 		}
 	}
 	repo := &repositoryStub{signupOK: false}
-	if _, _, err := signupService(t, repo, true).BeginSignup(context.Background(), validForm()); !errors.Is(err, ErrInvalid) || repo.attempt.Purpose != "" {
+	if _, _, err := signupService(t, repo, true).BeginSignup(context.Background(), validForm(), SignupRegion{Code: "DE", Screened: true}); !errors.Is(err, ErrInvalid) || repo.attempt.Purpose != "" {
 		t.Fatalf("a screened-out form must not start OIDC: %v", err)
 	}
 }

@@ -677,6 +677,30 @@ paths:
       parameters: [{$ref: '#/components/parameters/PlatformTenant'}]
       responses:
         '200': {description: Snapshot page, content: {application/json: {schema: {$ref: './platform-admin-openapi.yaml#/components/schemas/SnapshotPage'}}}}
+  /admin/v1/platform/signup-reviews:
+    get:
+      tags: [Signup screening]
+      operationId: listSignupReviews
+      summary: List self-service signups held by sanctions screening
+      description: Needs a global binding with signup_reviews:read. The queue is global, so tenant and merchant scope headers are refused.
+      responses:
+        '200': {description: Held signups, oldest first, content: {application/json: {schema: {type: object, additionalProperties: false, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/SignupReview'}}}}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/platform/signup-reviews/{id}/decision:
+    post:
+      tags: [Signup screening]
+      operationId: decideSignupReview
+      summary: Admit or reject one held signup
+      description: Needs a global binding with signup_reviews:decide and an MFA session. A decision is final; the registrant cannot decide its own signup.
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{name: id, in: path, required: true, schema: {$ref: '#/components/schemas/UUID'}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/SignupDecision'}}}}
+      responses:
+        '200': {description: Decision recorded, content: {application/json: {schema: {type: object, additionalProperties: false, required: [merchant_id,status], properties: {merchant_id: {$ref: '#/components/schemas/UUID'}, status: {type: string, enum: [approved, rejected]}}}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
   /admin/v1/platform/emergency-pauses:
     post:
       tags: [Platform configuration]
@@ -1308,7 +1332,9 @@ components:
         next_cursor: {type: string, maxLength: 256}
     Problem: {type: object, additionalProperties: false, required: [type,title,status,code,detail], properties: {type: {type: string}, title: {type: string}, status: {type: integer}, code: {type: string}, detail: {type: string}}}
     Scope: {type: object, additionalProperties: false, properties: {tenant_id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}}}
-    Principal: {type: object, additionalProperties: false, required: [user_id,session_id,display_name,roles,permissions,scopes,amr], properties: {user_id: {$ref: '#/components/schemas/UUID'}, session_id: {$ref: '#/components/schemas/UUID'}, display_name: {type: string}, email: {type: string, format: email}, roles: {type: array, items: {type: string}}, permissions: {type: array, items: {type: string}}, scopes: {type: array, items: {$ref: '#/components/schemas/Scope'}}, acr: {type: string}, amr: {type: array, items: {type: string}}, step_up_until: {type: string, format: date-time}}}
+    Principal: {type: object, additionalProperties: false, required: [user_id,session_id,display_name,roles,permissions,scopes,amr], properties: {user_id: {$ref: '#/components/schemas/UUID'}, session_id: {$ref: '#/components/schemas/UUID'}, display_name: {type: string}, email: {type: string, format: email}, roles: {type: array, items: {type: string}}, permissions: {type: array, items: {type: string}}, scopes: {type: array, items: {$ref: '#/components/schemas/Scope'}}, acr: {type: string}, amr: {type: array, items: {type: string}}, step_up_until: {type: string, format: date-time}, signup_review: {type: string, enum: [pending, rejected], description: 'Set only while the user''s own self-service signup is held by sanctions screening; never carries reasons.'}}}
+    SignupReview: {type: object, additionalProperties: false, required: [merchant_id,tenant_id,company_name,country,business_type,email,display_name,reasons,matches,screened_at], properties: {merchant_id: {$ref: '#/components/schemas/UUID'}, tenant_id: {$ref: '#/components/schemas/UUID'}, company_name: {type: string}, country: {type: string, pattern: '^[A-Z]{2}$'}, business_type: {type: string}, website: {type: string, format: uri}, email: {type: string}, display_name: {type: string}, ip_region: {type: string, pattern: '^[A-Z][A-Z0-9]$'}, reasons: {type: array, items: {type: string, enum: [domain_match, ip_region, ip_region_unknown, name_match, screening_list_stale]}}, matches: {type: array, maxItems: 20, items: {type: object, additionalProperties: false, required: [source,kind,reference], properties: {source: {type: string}, kind: {type: string, enum: [name, domain]}, reference: {type: string}}}}, screened_at: {type: string, format: date-time}}}
+    SignupDecision: {type: object, additionalProperties: false, required: [decision,reason], properties: {decision: {type: string, enum: [approve, reject]}, reason: {type: string, minLength: 3, maxLength: 1000}}}
     OverviewMoney:
       type: object
       additionalProperties: false

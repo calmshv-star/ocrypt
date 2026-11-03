@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -38,7 +40,17 @@ type ServiceConfig struct {
 	// SignupTTL bounds a signup request and its OIDC attempt. A registrant
 	// creates the IdP account, verifies the email and enrolls MFA inside it.
 	SignupTTL time.Duration
+	// SignupRegionHeader names the one header the trusted edge proxy sets to
+	// the client's region (for example CF-IPCountry). Signup requires it
+	// unless SignupUnscreenedIP explicitly opts out of IP screening.
+	SignupRegionHeader string
+	SignupUnscreenedIP bool
 }
+
+var (
+	headerNamePattern = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
+	regionCodePattern = regexp.MustCompile(`^[A-Z][A-Z0-9]$`)
+)
 
 const maxAdminSessionTTL = 10 * 365 * 24 * time.Hour
 
@@ -99,6 +111,12 @@ func NewService(repository Repository, provider *OIDCProvider, stateBox SecretBo
 	if config.SelfServiceSignup && config.PasswordOnly {
 		return nil, errors.New("self-service signup requires MFA and cannot run in password-only mode")
 	}
+	if config.SelfServiceSignup && (config.SignupRegionHeader == "") == !config.SignupUnscreenedIP {
+		return nil, errors.New("self-service signup needs either a trusted region header or an explicit opt-out of IP screening, not both")
+	}
+	if config.SignupRegionHeader != "" && !headerNamePattern.MatchString(config.SignupRegionHeader) {
+		return nil, errors.New("signup region header must be a plain HTTP header name")
+	}
 	return &Service{repository: repository, provider: provider, stateBox: stateBox, config: config, now: func() time.Time { return time.Now().UTC() }}, nil
 }
 
@@ -145,7 +163,7 @@ func (s *Service) SignupOptions(ctx context.Context) (SignupOptions, error) {
 
 // BeginSignup screens a registration form in PostgreSQL and starts an OIDC
 // login that requires MFA. Rejections never say which rule failed.
-func (s *Service) BeginSignup(ctx context.Context, form SignupForm) (string, string, error) {
+func (s *Service) BeginSignup(ctx context.Context, form SignupForm, region SignupRegion) (string, string, error) {
 	if !s.config.SelfServiceSignup {
 		return "", "", ErrNotFound
 	}
@@ -158,7 +176,7 @@ func (s *Service) BeginSignup(ctx context.Context, form SignupForm) (string, str
 		return "", "", err
 	}
 	now := s.now()
-	accepted, err := s.repository.CreateSignupRequest(ctx, requestID, form, now, now.Add(s.config.SignupTTL))
+	accepted, err := s.repository.CreateSignupRequest(ctx, requestID, form, region, now, now.Add(s.config.SignupTTL))
 	if err != nil {
 		return "", "", err
 	}
@@ -166,6 +184,21 @@ func (s *Service) BeginSignup(ctx context.Context, form SignupForm) (string, str
 		return "", "", ErrInvalid
 	}
 	return s.begin(ctx, "/#/onboarding", "signup", "", nil, InvitationLogin{}, requestID)
+}
+
+// signupRegion reads the client region from the configured proxy header. A
+// missing, repeated or malformed value is screened as unknown, never trusted.
+func (s *Service) signupRegion(header http.Header) SignupRegion {
+	if s.config.SignupRegionHeader == "" {
+		return SignupRegion{}
+	}
+	values := header.Values(s.config.SignupRegionHeader)
+	if len(values) == 1 {
+		if code := strings.TrimSpace(values[0]); regionCodePattern.MatchString(code) {
+			return SignupRegion{Code: code, Screened: true}
+		}
+	}
+	return SignupRegion{Screened: true}
 }
 
 func normalizeSignupForm(form SignupForm) (SignupForm, bool) {
@@ -368,6 +401,10 @@ func (s *Service) completeSignup(ctx context.Context, attempt LoginAttempt, clai
 	if !registration.Created {
 		returnPath = "/#/overview"
 	}
+	// A held registrant signs in to the review screen and holds no rights.
+	if registration.Held {
+		returnPath = "/"
+	}
 	return AuthResult{Principal: PrincipalFor(identity, session), Session: session, Tokens: &tokens, MFAAt: now}, returnPath, nil
 }
 
@@ -505,6 +542,32 @@ func AuthorizeWallets(principal Principal, scope Scope, write bool) (Scope, erro
 
 // authorizeWalletWrite also requires recent MFA: changing where customers pay
 // must not be possible with only a stolen or long-lived session cookie.
+// ListSignupReviews returns signups held by sanctions screening to a global
+// reviewer; a tenant-scoped grant never sees other tenants' registrations.
+func (s *Service) ListSignupReviews(ctx context.Context, principal Principal) ([]SignupReview, error) {
+	if _, err := principal.AuthorizePlatform(PermissionSignupReviewsRead, ""); err != nil {
+		return nil, err
+	}
+	return s.repository.ListSignupReviews(ctx, principal, 100)
+}
+
+// DecideSignupReview admits or rejects one held signup. It needs a global
+// grant, fresh MFA and a reason; the database refuses the registrant and a
+// second decision.
+func (s *Service) DecideSignupReview(ctx context.Context, principal Principal, merchantID string, input SignupDecision) (string, error) {
+	if _, err := principal.AuthorizePlatform(PermissionSignupReviewsDecide, ""); err != nil {
+		return "", err
+	}
+	if err := principal.RequireStepUp(s.now(), s.config.RequiredACR, s.config.AcceptedAMR); err != nil {
+		return "", err
+	}
+	input.Reason = strings.TrimSpace(input.Reason)
+	if !ids.Valid(merchantID) || (input.Decision != "approve" && input.Decision != "reject") || len([]rune(input.Reason)) < 3 || len(input.Reason) > 1000 || strings.IndexFunc(input.Reason, func(r rune) bool { return unicode.In(r, unicode.Cc, unicode.Cf) }) >= 0 {
+		return "", ErrInvalid
+	}
+	return s.repository.DecideSignupReview(ctx, principal, merchantID, input, s.now())
+}
+
 func (s *Service) authorizeWalletWrite(principal Principal, scope Scope) (Scope, error) {
 	resolved, err := AuthorizeWallets(principal, scope, true)
 	if err != nil {

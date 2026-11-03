@@ -23,8 +23,10 @@ type AuthRepository interface {
 	ConsumeLoginAttempt(context.Context, [32]byte, time.Time) (LoginAttempt, error)
 	FindIdentity(context.Context, string, string) (Identity, error)
 	CreateInvitationSession(context.Context, LoginAttempt, IDTokenClaims, Session) (Identity, Session, error)
-	CreateSignupRequest(context.Context, string, SignupForm, time.Time, time.Time) (bool, error)
+	CreateSignupRequest(context.Context, string, SignupForm, SignupRegion, time.Time, time.Time) (bool, error)
 	RegisterSelfServiceMerchant(context.Context, LoginAttempt, IDTokenClaims, time.Time) (SelfServiceRegistration, error)
+	ListSignupReviews(context.Context, Principal, int) ([]SignupReview, error)
+	DecideSignupReview(context.Context, Principal, string, SignupDecision, time.Time) (string, error)
 	// SignupOptions lists the business types open for registration and the
 	// countries registration is closed for.
 	SignupOptions(context.Context) (businessTypes, blockedCountries []string, err error)
