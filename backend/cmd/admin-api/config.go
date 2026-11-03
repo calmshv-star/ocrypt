@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
+
+var signupRegionHeaderPattern = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
 
 type adminConfig struct {
 	HTTPAddress                    string
@@ -26,6 +29,8 @@ type adminConfig struct {
 	SignupTTL                      time.Duration
 	SelfServiceSignup              bool
 	SignupTermsVersion             string
+	SignupRegionHeader             string
+	SignupUnscreenedIP             bool
 	IdleTTL                        time.Duration
 	AbsoluteTTL                    time.Duration
 	RotationInterval               time.Duration
@@ -161,6 +166,18 @@ func loadAdminConfig() (adminConfig, error) {
 	}
 	if config.SelfServiceSignup && config.PasswordOnly {
 		return adminConfig{}, errors.New("ADMIN_SELF_SERVICE_SIGNUP=true requires MFA and cannot be combined with ADMIN_PASSWORD_ONLY_MODE=true")
+	}
+	// REG-3: the trusted edge proxy's region header (for example CF-IPCountry)
+	// is screened at signup; an install without one must opt out explicitly.
+	config.SignupRegionHeader = strings.TrimSpace(os.Getenv("ADMIN_SIGNUP_REGION_HEADER"))
+	if config.SignupUnscreenedIP, err = strconv.ParseBool(envOr("ADMIN_SIGNUP_UNSCREENED_IP", "false")); err != nil {
+		return adminConfig{}, errors.New("ADMIN_SIGNUP_UNSCREENED_IP must be true or false")
+	}
+	if config.SignupRegionHeader != "" && !signupRegionHeaderPattern.MatchString(config.SignupRegionHeader) {
+		return adminConfig{}, errors.New("ADMIN_SIGNUP_REGION_HEADER must be a plain HTTP header name")
+	}
+	if config.SelfServiceSignup && (config.SignupRegionHeader == "") == !config.SignupUnscreenedIP {
+		return adminConfig{}, errors.New("ADMIN_SELF_SERVICE_SIGNUP=true requires exactly one of ADMIN_SIGNUP_REGION_HEADER or ADMIN_SIGNUP_UNSCREENED_IP=true")
 	}
 	if config.PasswordOnly && (config.RequiredACR != "password" || !config.AcceptedAMR["pwd"]) {
 		return adminConfig{}, errors.New("password-only mode requires ADMIN_REQUIRED_ACR=password and ADMIN_ACCEPTED_AMR to include pwd")

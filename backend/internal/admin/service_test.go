@@ -23,14 +23,31 @@ type repositoryStub struct {
 	signupOK          bool
 	signupErr         error
 	signupOptionCalls int
-	registration      SelfServiceRegistration
-	registerErr       error
-	sessions          []Session
+	signupRegions     []SignupRegion
+	signupReviews     []SignupReview
+	signupDecision    SignupDecision
+	signupDecisionErr error
+	// signupDecisionMerchant is the merchant the last decision targeted.
+	signupDecisionMerchant string
+	registration           SelfServiceRegistration
+	registerErr            error
+	sessions               []Session
 }
 
-func (r *repositoryStub) CreateSignupRequest(_ context.Context, _ string, form SignupForm, _, _ time.Time) (bool, error) {
+func (r *repositoryStub) CreateSignupRequest(_ context.Context, _ string, form SignupForm, region SignupRegion, _, _ time.Time) (bool, error) {
 	r.signupForms = append(r.signupForms, form)
+	r.signupRegions = append(r.signupRegions, region)
 	return r.signupOK, r.signupErr
+}
+func (r *repositoryStub) ListSignupReviews(context.Context, Principal, int) ([]SignupReview, error) {
+	return r.signupReviews, nil
+}
+func (r *repositoryStub) DecideSignupReview(_ context.Context, _ Principal, merchantID string, decision SignupDecision, _ time.Time) (string, error) {
+	if r.signupDecisionErr != nil {
+		return "", r.signupDecisionErr
+	}
+	r.signupDecision, r.signupDecisionMerchant = decision, merchantID
+	return map[string]string{"approve": "approved", "reject": "rejected"}[decision.Decision], nil
 }
 func (r *repositoryStub) RegisterSelfServiceMerchant(context.Context, LoginAttempt, IDTokenClaims, time.Time) (SelfServiceRegistration, error) {
 	return r.registration, r.registerErr

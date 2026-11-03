@@ -116,11 +116,15 @@ TO merchant_api_runtime;
 GRANT SELECT,INSERT ON reconciliation_reports,outbox_events TO merchant_api_runtime;
 -- The noncustodial edition keeps /readyz closed while a custodial wallet exists.
 GRANT EXECUTE ON FUNCTION platform_custodial_wallet_count() TO merchant_api_runtime;
--- Self-service registration runs only through screened definer functions.
+-- Self-service registration runs only through screened definer functions;
+-- held signups are listed and decided only by global reviewers.
 GRANT EXECUTE ON FUNCTION
-  create_admin_signup_request(uuid,text,text,text,text,text,timestamptz,timestamptz),
+  create_admin_signup_request(uuid,text,text,text,text,text,timestamptz,timestamptz,text,boolean),
   register_self_service_merchant(uuid,text,text,text,text,uuid,uuid,uuid,uuid,timestamptz),
-  list_current_admin_self_service_owner_grants()
+  list_current_admin_self_service_owner_grants(),
+  list_signup_screening_reviews(integer),
+  decide_signup_screening(uuid,text,text,timestamptz),
+  current_admin_signup_review_status()
 TO merchant_admin_runtime;
 GRANT SELECT ON signup_business_types,signup_blocked_countries TO merchant_admin_runtime;
 GRANT INSERT ON payment_intent_versions,callback_events,callback_deliveries TO merchant_api_runtime;

@@ -193,6 +193,8 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /admin/v1/platform/rollbacks", s.authenticated(s.mutating(s.platformHandler(PermissionPlatformConfigRollback, true))))
 	s.mux.Handle("GET /admin/v1/platform/snapshots", s.authenticated(s.platformHandler(PermissionPlatformConfigRead, false)))
 	s.mux.Handle("POST /admin/v1/platform/emergency-pauses", s.authenticated(s.mutating(s.platformHandler(PermissionPlatformConfigEmergency, true))))
+	s.mux.Handle("GET /admin/v1/platform/signup-reviews", s.authenticated(http.HandlerFunc(s.signupReviews)))
+	s.mux.Handle("POST /admin/v1/platform/signup-reviews/{id}/decision", s.authenticated(s.mutating(http.HandlerFunc(s.decideSignupReview))))
 	s.mux.Handle("GET /admin/v1/providers", s.authenticated(s.platformHandler(PermissionProviderOperationsRead, false)))
 	s.mux.Handle("GET /admin/v1/providers/{id}", s.authenticated(s.platformHandler(PermissionProviderOperationsRead, false)))
 	s.mux.Handle("GET /admin/v1/provider-change-requests", s.authenticated(s.platformHandler(PermissionProviderOperationsRead, false)))
@@ -590,7 +592,7 @@ func (s *Server) signup(w http.ResponseWriter, request *http.Request) {
 		writeProblem(w, http.StatusBadRequest, "invalid_request", "Request body is invalid.")
 		return
 	}
-	location, correlation, err := s.service.BeginSignup(request.Context(), form)
+	location, correlation, err := s.service.BeginSignup(request.Context(), form, s.service.signupRegion(request.Header))
 	if errors.Is(err, ErrNotFound) {
 		writeProblem(w, http.StatusNotFound, "not_found", "The requested resource was not found.")
 		return
@@ -703,6 +705,40 @@ func (s *Server) clearOIDCCookie(w http.ResponseWriter) {
 
 func (s *Server) me(w http.ResponseWriter, request *http.Request) {
 	writeJSON(w, http.StatusOK, authenticatedFrom(request.Context()).Principal)
+}
+
+// signupReviews lists signups held by sanctions screening. The queue is
+// global, so a browser scope header is refused rather than ignored.
+func (s *Server) signupReviews(w http.ResponseWriter, request *http.Request) {
+	if !unscopedRequest(w, request) {
+		return
+	}
+	items, err := s.service.ListSignupReviews(request.Context(), authenticatedFrom(request.Context()).Principal)
+	if items == nil {
+		items = []SignupReview{}
+	}
+	respond(w, map[string][]SignupReview{"data": items}, err)
+}
+
+func (s *Server) decideSignupReview(w http.ResponseWriter, request *http.Request) {
+	if !unscopedRequest(w, request) {
+		return
+	}
+	var input SignupDecision
+	if !s.decode(w, request, &input) {
+		return
+	}
+	merchantID := request.PathValue("id")
+	status, err := s.service.DecideSignupReview(request.Context(), authenticatedFrom(request.Context()).Principal, merchantID, input)
+	respond(w, map[string]string{"merchant_id": merchantID, "status": status}, err)
+}
+
+func unscopedRequest(w http.ResponseWriter, request *http.Request) bool {
+	if len(request.Header.Values("X-Admin-Tenant-ID")) > 0 || len(request.Header.Values("X-Admin-Merchant-ID")) > 0 {
+		writeProblem(w, http.StatusBadRequest, "invalid_scope", "Platform scope is invalid.")
+		return false
+	}
+	return true
 }
 
 func (s *Server) refreshCSRF(w http.ResponseWriter, request *http.Request) {

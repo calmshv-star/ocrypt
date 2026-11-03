@@ -46,7 +46,13 @@ func (r *PostgresRepository) Ping(ctx context.Context) error {
   to_regprocedure('public.admin_watch_wallet_inventory(uuid,uuid)') IS NOT NULL AND
   has_function_privilege(current_user,to_regprocedure('public.admin_watch_wallet_inventory(uuid,uuid)'),'EXECUTE') AND
   to_regprocedure('public.admin_replace_watch_wallet_address(uuid,uuid,uuid,uuid,uuid,text,text,text,bigint,text)') IS NOT NULL AND
-  has_function_privilege(current_user,to_regprocedure('public.admin_replace_watch_wallet_address(uuid,uuid,uuid,uuid,uuid,text,text,text,bigint,text)'),'EXECUTE')`).Scan(&ready)
+  has_function_privilege(current_user,to_regprocedure('public.admin_replace_watch_wallet_address(uuid,uuid,uuid,uuid,uuid,text,text,text,bigint,text)'),'EXECUTE') AND
+  to_regprocedure('public.current_admin_signup_review_status()') IS NOT NULL AND
+  has_function_privilege(current_user,to_regprocedure('public.current_admin_signup_review_status()'),'EXECUTE') AND
+  to_regprocedure('public.list_signup_screening_reviews(integer)') IS NOT NULL AND
+  has_function_privilege(current_user,to_regprocedure('public.list_signup_screening_reviews(integer)'),'EXECUTE') AND
+  to_regprocedure('public.decide_signup_screening(uuid,text,text,timestamp with time zone)') IS NOT NULL AND
+  has_function_privilege(current_user,to_regprocedure('public.decide_signup_screening(uuid,text,text,timestamp with time zone)'),'EXECUTE')`).Scan(&ready)
 	if err != nil || !ready {
 		return errors.New("required admin migrations or runtime grants are unavailable")
 	}
@@ -174,9 +180,9 @@ RETURNING state_hash,nonce,encrypted_verifier,purpose,expected_user_id::text,exi
 
 // CreateSignupRequest screens and stores a self-service signup request. A
 // false result means the request was rejected without saying which rule.
-func (r *PostgresRepository) CreateSignupRequest(ctx context.Context, id string, form SignupForm, createdAt, expiresAt time.Time) (bool, error) {
+func (r *PostgresRepository) CreateSignupRequest(ctx context.Context, id string, form SignupForm, region SignupRegion, createdAt, expiresAt time.Time) (bool, error) {
 	var accepted bool
-	err := r.pool.QueryRow(ctx, `SELECT create_admin_signup_request($1,$2,$3,$4,NULLIF($5,''),$6,$7,$8)`, id, form.CompanyName, form.Country, form.BusinessType, form.Website, form.TermsVersion, createdAt, expiresAt).Scan(&accepted)
+	err := r.pool.QueryRow(ctx, `SELECT create_admin_signup_request($1,$2,$3,$4,NULLIF($5,''),$6,$7,$8,NULLIF($9,''),$10)`, id, form.CompanyName, form.Country, form.BusinessType, form.Website, form.TermsVersion, createdAt, expiresAt, region.Code, region.Screened).Scan(&accepted)
 	return accepted, classifyAdminDB(err)
 }
 
@@ -191,10 +197,53 @@ func (r *PostgresRepository) RegisterSelfServiceMerchant(ctx context.Context, at
 		identifiers[index] = value
 	}
 	var result SelfServiceRegistration
-	err := r.pool.QueryRow(ctx, `SELECT user_id::text,coalesce(tenant_id::text,''),coalesce(merchant_id::text,''),created
+	err := r.pool.QueryRow(ctx, `SELECT user_id::text,coalesce(tenant_id::text,''),coalesce(merchant_id::text,''),created,held
 FROM register_self_service_merchant($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, attempt.SignupRequestID, claims.Issuer, claims.Subject, claims.Email, claims.Name,
-		identifiers[0], identifiers[1], identifiers[2], identifiers[3], at).Scan(&result.UserID, &result.TenantID, &result.MerchantID, &result.Created)
+		identifiers[0], identifiers[1], identifiers[2], identifiers[3], at).Scan(&result.UserID, &result.TenantID, &result.MerchantID, &result.Created, &result.Held)
 	return result, classifyAdminDB(err)
+}
+
+// ListSignupReviews reads held signups as the reviewer; the database checks
+// the reviewer's global binding again.
+func (r *PostgresRepository) ListSignupReviews(ctx context.Context, principal Principal, limit int) ([]SignupReview, error) {
+	var reviews []SignupReview
+	err := pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{IsoLevel: pgx.ReadCommitted, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('app.admin_user_id',$1,true)`, principal.UserID); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT merchant_id::text,tenant_id::text,company_name,country,business_type,coalesce(website,''),email,display_name,coalesce(ip_region,''),reasons,matches,screened_at
+FROM list_signup_screening_reviews($1)`, limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var review SignupReview
+			var matches []byte
+			if err := rows.Scan(&review.MerchantID, &review.TenantID, &review.CompanyName, &review.Country, &review.BusinessType, &review.Website, &review.Email, &review.DisplayName, &review.IPRegion, &review.Reasons, &matches, &review.ScreenedAt); err != nil {
+				return err
+			}
+			if err := json.Unmarshal(matches, &review.Matches); err != nil {
+				return err
+			}
+			reviews = append(reviews, review)
+		}
+		return rows.Err()
+	})
+	return reviews, classifyAdminDB(err)
+}
+
+// DecideSignupReview records one reviewer decision; the database refuses a
+// non-global reviewer, the registrant and a second decision.
+func (r *PostgresRepository) DecideSignupReview(ctx context.Context, principal Principal, merchantID string, decision SignupDecision, at time.Time) (string, error) {
+	var status string
+	err := pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('app.admin_user_id',$1,true)`, principal.UserID); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `SELECT decide_signup_screening($1,$2,$3,$4)`, merchantID, decision.Decision, decision.Reason, at).Scan(&status)
+	})
+	return status, classifyAdminDB(err)
 }
 
 // SignupOptions lists the business types open for self-service signup and
@@ -319,7 +368,8 @@ WHERE b.user_id=$1 AND b.role_key<>'merchant_owner' AND b.revoked_at IS NULL AND
 		for _, id := range ownerOrder {
 			identity.Bindings = append(identity.Bindings, *ownerBindings[id])
 		}
-		return nil
+		// A registrant held by sanctions screening learns only the state.
+		return tx.QueryRow(ctx, `SELECT coalesce(current_admin_signup_review_status(),'')`).Scan(&identity.SignupReview)
 	})
 	return identity, classifyAdminDB(err)
 }
@@ -1478,8 +1528,10 @@ func classifyAdminDB(err error) error {
 		switch pgErr.Code {
 		case "23505", "40001", "40P01", "55000":
 			return ErrConflict
-		case "23503", "23514", "22P02":
+		case "23503", "23514", "22P02", "OCP02":
 			return ErrInvalid
+		case "OCP01":
+			return ErrForbidden
 		}
 	}
 	return fmt.Errorf("admin persistence operation failed: %w", err)

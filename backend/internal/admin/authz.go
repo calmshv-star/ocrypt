@@ -33,7 +33,7 @@ func PrincipalFor(identity Identity, session Session) Principal {
 		key := binding.TenantID + "\x1f" + binding.MerchantID
 		scopes[key] = Scope{TenantID: binding.TenantID, MerchantID: binding.MerchantID}
 	}
-	principal := Principal{UserID: identity.UserID, SessionID: session.ID, DisplayName: identity.DisplayName, Email: identity.Email, ACR: session.ACR, AMR: append([]string(nil), session.AMR...), StepUpUntil: session.StepUpUntil}
+	principal := Principal{UserID: identity.UserID, SessionID: session.ID, DisplayName: identity.DisplayName, Email: identity.Email, ACR: session.ACR, AMR: append([]string(nil), session.AMR...), StepUpUntil: session.StepUpUntil, SignupReview: identity.SignupReview}
 	for _, binding := range identity.Bindings {
 		for permission, allowed := range binding.Permissions {
 			if allowed && editionAllows(permission) {

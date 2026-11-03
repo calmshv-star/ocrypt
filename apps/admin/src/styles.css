@@ -659,3 +659,14 @@
 .admin-export { display: inline-grid; justify-items: end; gap: 4px; }
 .admin-export small { max-width: 260px; color: var(--mp-muted); font-size: 12px; text-align: right; }
 .admin-export small[role="alert"] { color: var(--mp-negative); }
+.signup-review__reasons { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
+.signup-review__facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 0 0 14px; }
+.signup-review__facts dt { color: var(--mp-muted); }
+.signup-review__facts dd { margin: 0; overflow-wrap: anywhere; }
+.signup-review__facts ul { margin: 0; padding-left: 18px; }
+.signup-review__decision { display: grid; gap: 8px; }
+.signup-review__decision textarea { width: 100%; border: 1px solid var(--mp-border); border-radius: 10px; background: var(--mp-surface); color: var(--mp-text); padding: 8px 10px; font: inherit; }
+.signup-review__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.signup-review__decision [role="alert"] { color: var(--mp-negative); }
+.signup-review__decision [role="alert"] a { color: var(--mp-primary); font-weight: 600; }
+@media (max-width: 640px) { .signup-review__facts { grid-template-columns: minmax(0, 1fr); } }

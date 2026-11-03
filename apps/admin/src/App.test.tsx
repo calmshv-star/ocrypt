@@ -176,7 +176,8 @@ describe("admin application", () => {
     renderApp("/transfers", { client: liveClient, preview: false });
     fireEvent.change(await screen.findByRole("combobox", { name: "Language" }), { target: { value: "ru" } });
     expect(await screen.findByText("6.028692 USDT")).toBeInTheDocument();
-    expect(screen.getByText("Финализирован")).toBeInTheDocument();
+    // The amount can render before the Russian labels do; wait for the label.
+    expect(await screen.findByText("Финализирован")).toBeInTheDocument();
     expect(screen.queryByText("6028692")).not.toBeInTheDocument();
   });
 

@@ -5,7 +5,7 @@ export type Permission =
   | "payment_links:read" | "payment_links:write" | "checkout:write"
   | "webhook_settings:read" | "webhook_settings:write" | "webhook_settings:rotate" | "webhook_settings:disable"
   | "api_clients:read" | "api_clients:write" | "api_clients:rotate" | "api_clients:revoke"
-  | "management_audit:read" | "wallets:read" | "wallets:write"
+  | "management_audit:read" | "wallets:read" | "wallets:write" | "signup_reviews:read" | "signup_reviews:decide"
   | "matching_policy:read" | "matching_policy:write" | "matching_policy:approve" | "matching_policy:activate"
   | "platform_config:read" | "platform_config:write" | "platform_config:request" | "platform_config:approve"
   | "platform_config:schedule" | "platform_config:activate" | "platform_config:rollback" | "platform_config:emergency"
@@ -20,7 +20,9 @@ export type Permission =
   | "financial:reconciliation_request" | "financial:reconciliation_execute";
 
 export type AdminScope = { tenantId: string; merchantId?: string };
-export type AdminPrincipal = { user_id: string; session_id: string; display_name: string; email?: string; roles: string[]; permissions: Permission[]; scopes: Array<{tenant_id?:string;merchant_id?:string}>; acr?:string; amr:string[]; step_up_until?:string };
+export type AdminPrincipal = { user_id: string; session_id: string; display_name: string; email?: string; roles: string[]; permissions: Permission[]; scopes: Array<{tenant_id?:string;merchant_id?:string}>; acr?:string; amr:string[]; step_up_until?:string; signup_review?:"pending"|"rejected" };
+export type SignupReviewReason = "domain_match" | "ip_region" | "ip_region_unknown" | "name_match" | "screening_list_stale";
+export type SignupReview = { merchant_id:string; tenant_id:string; company_name:string; country:string; business_type:string; website?:string; email:string; display_name:string; ip_region?:string; reasons:SignupReviewReason[]; matches:Array<{source:string;kind:"name"|"domain";reference:string}>; screened_at:string };
 export type Page<T> = { items: T[]; next_cursor?: string };
 export type OverviewMoney = { amount_minor:string;currency:string;currency_scale:number };
 export type OverviewFlowPoint = { date:string;created:number;settled:number };

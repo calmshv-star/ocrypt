@@ -20,6 +20,8 @@ const (
 	PermissionInfrastructureEdit             Permission = "infrastructure:edit"
 	PermissionWalletsRead                    Permission = "wallets:read"
 	PermissionWalletsWrite                   Permission = "wallets:write"
+	PermissionSignupReviewsRead              Permission = "signup_reviews:read"
+	PermissionSignupReviewsDecide            Permission = "signup_reviews:decide"
 	PermissionReconcileRead                  Permission = "reconciliation:read"
 	PermissionAuditRead                      Permission = "audit:read"
 	PermissionTeamAdmin                      Permission = "team:admin"
@@ -113,6 +115,9 @@ type Identity struct {
 	Email       string
 	Status      string
 	Bindings    []Binding
+	// SignupReview is "pending" or "rejected" while the user's own
+	// self-service signup is held by sanctions screening.
+	SignupReview string
 }
 
 type Principal struct {
@@ -126,7 +131,9 @@ type Principal struct {
 	ACR         string       `json:"acr,omitempty"`
 	AMR         []string     `json:"amr"`
 	StepUpUntil *time.Time   `json:"step_up_until,omitempty"`
-	grants      []authorizationGrant
+	// SignupReview tells a held registrant only the state of its application.
+	SignupReview string `json:"signup_review,omitempty"`
+	grants       []authorizationGrant
 }
 
 type authorizationGrant struct {
@@ -455,4 +462,42 @@ type SelfServiceRegistration struct {
 	TenantID   string
 	MerchantID string
 	Created    bool
+	// Held is true when screening created the merchant in status 'review'.
+	Held bool
+}
+
+// SignupRegion is the client region the trusted edge proxy reported when the
+// signup form was posted. Screened is false only when the installation opted
+// out of IP screening; Code is empty when the header was missing or invalid.
+type SignupRegion struct {
+	Code     string
+	Screened bool
+}
+
+// SignupReview is a self-service signup held by sanctions screening.
+type SignupReview struct {
+	MerchantID   string              `json:"merchant_id"`
+	TenantID     string              `json:"tenant_id"`
+	CompanyName  string              `json:"company_name"`
+	Country      string              `json:"country"`
+	BusinessType string              `json:"business_type"`
+	Website      string              `json:"website,omitempty"`
+	Email        string              `json:"email"`
+	DisplayName  string              `json:"display_name"`
+	IPRegion     string              `json:"ip_region,omitempty"`
+	Reasons      []string            `json:"reasons"`
+	Matches      []SignupReviewMatch `json:"matches"`
+	ScreenedAt   time.Time           `json:"screened_at"`
+}
+
+type SignupReviewMatch struct {
+	Source    string `json:"source"`
+	Kind      string `json:"kind"`
+	Reference string `json:"reference"`
+}
+
+// SignupDecision admits ("approve") or rejects ("reject") a held signup.
+type SignupDecision struct {
+	Decision string `json:"decision"`
+	Reason   string `json:"reason"`
 }

@@ -128,6 +128,15 @@ and so is `XX` (unknown to the edge) unless listed; add `T1` to refuse Tor
 exits. CORS preflights are not gated, so the browser can read the 451. The gate
 is off unless both variables are set.
 
+Self-service signups are screened against sanctions lists, the website and
+email domains and the client region (requirement REG-3). With
+`ADMIN_SELF_SERVICE_SIGNUP=true`, set `ADMIN_SIGNUP_REGION_HEADER` to the edge
+proxy's country header (for example `CF-IPCountry`), or
+`ADMIN_SIGNUP_UNSCREENED_IP=true` to opt out of the IP check explicitly; the
+admin API refuses to start with neither or both. A match, or lists older than
+8 days, holds the signup for a reviewer. Loading the lists is described in
+`deploy/standalone/signup-screening/README.md`.
+
 `go run ./cmd/worker` requires exactly one of `DATABASE_URL` or
 `DATABASE_URL_FILE`, plus `WORKER_ID`, and comma-separated
 `WORKER_ROLES` chosen from `settlements`, `callbacks`, `outbox`, `resolutions`,

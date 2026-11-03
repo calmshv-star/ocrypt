@@ -1,7 +1,7 @@
 import { useI18n } from "@merchant/i18n";
 import { AppShell, Badge, Button, PRODUCT_NAME, Select, ThemeToggle, WorkspaceSwitcher, type ShellNavGroup } from "@merchant/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, Archive, Blocks, CircleDollarSign, Fingerprint, GitCompareArrows, KeyRound, Landmark, LayoutDashboard, Link2, RadioTower, ReceiptText, RefreshCw, Settings2, ShieldCheck, Sparkles } from "lucide-react";
+import { Activity, Archive, Blocks, CircleDollarSign, Fingerprint, GitCompareArrows, KeyRound, Landmark, LayoutDashboard, Link2, RadioTower, ReceiptText, RefreshCw, Settings2, ShieldCheck, Sparkles, UserCheck } from "lucide-react";
 import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AdminProvider, useAdmin } from "./AdminProvider";
@@ -47,6 +47,7 @@ const ProviderOperationsPage = lazy(() => import("./ProviderOperationsPage").the
 const ProviderConfigurationPage = lazy(() => import("./ProviderConfigurationPage").then((module) => ({ default: module.ProviderConfigurationPage })));
 const RetentionControlPage = lazy(() => import("./RetentionControlPage").then((module) => ({ default: module.RetentionControlPage })));
 const OnboardingPage = lazy(() => import("./OnboardingPage").then((module) => ({ default: module.OnboardingPage })));
+const SignupReviewsPage = lazy(() => import("./SignupReviewsPage").then((module) => ({ default: module.SignupReviewsPage })));
 const MigrationControlPage = lazy(() => import("./MigrationControlPage").then((module) => ({ default: module.MigrationControlPage })));
 
 function safeReturnPath() {
@@ -54,13 +55,13 @@ function safeReturnPath() {
   return /(?:[?#&])token=/.test(value)?"/":value;
 }
 
-function AccessScreen({ state }: { state: "loading" | "unauthenticated" | "error" | "scope" }) {
+function AccessScreen({ state }: { state: "loading" | "unauthenticated" | "error" | "scope" | "review" | "rejected" }) {
   const { locale, locales, localeNames, setLocale, t } = useI18n();
-  const { client } = useAdmin();
+  const { client, signOut } = useAdmin();
   const signup = useQuery({ queryKey: ["signup-options"], enabled: state === "unauthenticated" && Boolean(client), queryFn: ({ signal }) => client!.signupOptions(signal), staleTime: 60_000 });
-  const title = state === "loading" ? t("admin.sessionLoading") : state === "unauthenticated" ? t("admin.signInTitle") : state === "scope" ? t("admin.noScopeTitle") : t("admin.sessionErrorTitle");
-  const body = state === "unauthenticated" ? t("admin.signInBody") : state === "scope" ? t("admin.noScopeBody") : state === "error" ? t("admin.sessionErrorBody") : "";
-  return <main className="admin-access"><div className="admin-access__controls"><Select aria-label={t("common.locale")} onChange={(event) => setLocale(event.target.value as typeof locale)} value={locale}>{locales.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}</Select><ThemeToggle label={t("common.theme")} /></div><section aria-busy={state === "loading" || undefined} role={state === "error" ? "alert" : "status"}><div className="admin-access__brand"><span aria-hidden="true" className="mp-brand__mark"><span/><span/></span><strong>{PRODUCT_NAME}</strong></div><div className="admin-access__content"><span aria-hidden="true" className="admin-access__shield"><ShieldCheck size={24}/></span><div><h1>{title}</h1>{body && <p>{body}</p>}</div></div>{state === "unauthenticated" && client && <a className="mp-button mp-button--primary mp-button--md" href={client.loginURL(safeReturnPath())}>{t("common.signIn")}</a>}{state === "unauthenticated" && signup.data?.enabled && <a className="admin-signup__signin" href="#/signup">{t("signup.create")}</a>}{state === "error" && <Button onClick={() => window.location.reload()}>{t("common.retry")}</Button>}</section></main>;
+  const title = state === "loading" ? t("admin.sessionLoading") : state === "unauthenticated" ? t("admin.signInTitle") : state === "scope" ? t("admin.noScopeTitle") : state === "review" ? t("admin.reviewTitle") : state === "rejected" ? t("admin.rejectedTitle") : t("admin.sessionErrorTitle");
+  const body = state === "unauthenticated" ? t("admin.signInBody") : state === "scope" ? t("admin.noScopeBody") : state === "review" ? t("admin.reviewBody") : state === "rejected" ? t("admin.rejectedBody") : state === "error" ? t("admin.sessionErrorBody") : "";
+  return <main className="admin-access"><div className="admin-access__controls"><Select aria-label={t("common.locale")} onChange={(event) => setLocale(event.target.value as typeof locale)} value={locale}>{locales.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}</Select><ThemeToggle label={t("common.theme")} /></div><section aria-busy={state === "loading" || undefined} role={state === "error" ? "alert" : "status"}><div className="admin-access__brand"><span aria-hidden="true" className="mp-brand__mark"><span/><span/></span><strong>{PRODUCT_NAME}</strong></div><div className="admin-access__content"><span aria-hidden="true" className="admin-access__shield"><ShieldCheck size={24}/></span><div><h1>{title}</h1>{body && <p>{body}</p>}</div></div>{state === "unauthenticated" && client && <a className="mp-button mp-button--primary mp-button--md" href={client.loginURL(safeReturnPath())}>{t("common.signIn")}</a>}{state === "unauthenticated" && signup.data?.enabled && <a className="admin-signup__signin" href="#/signup">{t("signup.create")}</a>}{state === "error" && <Button onClick={() => window.location.reload()}>{t("common.retry")}</Button>}{(state === "review" || state === "rejected") && <Button onClick={() => void signOut().then(() => window.location.assign("/"))} variant="secondary">{t("common.signOut")}</Button>}</section></main>;
 }
 
 function PreviewRoutes() {
@@ -124,6 +125,7 @@ function ProductionRoutes() {
     <Route element={<ProviderConfigurationPage />} path="/provider-configurations" />
     <Route element={<RetentionControlPage />} path="/retention" />
     <Route element={<MigrationControlPage />} path="/migrations" />
+    <Route element={<SignupReviewsPage />} path="/signup-reviews" />
     <Route element={<Navigate replace to="/overview" />} path="*" />
   </Routes>;
 }
@@ -156,6 +158,7 @@ function AdminApplication() {
   const infrastructure = [
       admin.can("infrastructure:read") && { label: t("nav.assets"), href: "#/assets", icon: RadioTower, active: active("/assets") },
       admin.can("platform_config:read") && { label: t("nav.platformConfiguration"), href: "#/platform", icon: Settings2, active: active("/platform") },
+      admin.can("signup_reviews:read") && !admin.scope?.merchantId && { label: t("signupReviews.nav"), href: "#/signup-reviews", icon: UserCheck, active: active("/signup-reviews") },
       admin.can("provider_ops:read") && !admin.scope?.merchantId && { label: t("providerOps.nav"), href: "#/providers", icon: Activity, active: active("/providers") },
       admin.can("provider_config:read") && !admin.scope?.merchantId && { label: t("providerConfig.nav"), href: "#/provider-configurations", icon: KeyRound, active: active("/provider-configurations") },
       admin.can("retention:read") && !admin.scope?.merchantId && { label: t("retentionControl.nav"), href: "#/retention", icon: Archive, active: active("/retention") },
@@ -173,6 +176,8 @@ function AdminApplication() {
   if (admin.sessionState === "loading") return <AccessScreen state="loading" />;
   if (admin.sessionState === "unauthenticated") return <AccessScreen state="unauthenticated" />;
   if (admin.sessionState === "error") return <AccessScreen state="error" />;
+  // A registrant held by sanctions screening sees only the state of the application.
+  if (admin.principal?.signup_review) return <AccessScreen state={admin.principal.signup_review === "rejected" ? "rejected" : "review"} />;
   if (!admin.scope || !admin.principal) return <AccessScreen state="scope" />;
 
   const scopeIndex = admin.scopes.findIndex((scope) => scope.tenantId === admin.scope?.tenantId && scope.merchantId === admin.scope?.merchantId);
