@@ -1,0 +1,10 @@
+# Build from the previous admitted runtime; replace only the tested binary.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG BINARY
+ARG REVISION
+ARG VERSION
+COPY --chown=65532:65532 ${BINARY} /app/service
+LABEL org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.source="https://github.com/calmshv-star/ocrypt"

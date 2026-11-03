@@ -322,6 +322,9 @@ func (s *EVMSource) LookupTransaction(ctx context.Context, chainID, transactionI
 	if err != nil {
 		return nil, &ProviderError{Kind: ErrorPermanent, Operation: "evm transaction lookup", Cause: err}
 	}
+	if _, err := s.identity(ctx); err != nil {
+		return nil, err
+	}
 	var transaction evmTransaction
 	if err := s.http.rpc(ctx, "evm transaction lookup", "eth_getTransactionByHash", []any{txHash}, &transaction); err != nil {
 		return nil, err

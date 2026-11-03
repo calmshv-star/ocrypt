@@ -515,6 +515,8 @@ func (q *QuorumSource) Heads(ctx context.Context) ([]scanner.ProviderHead, error
 }
 
 func (q *QuorumSource) ScanRange(ctx context.Context, from, to uint64) (scanner.RangeBatch, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	type result struct {
 		batch scanner.RangeBatch
 		err   error
@@ -580,6 +582,8 @@ func (q *QuorumSource) ScanRange(ctx context.Context, from, to uint64) (scanner.
 }
 
 func (q *QuorumSource) LookupTransaction(ctx context.Context, chainID, transactionID string) ([]domain.TransferEvent, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	type result struct {
 		events []domain.TransferEvent
 		err    error
