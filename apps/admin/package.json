@@ -15,7 +15,7 @@
     "@merchant/ui": "workspace:*",
     "@tanstack/react-query": "^5.87.1",
     "@walletconnect/sign-client": "2.23.10",
-    "lucide-react": "^0.468.0",
+    "lucide-react": "^1.31.0",
     "qrcode": "1.5.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
