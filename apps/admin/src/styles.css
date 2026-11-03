@@ -705,6 +705,10 @@
 .notifications__table tbody th small { display: block; color: var(--mp-muted); font-weight: 400; }
 .notifications__switch { display: flex; gap: 10px; align-items: center; padding: 6px 0; }
 .sanctions__refs { display: flex; flex-wrap: wrap; gap: 6px; }
+.account__actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.account__delete { display: grid; gap: 10px; }
+.account__delete ul { margin: 0; padding-left: 20px; }
+.account__delete label { display: grid; gap: 6px; max-width: 420px; }
 .security__sessions code { font-size: 12px; }
 .go-live__submit { display: grid; gap: 8px; justify-items: start; margin-top: 16px; }
 .go-live-review__addresses { display: grid; gap: 6px; margin: 0 0 12px; padding: 0; list-style: none; }

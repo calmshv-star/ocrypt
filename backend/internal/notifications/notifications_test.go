@@ -39,6 +39,10 @@ func TestRenderNamesTheEventInTheUsersLanguage(t *testing.T) {
 	if sanctioned.Subject != "Платёж с адреса из санкционного списка" || !strings.Contains(sanctioned.Text, "2.5 (tron:mainnet/usdt) в сети tron:mainnet пришли с адреса TXYZ") || !strings.Contains(sanctioned.Text, "(SDN-301)") || !strings.HasSuffix(sanctioned.Text, "/#/sanctions-alerts") {
 		t.Fatal(sanctioned.Text)
 	}
+	changed, _ := Render("email_changed", "fr", json.RawMessage(`{"new_email":"n***@shop.example","changed_at":"2026-11-03T09:15:00Z"}`), "https://cabinet.example")
+	if changed.Subject != "L'e-mail de connexion Ocrypt a changé" || !strings.Contains(changed.Text, "à n***@shop.example à 2026-11-03 09:15 UTC") {
+		t.Fatal(changed.Text)
+	}
 	if _, err := Render("refund", "en", json.RawMessage(`{}`), "https://cabinet.example"); !errors.Is(err, ErrInvalid) {
 		t.Fatal("an unknown event must not render")
 	}

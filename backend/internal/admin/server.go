@@ -135,6 +135,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /admin/v1/auth/signup", s.signup)
 	s.mux.HandleFunc("GET /admin/v1/auth/signup/options", s.signupOptions)
 	s.mux.HandleFunc("GET /admin/v1/auth/callback", s.callback)
+	s.mux.HandleFunc("GET /admin/v1/auth/account-links", s.accountLinks)
 	s.mux.Handle("GET /admin/v1/auth/step-up", s.authenticated(http.HandlerFunc(s.stepUp)))
 	s.mux.Handle("GET /admin/v1/session/me", s.authenticated(http.HandlerFunc(s.me)))
 	s.mux.Handle("POST /admin/v1/session/csrf", s.authenticated(s.sameOrigin(http.HandlerFunc(s.refreshCSRF))))
@@ -142,6 +143,9 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /admin/v1/session/sessions", s.authenticated(http.HandlerFunc(s.mySessions)))
 	s.mux.Handle("POST /admin/v1/session/sessions/revoke-others", s.authenticated(s.mutating(http.HandlerFunc(s.revokeOtherSessions))))
 	s.mux.Handle("POST /admin/v1/session/sessions/{id}/revoke", s.authenticated(s.mutating(http.HandlerFunc(s.revokeMySession))))
+	s.mux.Handle("GET /admin/v1/account/export", s.authenticated(http.HandlerFunc(s.accountExport)))
+	s.mux.Handle("GET /admin/v1/account/deletion", s.authenticated(http.HandlerFunc(s.accountDeletion)))
+	s.mux.Handle("POST /admin/v1/account/delete", s.authenticated(s.mutating(http.HandlerFunc(s.deleteAccount))))
 	s.mux.Handle("GET /admin/v1/notifications", s.authenticated(http.HandlerFunc(s.notificationSettings)))
 	s.mux.Handle("GET /admin/v1/sanctions-alerts", s.authenticated(http.HandlerFunc(s.sanctionsAlerts)))
 	s.mux.Handle("PUT /admin/v1/notifications/merchant", s.authenticated(s.mutating(http.HandlerFunc(s.saveMerchantNotifications))))
@@ -911,6 +915,44 @@ func optionalScope(w http.ResponseWriter, request *http.Request) (Scope, bool) {
 	return scope, true
 }
 
+func (s *Server) accountLinks(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.service.AccountLinks())
+}
+
+// accountExport downloads the user's data as a JSON file.
+func (s *Server) accountExport(w http.ResponseWriter, request *http.Request) {
+	document, err := s.service.AccountExport(request.Context(), authenticatedFrom(request.Context()).Principal)
+	if err != nil {
+		respond[any](w, nil, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="ocrypt-account-`+s.service.now().UTC().Format("2006-01-02")+`.json"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(document)
+}
+
+func (s *Server) accountDeletion(w http.ResponseWriter, request *http.Request) {
+	value, err := s.service.AccountDeletion(request.Context(), authenticatedFrom(request.Context()).Principal)
+	respond(w, value, err)
+}
+
+// deleteAccount ends the account and this browser's session with it.
+func (s *Server) deleteAccount(w http.ResponseWriter, request *http.Request) {
+	var input AccountDeletionInput
+	if !s.decode(w, request, &input) {
+		return
+	}
+	closed, err := s.service.DeleteAccount(request.Context(), authenticatedFrom(request.Context()), input)
+	if err != nil {
+		respond[any](w, nil, err)
+		return
+	}
+	s.clearCookies(w)
+	writeJSON(w, http.StatusOK, map[string]int{"closed_merchants": closed})
+}
+
 func (s *Server) sanctionsAlerts(w http.ResponseWriter, request *http.Request) {
 	auth, scope, ok := s.authorize(w, request, PermissionPaymentsRead)
 	if !ok {
@@ -1549,6 +1591,10 @@ func problemCode(err error) string {
 		return "authentication_required"
 	case errors.Is(err, ErrNotFound):
 		return "not_found"
+	case errors.Is(err, ErrSoleOwner):
+		return "owner_of_merchants"
+	case errors.Is(err, ErrPlatformOperator):
+		return "platform_operator"
 	case errors.Is(err, ErrConflict), errors.Is(err, ErrExpired):
 		return "conflict"
 	case errors.Is(err, ErrAddressNotAccepted):
@@ -1563,7 +1609,7 @@ func publicDetail(err error) string {
 	if statusFor(err) >= 500 {
 		return "The request could not be completed."
 	}
-	return map[string]string{"step_up_required": "Recent multi-factor authentication is required.", "separation_of_duty": "A different authorized operator must approve this action.", "forbidden": "Permission denied.", "authentication_required": "Authentication is required.", "not_found": "Resource was not found.", "conflict": "The resource changed or the operation is no longer available.", "invalid_request": "Request is invalid.", "address_not_accepted": "A receiving address is not accepted."}[problemCode(err)]
+	return map[string]string{"step_up_required": "Recent multi-factor authentication is required.", "separation_of_duty": "A different authorized operator must approve this action.", "forbidden": "Permission denied.", "authentication_required": "Authentication is required.", "not_found": "Resource was not found.", "conflict": "The resource changed or the operation is no longer available.", "invalid_request": "Request is invalid.", "address_not_accepted": "A receiving address is not accepted.", "owner_of_merchants": "Merchants would be left without an owner.", "platform_operator": "Platform operators are offboarded by another operator."}[problemCode(err)]
 }
 
 func writeProblem(w http.ResponseWriter, status int, code, detail string) {

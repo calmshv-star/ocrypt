@@ -755,6 +755,54 @@ func (r *PostgresRepository) SanctionsAlerts(ctx context.Context, principal Prin
 	return alerts, classifyAdminDB(err)
 }
 
+func (r *PostgresRepository) SyncEmail(ctx context.Context, principal Principal, email string, at time.Time) (bool, error) {
+	var changed bool
+	err := r.asActor(ctx, principal, pgx.ReadWrite, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT sync_current_admin_email($1,$2)`, email, at).Scan(&changed)
+	})
+	return changed, classifyAdminDB(err)
+}
+
+func (r *PostgresRepository) AccountExport(ctx context.Context, principal Principal) (json.RawMessage, error) {
+	var document json.RawMessage
+	err := r.asActor(ctx, principal, pgx.ReadOnly, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT current_admin_account_export()`).Scan(&document)
+	})
+	return document, classifyAdminDB(err)
+}
+
+func (r *PostgresRepository) SoleOwnedMerchants(ctx context.Context, principal Principal) ([]OwnedMerchant, error) {
+	owned := []OwnedMerchant{}
+	err := r.asActor(ctx, principal, pgx.ReadOnly, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT tenant_id::text,merchant_id::text,display_name FROM current_admin_sole_owned_merchants()`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var merchant OwnedMerchant
+			if err := rows.Scan(&merchant.TenantID, &merchant.MerchantID, &merchant.DisplayName); err != nil {
+				return err
+			}
+			owned = append(owned, merchant)
+		}
+		return rows.Err()
+	})
+	return owned, classifyAdminDB(err)
+}
+
+// DeleteAccount runs the whole deletion in one serializable transaction.
+func (r *PostgresRepository) DeleteAccount(ctx context.Context, principal Principal, closeMerchants bool, at time.Time) (int, error) {
+	var closed int
+	err := pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{IsoLevel: pgx.Serializable}, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('app.admin_user_id',$1,true)`, principal.UserID); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `SELECT delete_current_admin_account($1,$2)`, closeMerchants, at).Scan(&closed)
+	})
+	return closed, classifyAdminDB(err)
+}
+
 func (r *PostgresRepository) EnqueueSignInNotification(ctx context.Context, principal Principal, sessionID, locale string) error {
 	return classifyAdminDB(r.asActor(ctx, principal, pgx.ReadWrite, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `SELECT enqueue_current_admin_sign_in_notification($1,$2)`, sessionID, locale)
@@ -1830,6 +1878,10 @@ func classifyAdminDB(err error) error {
 			return ErrForbidden
 		case "OCP04":
 			return ErrAddressNotAccepted
+		case "OCP05":
+			return ErrSoleOwner
+		case "OCP06":
+			return ErrPlatformOperator
 		}
 	}
 	return fmt.Errorf("admin persistence operation failed: %w", err)

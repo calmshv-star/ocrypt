@@ -62,7 +62,7 @@ func main() {
 		slog.Error("admin state encryption initialization failed")
 		os.Exit(1)
 	}
-	service, err := admin.NewService(repository, provider, stateBox, admin.ServiceConfig{LoginTTL: 5 * time.Minute, IdleTTL: config.IdleTTL, AbsoluteTTL: config.AbsoluteTTL, RotationInterval: config.RotationInterval, StepUpTTL: config.StepUpTTL, RequiredACR: config.RequiredACR, AcceptedAMR: config.AcceptedAMR, PasswordOnly: config.PasswordOnly, SelfServiceSignup: config.SelfServiceSignup, SignupTermsVersion: config.SignupTermsVersion, SignupTTL: config.SignupTTL, SignupRegionHeader: config.SignupRegionHeader, SignupUnscreenedIP: config.SignupUnscreenedIP, TelegramBotUsername: config.TelegramBotUsername})
+	service, err := admin.NewService(repository, provider, stateBox, admin.ServiceConfig{LoginTTL: 5 * time.Minute, IdleTTL: config.IdleTTL, AbsoluteTTL: config.AbsoluteTTL, RotationInterval: config.RotationInterval, StepUpTTL: config.StepUpTTL, RequiredACR: config.RequiredACR, AcceptedAMR: config.AcceptedAMR, PasswordOnly: config.PasswordOnly, SelfServiceSignup: config.SelfServiceSignup, SignupTermsVersion: config.SignupTermsVersion, SignupTTL: config.SignupTTL, SignupRegionHeader: config.SignupRegionHeader, SignupUnscreenedIP: config.SignupUnscreenedIP, TelegramBotUsername: config.TelegramBotUsername, AccountURL: config.AccountURL, RecoveryURL: config.RecoveryURL})
 	if err != nil {
 		slog.Error("admin security policy initialization failed", "error", err)
 		os.Exit(1)

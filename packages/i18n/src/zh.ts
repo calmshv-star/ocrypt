@@ -1488,5 +1488,22 @@ export const zhCN = {
   "sanctions.transaction": "交易",
   "notifications.sanctionedAlways": "来自受制裁地址的付款总会通知给所有接收此商户通知的人。",
   "goLive.addressNotAccepted": "其中一个地址不能用于正式付款。请使用其他地址或联系支持。",
-  "sanctions.operatorList": "运营方名单"
+  "sanctions.operatorList": "运营方名单",
+  "account.recovery": "忘记密码或丢失了第二因素？",
+  "account.title": "您的账户",
+  "account.body": "您的密码、第二因素和邮箱均在登录提供方处管理。在那里更改的邮箱会在您下次登录时同步，旧地址会收到通知。",
+  "account.manage": "在登录提供方处管理",
+  "account.export": "下载我的数据",
+  "account.exportBody": "一个 JSON 文件，包含您的资料、成员身份、角色、会话、通知设置和近期操作。",
+  "account.exportFailed": "下载失败。请重试。",
+  "account.deleteTitle": "删除账户",
+  "account.deleteBody": "结束所有会话以及您对所有商户的访问，删除您的通知设置并匿名化您的资料。审计日志和付款记录会按法律要求保留。您在登录提供方处的账户不会被删除。",
+  "account.operator": "平台运营人员需由其他运营人员移除。",
+  "account.soleOwned": "您是这些商户的唯一所有者。删除您的账户将关闭它们：其付款页面和 API 将停止，记录会保留。",
+  "account.closeConfirm": "关闭这些商户",
+  "account.confirmEmail": "输入您的邮箱以确认",
+  "account.delete": "删除我的账户",
+  "account.deleting": "正在删除…",
+  "account.failed": "无法删除账户。请刷新页面后重试。",
+  "account.ownerConflict": "有商户将失去所有者。请勾选“关闭这些商户”，或先添加其他所有者。"
 } satisfies Messages;

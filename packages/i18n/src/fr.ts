@@ -1488,5 +1488,22 @@ export const fr = {
   "sanctions.transaction": "Transaction",
   "notifications.sanctionedAlways": "Les paiements depuis une adresse sanctionnée sont toujours signalés à tous ceux qui reçoivent les notifications de ce marchand.",
   "goLive.addressNotAccepted": "L'une des adresses ne peut pas servir aux paiements réels. Utilisez une autre adresse ou contactez le support.",
-  "sanctions.operatorList": "Liste de l'opérateur"
+  "sanctions.operatorList": "Liste de l'opérateur",
+  "account.recovery": "Mot de passe oublié ou second facteur perdu ?",
+  "account.title": "Votre compte",
+  "account.body": "Votre mot de passe, second facteur et e-mail se gèrent chez votre fournisseur de connexion. Un e-mail modifié là-bas est repris à votre prochaine connexion, et l'ancienne adresse est prévenue.",
+  "account.manage": "Gérer chez le fournisseur de connexion",
+  "account.export": "Télécharger mes données",
+  "account.exportBody": "Un fichier JSON avec votre profil, vos adhésions, rôles, sessions, réglages de notifications et actions récentes.",
+  "account.exportFailed": "Le téléchargement a échoué. Réessayez.",
+  "account.deleteTitle": "Supprimer le compte",
+  "account.deleteBody": "Met fin à toutes les sessions et à votre accès à tous les marchands, supprime vos réglages de notifications et anonymise votre profil. Le journal d'audit et les enregistrements de paiement sont conservés, comme la loi l'exige. Votre compte chez le fournisseur de connexion n'est pas supprimé.",
+  "account.operator": "Les opérateurs de la plateforme sont retirés par un autre opérateur.",
+  "account.soleOwned": "Vous êtes le seul propriétaire de ces marchands. Supprimer votre compte les ferme : leurs pages de paiement et leur API s'arrêtent, leurs enregistrements sont conservés.",
+  "account.closeConfirm": "Fermer ces marchands",
+  "account.confirmEmail": "Saisissez votre e-mail pour confirmer",
+  "account.delete": "Supprimer mon compte",
+  "account.deleting": "Suppression…",
+  "account.failed": "Impossible de supprimer le compte. Actualisez la page et réessayez.",
+  "account.ownerConflict": "Un marchand resterait sans propriétaire. Cochez « Fermer ces marchands » ou ajoutez d'abord un autre propriétaire."
 } satisfies Messages;

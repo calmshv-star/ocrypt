@@ -30,6 +30,10 @@ type repositoryStub struct {
 	userSessions                            []SessionSummary
 	revokedSession, revokedFor, keptSession string
 	revokeErr                               error
+	syncedEmail                             string
+	syncErr                                 error
+	soleOwned                               []OwnedMerchant
+	deleted                                 bool
 	savedEmailEvents                        []string
 	savedLocale                             string
 	savedSignInEmail                        *bool
@@ -281,6 +285,23 @@ func (r *repositoryStub) CreateTelegramLinkCode(_ context.Context, _ Principal, 
 func (r *repositoryStub) UnlinkTelegram(_ context.Context, _ Principal, audit AuditEntry) error {
 	r.audit = audit
 	return nil
+}
+func (r *repositoryStub) SyncEmail(_ context.Context, _ Principal, email string, _ time.Time) (bool, error) {
+	r.syncedEmail = email
+	return true, r.syncErr
+}
+func (r *repositoryStub) AccountExport(context.Context, Principal) (json.RawMessage, error) {
+	return json.RawMessage(`{"format":"ocrypt-account-export-v1","user":{"email":"operator@example.com"}}`), nil
+}
+func (r *repositoryStub) SoleOwnedMerchants(context.Context, Principal) ([]OwnedMerchant, error) {
+	return append([]OwnedMerchant{}, r.soleOwned...), nil
+}
+func (r *repositoryStub) DeleteAccount(_ context.Context, _ Principal, closeMerchants bool, _ time.Time) (int, error) {
+	if len(r.soleOwned) > 0 && !closeMerchants {
+		return 0, ErrSoleOwner
+	}
+	r.deleted = true
+	return len(r.soleOwned), nil
 }
 func (r *repositoryStub) SanctionsAlerts(_ context.Context, _ Principal, scope Scope, _ int) ([]SanctionsAlert, error) {
 	if scope.MerchantID == "" {

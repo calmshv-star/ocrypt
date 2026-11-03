@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -39,6 +40,10 @@ type AuthRepository interface {
 	UnlinkTelegram(ctx context.Context, principal Principal, audit AuditEntry) error
 	EnqueueSignInNotification(ctx context.Context, principal Principal, sessionID, locale string) error
 	SanctionsAlerts(ctx context.Context, principal Principal, scope Scope, limit int) ([]SanctionsAlert, error)
+	SyncEmail(ctx context.Context, principal Principal, email string, at time.Time) (bool, error)
+	AccountExport(ctx context.Context, principal Principal) (json.RawMessage, error)
+	SoleOwnedMerchants(ctx context.Context, principal Principal) ([]OwnedMerchant, error)
+	DeleteAccount(ctx context.Context, principal Principal, closeMerchants bool, at time.Time) (int, error)
 	SubmitGoLive(ctx context.Context, principal Principal, scope Scope, requestID, preset string, addresses []GoLiveProvenAddress, at time.Time) error
 	PrepareGoLiveWallets(context.Context, Principal, string, time.Time) ([]GoLivePreparedWallet, error)
 	ListGoLiveReviews(context.Context, Principal, int) ([]GoLiveReview, error)

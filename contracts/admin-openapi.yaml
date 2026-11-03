@@ -26,6 +26,7 @@ tags:
   - name: Go-live
   - name: Notifications
   - name: Sanctions screening
+  - name: Account
 paths:
   /admin/v1/auth/login:
     get:
@@ -215,6 +216,47 @@ paths:
         '204': {description: Action token replaced and returned only as a Strict secure cookie}
         '401': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/auth/account-links:
+    get:
+      tags: [Account]
+      operationId: accountLinks
+      summary: The identity provider's account and password-recovery pages
+      description: Public. Passwords, second factors and the email are managed and recovered at the provider; an empty object means no links are configured.
+      security: []
+      responses:
+        '200': {description: Links, content: {application/json: {schema: {type: object, additionalProperties: false, properties: {account_url: {type: string, format: uri}, recovery_url: {type: string, format: uri}}}}}}
+  /admin/v1/account/export:
+    get:
+      tags: [Account]
+      operationId: accountExport
+      summary: Download everything the platform holds about the signed-in user
+      description: A JSON file (format ocrypt-account-export-v1) with the profile, memberships, role bindings, the latest 500 sessions, notification settings and the latest 1000 audit events the user caused.
+      responses:
+        '200': {description: Export file, headers: {Content-Disposition: {schema: {type: string}}}, content: {application/json: {schema: {type: object}}}}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/account/deletion:
+    get:
+      tags: [Account]
+      operationId: accountDeletion
+      summary: What deleting the account would do
+      responses:
+        '200': {description: Preview, content: {application/json: {schema: {type: object, additionalProperties: false, required: [sole_owned_merchants, platform_operator], properties: {sole_owned_merchants: {type: array, items: {type: object, additionalProperties: false, required: [tenant_id, merchant_id, display_name], properties: {tenant_id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, display_name: {type: string}}}}, platform_operator: {type: boolean}}}}}}
+        '401': {$ref: '#/components/responses/Problem'}
+  /admin/v1/account/delete:
+    post:
+      tags: [Account]
+      operationId: deleteAccount
+      summary: Delete the signed-in user's account
+      description: Needs an MFA session and the user's own email as confirmation. Ends every session and access, removes notification data and pseudonymises the user; the audit log and financial records stay. Merchants the user alone owns are closed only with close_merchants (else 409 owner_of_merchants). Platform operators get 409 platform_operator. Clears this browser's session cookies.
+      security: [{sessionCookie: [], csrfHeader: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [confirm_email, close_merchants], properties: {confirm_email: {type: string, maxLength: 320}, close_merchants: {type: boolean}}}}}}
+      responses:
+        '200': {description: Deleted, content: {application/json: {schema: {type: object, additionalProperties: false, required: [closed_merchants], properties: {closed_merchants: {type: integer, minimum: 0}}}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
   /admin/v1/sanctions-alerts:
     get:
       tags: [Sanctions screening]

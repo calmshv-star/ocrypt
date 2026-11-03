@@ -1488,5 +1488,22 @@ export const es = {
   "sanctions.transaction": "Transacción",
   "notifications.sanctionedAlways": "Los pagos desde una dirección sancionada siempre se notifican a todos los que reciben las notificaciones de este comercio.",
   "goLive.addressNotAccepted": "Una de las direcciones no se puede usar para pagos reales. Use otra dirección o contacte con soporte.",
-  "sanctions.operatorList": "Lista del operador"
+  "sanctions.operatorList": "Lista del operador",
+  "account.recovery": "¿Olvidó su contraseña o perdió su segundo factor?",
+  "account.title": "Su cuenta",
+  "account.body": "Su contraseña, segundo factor y correo se gestionan en su proveedor de acceso. Un correo cambiado allí se adopta en su próximo inicio de sesión y se avisa a la dirección anterior.",
+  "account.manage": "Gestionar en el proveedor de acceso",
+  "account.export": "Descargar mis datos",
+  "account.exportBody": "Un archivo JSON con su perfil, membresías, roles, sesiones, ajustes de notificaciones y acciones recientes.",
+  "account.exportFailed": "La descarga falló. Inténtelo de nuevo.",
+  "account.deleteTitle": "Eliminar cuenta",
+  "account.deleteBody": "Cierra todas las sesiones y su acceso a todos los comercios, elimina sus ajustes de notificaciones y anonimiza su perfil. El registro de auditoría y los registros de pagos se conservan, como exige la ley. Su cuenta en el proveedor de acceso no se elimina.",
+  "account.operator": "A los operadores de la plataforma los da de baja otro operador.",
+  "account.soleOwned": "Usted es el único propietario de estos comercios. Eliminar su cuenta los cierra: sus páginas de pago y su API dejan de funcionar, y sus registros se conservan.",
+  "account.closeConfirm": "Cerrar estos comercios",
+  "account.confirmEmail": "Escriba su correo para confirmar",
+  "account.delete": "Eliminar mi cuenta",
+  "account.deleting": "Eliminando…",
+  "account.failed": "No se pudo eliminar la cuenta. Actualice la página e inténtelo de nuevo.",
+  "account.ownerConflict": "Un comercio se quedaría sin propietario. Marque «Cerrar estos comercios» o añada antes otro propietario."
 } satisfies Messages;

@@ -38,10 +38,12 @@ type payload struct {
 	AssetDecimals *int   `json:"asset_decimals"`
 	Asset         string `json:"asset"`
 	Reference     string `json:"reference"`
+	NewEmail      string `json:"new_email"`
+	ChangedAt     string `json:"changed_at"`
 }
 
 // cabinetPath is where each event is handled in the cabinet.
-var cabinetPath = map[string]string{"paid": "/#/intents", "underpaid": "/#/intents", "review": "/#/intents", "webhook_failed": "/#/webhooks", "sign_in": "/#/security", "sanctioned": "/#/sanctions-alerts"}
+var cabinetPath = map[string]string{"paid": "/#/intents", "underpaid": "/#/intents", "review": "/#/intents", "webhook_failed": "/#/webhooks", "sign_in": "/#/security", "sanctioned": "/#/sanctions-alerts", "email_changed": "/#/security"}
 
 // Render builds the message of a job in its locale (English when unknown).
 // Every value from the payload is reduced to printable text first.
@@ -92,6 +94,10 @@ func Render(event, locale string, raw json.RawMessage, cabinetURL string) (Messa
 	if at, err := time.Parse(time.RFC3339Nano, p.SignedInAt); err == nil {
 		values["time"] = at.UTC().Format("2006-01-02 15:04")
 	}
+	if at, err := time.Parse(time.RFC3339Nano, p.ChangedAt); err == nil {
+		values["time"] = at.UTC().Format("2006-01-02 15:04")
+	}
+	values["new_email"] = plain(p.NewEmail, 320, "—")
 	subject, body := words[event+".subject"], words[event+".body"]
 	if subject == "" || body == "" {
 		return Message{}, ErrInvalid
@@ -182,6 +188,8 @@ func deviceText(label, unknown string) string {
 
 var catalog = map[string]map[string]string{
 	"en": {
+		"email_changed.subject":  "Your Ocrypt sign-in email changed",
+		"email_changed.body":     "The email of your Ocrypt account changed from this address to {new_email} at {time} UTC, after a change at your sign-in provider. If you did not do this, secure your sign-in provider account and contact support.",
 		"operator_list":          "the operator's list",
 		"sanctioned.subject":     "Payment from a sanctioned address",
 		"sanctioned.body":        "{merchant}: {amount} ({asset}) on {network} came from {sender}, which is on a sanctions list ({reference}). Transaction {transaction}. The payment is not changed automatically: review it before you fulfil the order or return funds.",
@@ -204,6 +212,8 @@ var catalog = map[string]map[string]string{
 		"telegram.start":         "To get Ocrypt notifications here, open the cabinet, go to Notifications and press Connect Telegram.",
 	},
 	"ru": {
+		"email_changed.subject":  "Изменился email вашего аккаунта Ocrypt",
+		"email_changed.body":     "Email вашего аккаунта Ocrypt изменился с этого адреса на {new_email} ({time} UTC) после изменения у провайдера входа. Если это были не вы, защитите аккаунт у провайдера входа и обратитесь в поддержку.",
 		"operator_list":          "список оператора",
 		"sanctioned.subject":     "Платёж с адреса из санкционного списка",
 		"sanctioned.body":        "{merchant}: {amount} ({asset}) в сети {network} пришли с адреса {sender}, который есть в санкционном списке ({reference}). Транзакция {transaction}. Платёж автоматически не меняется: проверьте его, прежде чем выполнять заказ или возвращать средства.",
@@ -226,6 +236,8 @@ var catalog = map[string]map[string]string{
 		"telegram.start":         "Чтобы получать сюда уведомления Ocrypt, откройте кабинет, раздел «Уведомления», и нажмите «Подключить Telegram».",
 	},
 	"zh": {
+		"email_changed.subject":  "您的 Ocrypt 登录邮箱已更改",
+		"email_changed.body":     "由于您在登录提供方处的更改，您的 Ocrypt 账户邮箱已于 {time} UTC 从此地址更改为 {new_email}。如果这不是您本人操作，请保护您在登录提供方处的账户并联系支持。",
 		"operator_list":          "运营方名单",
 		"sanctioned.subject":     "来自受制裁地址的付款",
 		"sanctioned.body":        "{merchant}：{network} 上的 {amount}（{asset}）来自 {sender}，该地址在制裁名单中（{reference}）。交易 {transaction}。付款不会被自动更改：请在履行订单或退回资金前进行审查。",
@@ -248,6 +260,8 @@ var catalog = map[string]map[string]string{
 		"telegram.start":         "要在此接收 Ocrypt 通知，请打开后台，进入“通知”，然后点击“连接 Telegram”。",
 	},
 	"es": {
+		"email_changed.subject":  "Cambió el correo de acceso de Ocrypt",
+		"email_changed.body":     "El correo de su cuenta de Ocrypt cambió de esta dirección a {new_email} a las {time} UTC, tras un cambio en su proveedor de acceso. Si no fue usted, proteja su cuenta del proveedor de acceso y contacte con soporte.",
 		"operator_list":          "la lista del operador",
 		"sanctioned.subject":     "Pago desde una dirección sancionada",
 		"sanctioned.body":        "{merchant}: {amount} ({asset}) en {network} llegaron desde {sender}, que figura en una lista de sanciones ({reference}). Transacción {transaction}. El pago no se modifica automáticamente: revíselo antes de cumplir el pedido o devolver fondos.",
@@ -270,6 +284,8 @@ var catalog = map[string]map[string]string{
 		"telegram.start":         "Para recibir aquí las notificaciones de Ocrypt, abra el panel, vaya a Notificaciones y pulse Conectar Telegram.",
 	},
 	"fr": {
+		"email_changed.subject":  "L'e-mail de connexion Ocrypt a changé",
+		"email_changed.body":     "L'e-mail de votre compte Ocrypt est passé de cette adresse à {new_email} à {time} UTC, après une modification chez votre fournisseur de connexion. Si ce n'était pas vous, sécurisez votre compte chez le fournisseur de connexion et contactez le support.",
 		"operator_list":          "la liste de l'opérateur",
 		"sanctioned.subject":     "Paiement depuis une adresse sanctionnée",
 		"sanctioned.body":        "{merchant} : {amount} ({asset}) sur {network} proviennent de {sender}, qui figure sur une liste de sanctions ({reference}). Transaction {transaction}. Le paiement n'est pas modifié automatiquement : examinez-le avant d'exécuter la commande ou de restituer des fonds.",
@@ -292,6 +308,8 @@ var catalog = map[string]map[string]string{
 		"telegram.start":         "Pour recevoir ici les notifications Ocrypt, ouvrez l'espace marchand, rubrique Notifications, et appuyez sur Connecter Telegram.",
 	},
 	"de": {
+		"email_changed.subject":  "Ihre Ocrypt-Anmelde-E-Mail wurde geändert",
+		"email_changed.body":     "Die E-Mail Ihres Ocrypt-Kontos wurde um {time} UTC von dieser Adresse auf {new_email} geändert, nach einer Änderung bei Ihrem Anmeldeanbieter. Falls Sie das nicht waren, sichern Sie Ihr Konto beim Anmeldeanbieter und wenden Sie sich an den Support.",
 		"operator_list":          "der Liste des Betreibers",
 		"sanctioned.subject":     "Zahlung von einer sanktionierten Adresse",
 		"sanctioned.body":        "{merchant}: {amount} ({asset}) im Netz {network} kamen von {sender}, die auf einer Sanktionsliste steht ({reference}). Transaktion {transaction}. Die Zahlung wird nicht automatisch geändert: Prüfen Sie sie, bevor Sie die Bestellung ausführen oder Geld zurückgeben.",

@@ -21,6 +21,8 @@ export type Permission =
 
 export type AdminScope = { tenantId: string; merchantId?: string };
 export type AdminPrincipal = { user_id: string; session_id: string; display_name: string; email?: string; roles: string[]; permissions: Permission[]; scopes: Array<{tenant_id?:string;merchant_id?:string}>; acr?:string; amr:string[]; step_up_until?:string; signup_review?:"pending"|"rejected" };
+export type AccountLinks = { accountURL?: string; recoveryURL?: string };
+export type AccountDeletion = { sole_owned_merchants: Array<{ tenant_id:string; merchant_id:string; display_name:string }>; platform_operator: boolean };
 export type SanctionsAlert = { id:string; chain_id:string; transaction_id:string; asset_id:string; from_address:string; to_address:string; amount_atomic:string; asset_decimals:number; matches:Array<{source:string;reference:string}>; detected_at:string };
 export type NotificationEvent = "paid" | "underpaid" | "review" | "webhook_failed";
 export type NotificationSettings = { email:string; locale?:string; telegram:{ available:boolean; linked:boolean }; account:{ sign_in_email:boolean; sign_in_telegram:boolean }; merchant?:{ configured:boolean; webhooks_allowed:boolean; email_events:NotificationEvent[]; telegram_events:NotificationEvent[] } };
