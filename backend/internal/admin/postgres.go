@@ -52,7 +52,17 @@ func (r *PostgresRepository) Ping(ctx context.Context) error {
   to_regprocedure('public.list_signup_screening_reviews(integer)') IS NOT NULL AND
   has_function_privilege(current_user,to_regprocedure('public.list_signup_screening_reviews(integer)'),'EXECUTE') AND
   to_regprocedure('public.decide_signup_screening(uuid,text,text,timestamp with time zone)') IS NOT NULL AND
-  has_function_privilege(current_user,to_regprocedure('public.decide_signup_screening(uuid,text,text,timestamp with time zone)'),'EXECUTE')`).Scan(&ready)
+  has_function_privilege(current_user,to_regprocedure('public.decide_signup_screening(uuid,text,text,timestamp with time zone)'),'EXECUTE') AND
+  to_regprocedure('public.merchant_go_live_state(uuid,uuid)') IS NOT NULL AND
+  has_function_privilege(current_user,to_regprocedure('public.merchant_go_live_state(uuid,uuid)'),'EXECUTE') AND
+  to_regprocedure('public.submit_merchant_go_live_request(uuid,uuid,uuid,text,jsonb,timestamp with time zone)') IS NOT NULL AND
+  has_function_privilege(current_user,to_regprocedure('public.submit_merchant_go_live_request(uuid,uuid,uuid,text,jsonb,timestamp with time zone)'),'EXECUTE') AND
+  to_regprocedure('public.list_go_live_requests(integer)') IS NOT NULL AND
+  has_function_privilege(current_user,to_regprocedure('public.list_go_live_requests(integer)'),'EXECUTE') AND
+  to_regprocedure('public.prepare_go_live_wallets(uuid,timestamp with time zone)') IS NOT NULL AND
+  has_function_privilege(current_user,to_regprocedure('public.prepare_go_live_wallets(uuid,timestamp with time zone)'),'EXECUTE') AND
+  to_regprocedure('public.decide_go_live_request(uuid,text,text,timestamp with time zone)') IS NOT NULL AND
+  has_function_privilege(current_user,to_regprocedure('public.decide_go_live_request(uuid,text,text,timestamp with time zone)'),'EXECUTE')`).Scan(&ready)
 	if err != nil || !ready {
 		return errors.New("required admin migrations or runtime grants are unavailable")
 	}
@@ -244,6 +254,92 @@ func (r *PostgresRepository) DecideSignupReview(ctx context.Context, principal P
 		return tx.QueryRow(ctx, `SELECT decide_signup_screening($1,$2,$3,$4)`, merchantID, decision.Decision, decision.Reason, at).Scan(&status)
 	})
 	return status, classifyAdminDB(err)
+}
+
+// asActor runs fn in a transaction that names the admin user, for the
+// definer functions that check the actor themselves.
+func (r *PostgresRepository) asActor(ctx context.Context, principal Principal, mode pgx.TxAccessMode, fn func(pgx.Tx) error) error {
+	return pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{IsoLevel: pgx.ReadCommitted, AccessMode: mode}, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('app.admin_user_id',$1,true)`, principal.UserID); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
+}
+
+func (r *PostgresRepository) GoLiveState(ctx context.Context, principal Principal, scope Scope) (GoLiveState, error) {
+	var state GoLiveState
+	err := r.asActor(ctx, principal, pgx.ReadOnly, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT environment,coalesce(request_id::text,''),coalesce(request_status,''),coalesce(preset,''),requested_at,screening_ready FROM merchant_go_live_state($1,$2)`, scope.TenantID, scope.MerchantID).
+			Scan(&state.Environment, &state.RequestID, &state.RequestStatus, &state.Preset, &state.RequestedAt, &state.ScreeningReady)
+	})
+	return state, classifyAdminDB(err)
+}
+
+func (r *PostgresRepository) SubmitGoLive(ctx context.Context, principal Principal, scope Scope, requestID, preset string, addresses []GoLiveProvenAddress, at time.Time) error {
+	payload, err := json.Marshal(addresses)
+	if err != nil {
+		return err
+	}
+	err = r.asActor(ctx, principal, pgx.ReadWrite, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `SELECT submit_merchant_go_live_request($1,$2,$3,$4,$5::jsonb,$6)`, requestID, scope.TenantID, scope.MerchantID, preset, string(payload), at)
+		return err
+	})
+	return classifyAdminDB(err)
+}
+
+func (r *PostgresRepository) ListGoLiveReviews(ctx context.Context, principal Principal, limit int) ([]GoLiveReview, error) {
+	var reviews []GoLiveReview
+	err := r.asActor(ctx, principal, pgx.ReadOnly, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT request_id::text,tenant_id::text,merchant_id::text,company_name,owner_email,preset,screening_status,addresses,requested_at FROM list_go_live_requests($1)`, limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var review GoLiveReview
+			var addresses []byte
+			if err := rows.Scan(&review.RequestID, &review.TenantID, &review.MerchantID, &review.CompanyName, &review.OwnerEmail, &review.Preset, &review.ScreeningStatus, &addresses, &review.RequestedAt); err != nil {
+				return err
+			}
+			if err := json.Unmarshal(addresses, &review.Addresses); err != nil {
+				return err
+			}
+			reviews = append(reviews, review)
+		}
+		return rows.Err()
+	})
+	return reviews, classifyAdminDB(err)
+}
+
+// PrepareGoLiveWallets creates the inert wallet and deposit address records
+// for a pending request; admission stays a four-eyes platform change.
+func (r *PostgresRepository) PrepareGoLiveWallets(ctx context.Context, principal Principal, requestID string, at time.Time) ([]GoLivePreparedWallet, error) {
+	var wallets []GoLivePreparedWallet
+	err := r.asActor(ctx, principal, pgx.ReadWrite, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT chain_id,wallet_id::text,address FROM prepare_go_live_wallets($1,$2)`, requestID, at)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var wallet GoLivePreparedWallet
+			if err := rows.Scan(&wallet.ChainID, &wallet.WalletID, &wallet.Address); err != nil {
+				return err
+			}
+			wallets = append(wallets, wallet)
+		}
+		return rows.Err()
+	})
+	return wallets, classifyAdminDB(err)
+}
+
+func (r *PostgresRepository) DecideGoLiveReview(ctx context.Context, principal Principal, requestID string, decision SignupDecision, at time.Time) (string, error) {
+	var outcome string
+	err := r.asActor(ctx, principal, pgx.ReadWrite, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT decide_go_live_request($1,$2,$3,$4)`, requestID, decision.Decision, decision.Reason, at).Scan(&outcome)
+	})
+	return outcome, classifyAdminDB(err)
 }
 
 // SignupOptions lists the business types open for self-service signup and

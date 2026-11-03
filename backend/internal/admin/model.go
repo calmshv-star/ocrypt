@@ -22,6 +22,9 @@ const (
 	PermissionWalletsWrite                   Permission = "wallets:write"
 	PermissionSignupReviewsRead              Permission = "signup_reviews:read"
 	PermissionSignupReviewsDecide            Permission = "signup_reviews:decide"
+	PermissionGoLiveRequest                  Permission = "go_live:request"
+	PermissionGoLiveReviewsRead              Permission = "go_live_reviews:read"
+	PermissionGoLiveReviewsDecide            Permission = "go_live_reviews:decide"
 	PermissionReconcileRead                  Permission = "reconciliation:read"
 	PermissionAuditRead                      Permission = "audit:read"
 	PermissionTeamAdmin                      Permission = "team:admin"
@@ -504,6 +507,72 @@ type SignupReviewMatch struct {
 	Source    string `json:"source"`
 	Kind      string `json:"kind"`
 	Reference string `json:"reference"`
+}
+
+// GoLiveState is what a merchant owner sees about going live.
+type GoLiveState struct {
+	Environment    string     `json:"environment"`
+	RequestID      string     `json:"request_id,omitempty"`
+	RequestStatus  string     `json:"request_status,omitempty"`
+	Preset         string     `json:"preset,omitempty"`
+	RequestedAt    *time.Time `json:"requested_at,omitempty"`
+	ScreeningReady bool       `json:"screening_ready"`
+}
+
+// GoLiveSubmission is the owner's request: a preset and one signed proof per
+// receiving address.
+type GoLiveSubmission struct {
+	Preset string          `json:"preset"`
+	Proofs []GoLiveProofIn `json:"proofs"`
+}
+
+type GoLiveProofIn struct {
+	Token     string `json:"token"`
+	Signature string `json:"signature"`
+}
+
+// GoLiveProvenAddress is a verified proof as it is stored with the request.
+type GoLiveProvenAddress struct {
+	ChainID   string    `json:"chain_id"`
+	Canonical string    `json:"canonical_address"`
+	Display   string    `json:"display_address"`
+	ProofKind string    `json:"proof_kind"`
+	Nonce     string    `json:"proof_nonce"`
+	Message   string    `json:"proof_message"`
+	Signature string    `json:"proof_signature"`
+	ProvenAt  time.Time `json:"proven_at"`
+}
+
+// GoLiveReview is a pending request in the operator queue.
+type GoLiveReview struct {
+	RequestID       string                `json:"request_id"`
+	TenantID        string                `json:"tenant_id"`
+	MerchantID      string                `json:"merchant_id"`
+	CompanyName     string                `json:"company_name"`
+	OwnerEmail      string                `json:"owner_email"`
+	Preset          string                `json:"preset"`
+	ScreeningStatus string                `json:"screening_status"`
+	Addresses       []GoLiveReviewAddress `json:"addresses"`
+	RequestedAt     time.Time             `json:"requested_at"`
+}
+
+type GoLiveReviewAddress struct {
+	ChainID   string `json:"chain_id"`
+	Address   string `json:"address"`
+	Canonical string `json:"canonical_address"`
+	ProofKind string `json:"proof_kind"`
+	// WalletID is the merchant's watch-only wallet on the chain, once prepared:
+	// the logical key of its wallet_pool platform change.
+	WalletID       string `json:"wallet_id,omitempty"`
+	Admitted       bool   `json:"admitted"`
+	RoutesAdmitted bool   `json:"routes_admitted"`
+}
+
+// GoLivePreparedWallet is a wallet record created (or found) for a request.
+type GoLivePreparedWallet struct {
+	ChainID  string `json:"chain_id"`
+	WalletID string `json:"wallet_id"`
+	Address  string `json:"address"`
 }
 
 // SignupDecision admits ("approve") or rejects ("reject") a held signup.

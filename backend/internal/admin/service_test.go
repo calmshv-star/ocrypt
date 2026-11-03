@@ -25,9 +25,13 @@ type repositoryStub struct {
 	signupOptionCalls int
 	signupRegions     []SignupRegion
 	dailyTotalsArgs   []string
-	signupReviews     []SignupReview
-	signupDecision    SignupDecision
-	signupDecisionErr error
+	// go-live submission and decision as the repository received them
+	goLiveRequestID, goLivePreset, goLivePrepared string
+	goLiveAddresses                               []GoLiveProvenAddress
+	goLiveDecision                                SignupDecision
+	signupReviews                                 []SignupReview
+	signupDecision                                SignupDecision
+	signupDecisionErr                             error
 	// signupDecisionMerchant is the merchant the last decision targeted.
 	signupDecisionMerchant string
 	registration           SelfServiceRegistration
@@ -39,6 +43,27 @@ func (r *repositoryStub) CreateSignupRequest(_ context.Context, _ string, form S
 	r.signupForms = append(r.signupForms, form)
 	r.signupRegions = append(r.signupRegions, region)
 	return r.signupOK, r.signupErr
+}
+func (r *repositoryStub) GoLiveState(context.Context, Principal, Scope) (GoLiveState, error) {
+	if r.goLivePreset != "" {
+		return GoLiveState{Environment: "test", RequestID: r.goLiveRequestID, RequestStatus: "pending", Preset: r.goLivePreset, ScreeningReady: true}, nil
+	}
+	return GoLiveState{Environment: "test", ScreeningReady: true}, nil
+}
+func (r *repositoryStub) SubmitGoLive(_ context.Context, _ Principal, _ Scope, requestID, preset string, addresses []GoLiveProvenAddress, _ time.Time) error {
+	r.goLiveRequestID, r.goLivePreset, r.goLiveAddresses = requestID, preset, addresses
+	return nil
+}
+func (r *repositoryStub) PrepareGoLiveWallets(_ context.Context, _ Principal, requestID string, _ time.Time) ([]GoLivePreparedWallet, error) {
+	r.goLivePrepared = requestID
+	return []GoLivePreparedWallet{{ChainID: "eip155:56", WalletID: "018f22b0-4db4-7c58-8f18-4d2f9d7b6a77", Address: "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf"}}, nil
+}
+func (r *repositoryStub) ListGoLiveReviews(context.Context, Principal, int) ([]GoLiveReview, error) {
+	return []GoLiveReview{{RequestID: "44444444-4444-4444-8444-444444444444", Preset: "fast", Addresses: []GoLiveReviewAddress{{ChainID: "eip155:56", Address: "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf", ProofKind: "evm_personal_sign"}}}}, nil
+}
+func (r *repositoryStub) DecideGoLiveReview(_ context.Context, _ Principal, requestID string, decision SignupDecision, _ time.Time) (string, error) {
+	r.goLiveDecision = decision
+	return map[string]string{"approve": "approved", "reject": "rejected"}[decision.Decision], nil
 }
 func (r *repositoryStub) ListSignupReviews(context.Context, Principal, int) ([]SignupReview, error) {
 	return r.signupReviews, nil

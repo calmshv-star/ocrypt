@@ -195,6 +195,12 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /admin/v1/platform/rollbacks", s.authenticated(s.mutating(s.platformHandler(PermissionPlatformConfigRollback, true))))
 	s.mux.Handle("GET /admin/v1/platform/snapshots", s.authenticated(s.platformHandler(PermissionPlatformConfigRead, false)))
 	s.mux.Handle("POST /admin/v1/platform/emergency-pauses", s.authenticated(s.mutating(s.platformHandler(PermissionPlatformConfigEmergency, true))))
+	s.mux.Handle("GET /admin/v1/go-live", s.authenticated(http.HandlerFunc(s.goLiveState)))
+	s.mux.Handle("POST /admin/v1/go-live/address-challenges", s.authenticated(s.mutating(http.HandlerFunc(s.goLiveChallenge))))
+	s.mux.Handle("POST /admin/v1/go-live/requests", s.authenticated(s.mutating(http.HandlerFunc(s.submitGoLive))))
+	s.mux.Handle("GET /admin/v1/platform/go-live-requests", s.authenticated(http.HandlerFunc(s.goLiveReviews)))
+	s.mux.Handle("POST /admin/v1/platform/go-live-requests/{id}/wallets", s.authenticated(s.mutating(http.HandlerFunc(s.prepareGoLiveWallets))))
+	s.mux.Handle("POST /admin/v1/platform/go-live-requests/{id}/decision", s.authenticated(s.mutating(http.HandlerFunc(s.decideGoLiveReview))))
 	s.mux.Handle("GET /admin/v1/platform/signup-reviews", s.authenticated(http.HandlerFunc(s.signupReviews)))
 	s.mux.Handle("POST /admin/v1/platform/signup-reviews/{id}/decision", s.authenticated(s.mutating(http.HandlerFunc(s.decideSignupReview))))
 	s.mux.Handle("GET /admin/v1/providers", s.authenticated(s.platformHandler(PermissionProviderOperationsRead, false)))
@@ -775,6 +781,90 @@ func (s *Server) decideSignupReview(w http.ResponseWriter, request *http.Request
 	merchantID := request.PathValue("id")
 	status, err := s.service.DecideSignupReview(request.Context(), authenticatedFrom(request.Context()).Principal, merchantID, input)
 	respond(w, map[string]string{"merchant_id": merchantID, "status": status}, err)
+}
+
+// goLiveScope resolves the merchant scope of an owner's go-live call; the
+// service checks the go_live:request grant for that merchant.
+func (s *Server) goLiveScope(w http.ResponseWriter, request *http.Request) (AuthResult, Scope, bool) {
+	scope, err := requestedScope(request)
+	if err != nil || scope.MerchantID == "" {
+		writeProblem(w, http.StatusBadRequest, "invalid_scope", "A merchant scope is required.")
+		return AuthResult{}, Scope{}, false
+	}
+	return authenticatedFrom(request.Context()), scope, true
+}
+
+func (s *Server) goLiveState(w http.ResponseWriter, request *http.Request) {
+	auth, scope, ok := s.goLiveScope(w, request)
+	if !ok {
+		return
+	}
+	state, err := s.service.GoLiveState(request.Context(), auth.Principal, scope)
+	respond(w, state, err)
+}
+
+func (s *Server) goLiveChallenge(w http.ResponseWriter, request *http.Request) {
+	auth, scope, ok := s.goLiveScope(w, request)
+	if !ok {
+		return
+	}
+	var input struct {
+		ChainID string `json:"chain_id"`
+		Address string `json:"address"`
+	}
+	if !s.decode(w, request, &input) {
+		return
+	}
+	challenge, err := s.service.CreateGoLiveChallenge(auth.Principal, scope, s.origin.Host, input.ChainID, input.Address)
+	respond(w, challenge, err)
+}
+
+func (s *Server) submitGoLive(w http.ResponseWriter, request *http.Request) {
+	auth, scope, ok := s.goLiveScope(w, request)
+	if !ok {
+		return
+	}
+	var input GoLiveSubmission
+	if !s.decode(w, request, &input) {
+		return
+	}
+	state, err := s.service.SubmitGoLive(request.Context(), auth.Principal, scope, s.origin.Host, input)
+	respond(w, state, err)
+}
+
+func (s *Server) goLiveReviews(w http.ResponseWriter, request *http.Request) {
+	if !unscopedRequest(w, request) {
+		return
+	}
+	items, err := s.service.ListGoLiveReviews(request.Context(), authenticatedFrom(request.Context()).Principal)
+	if items == nil {
+		items = []GoLiveReview{}
+	}
+	respond(w, map[string][]GoLiveReview{"data": items}, err)
+}
+
+func (s *Server) prepareGoLiveWallets(w http.ResponseWriter, request *http.Request) {
+	if !unscopedRequest(w, request) {
+		return
+	}
+	wallets, err := s.service.PrepareGoLiveWallets(request.Context(), authenticatedFrom(request.Context()).Principal, request.PathValue("id"))
+	if wallets == nil {
+		wallets = []GoLivePreparedWallet{}
+	}
+	respond(w, map[string][]GoLivePreparedWallet{"data": wallets}, err)
+}
+
+func (s *Server) decideGoLiveReview(w http.ResponseWriter, request *http.Request) {
+	if !unscopedRequest(w, request) {
+		return
+	}
+	var input SignupDecision
+	if !s.decode(w, request, &input) {
+		return
+	}
+	requestID := request.PathValue("id")
+	status, err := s.service.DecideGoLiveReview(request.Context(), authenticatedFrom(request.Context()).Principal, requestID, input)
+	respond(w, map[string]string{"request_id": requestID, "status": status}, err)
 }
 
 func unscopedRequest(w http.ResponseWriter, request *http.Request) bool {
