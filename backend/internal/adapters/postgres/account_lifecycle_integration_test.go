@@ -60,6 +60,13 @@ func (f *faultDatabase) accountLifecycle(t *testing.T) {
 	if changed, _ := repository.SyncEmail(f.ctx, principal(owner), "new-owner@shop.example", now); changed {
 		t.Fatal("an unchanged email is not written again")
 	}
+	// A disposable domain is refused like at signup, and audited.
+	if changed, err := repository.SyncEmail(f.ctx, principal(owner), "owner@10minutemail.com", now); err != nil || changed {
+		t.Fatalf("a disposable address is not taken over: %v %v", changed, err)
+	}
+	if f.count(t, `SELECT count(*) FROM admin_audit_log WHERE action='admin.user.email_change_refused' AND actor_user_id=$1 AND details->>'reason'='disposable_domain'`, owner) != 1 {
+		t.Fatal("the refusal is audited")
+	}
 	if f.count(t, `SELECT count(*) FROM admin_users WHERE id=$1 AND email='new-owner@shop.example'`, owner) != 1 ||
 		f.count(t, `SELECT count(*) FROM merchant_members WHERE admin_user_id=$1 AND email='new-owner@shop.example'`, owner) != 1 ||
 		f.count(t, `SELECT count(*) FROM admin_audit_log WHERE action='admin.user.email_changed' AND actor_user_id=$1`, owner) != 1 {
@@ -124,9 +131,18 @@ SELECT $1,$2,$3,u.id,u.oidc_issuer,u.oidc_subject,lower(u.email),u.display_name,
 	if len(partnerSole) != 1 {
 		t.Fatalf("the partner alone owns their own merchant: %+v", partnerSole)
 	}
-	if _, err := repository.DeleteAccount(f.ctx, principal(partner), false, now); err == nil || !strings.Contains(err.Error(), "owns merchants alone") {
+	if _, err := repository.DeleteAccount(f.ctx, principal(partner), nil, now); err == nil || !strings.Contains(err.Error(), "owns merchants alone") {
 		t.Fatalf("closing a merchant needs consent: %v", err)
 	}
+	if _, err := repository.DeleteAccount(f.ctx, principal(partner), []string{merchant}, now); err == nil || !strings.Contains(err.Error(), "owns merchants alone") {
+		t.Fatalf("consent names exactly the merchants the user alone owns: %v", err)
+	}
+	// A co-owner whose account cannot sign in does not count as an owner.
+	faultExec(t, f.ctx, f.admin, `UPDATE admin_users SET status='disabled' WHERE id=$1`, partner)
+	if alone, _ := repository.SoleOwnedMerchants(f.ctx, principal(owner)); len(alone) != 1 {
+		t.Fatalf("a disabled co-owner leaves the owner alone: %+v", alone)
+	}
+	faultExec(t, f.ctx, f.admin, `UPDATE admin_users SET status='active' WHERE id=$1`, partner)
 
 	// The owner deletes their account: the co-owned merchant stays open.
 	sessionID := faultID(t)
@@ -139,8 +155,14 @@ SELECT $1,$2,$3,u.id,u.oidc_issuer,u.oidc_subject,lower(u.email),u.display_name,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if closed, err := repository.DeleteAccount(f.ctx, principal(owner), false, now); err != nil || closed != 0 {
+	if closed, err := repository.DeleteAccount(f.ctx, principal(owner), nil, now); err != nil || closed != 0 {
 		t.Fatalf("delete: %d %v", closed, err)
+	}
+	// The address the account had is told; the pending email-change notice
+	// to the old address survives the deletion.
+	if f.count(t, `SELECT count(*) FROM notification_jobs WHERE user_id=$1 AND event='account_deleted' AND recipient_email='new-owner@shop.example' AND status='pending'`, owner) != 1 ||
+		f.count(t, `SELECT count(*) FROM notification_jobs WHERE user_id=$1 AND event='email_changed' AND recipient_email='old-owner@shop.example'`, owner) != 1 {
+		t.Fatal("deletion tells the account's address and keeps the security notice")
 	}
 	if f.count(t, `SELECT count(*) FROM admin_users WHERE id=$1 AND status='disabled' AND email IS NULL AND display_name='Deleted user' AND oidc_subject='deleted:'||id::text`, owner) != 1 {
 		t.Fatal("the user is disabled and pseudonymised")
@@ -161,10 +183,15 @@ SELECT $1,$2,$3,u.id,u.oidc_issuer,u.oidc_subject,lower(u.email),u.display_name,
 
 	// The partner is now the only owner of both merchants and agrees to
 	// close them; their records stay.
-	if again, _ := repository.SoleOwnedMerchants(f.ctx, principal(partner)); len(again) != 2 {
+	again, _ := repository.SoleOwnedMerchants(f.ctx, principal(partner))
+	if len(again) != 2 {
 		t.Fatalf("the partner alone owns both merchants now: %+v", again)
 	}
-	if closed, err := repository.DeleteAccount(f.ctx, principal(partner), true, now); err != nil || closed != 2 {
+	var both []string
+	for _, owned := range again {
+		both = append(both, owned.MerchantID)
+	}
+	if closed, err := repository.DeleteAccount(f.ctx, principal(partner), both, now); err != nil || closed != 2 {
 		t.Fatalf("partner delete: %d %v", closed, err)
 	}
 	if f.count(t, `SELECT count(*) FROM merchants WHERE id IN ($1,(SELECT merchant_id FROM merchant_signups WHERE admin_user_id=$2)) AND status='disabled'`, merchant, partner) != 2 ||
@@ -177,7 +204,22 @@ SELECT $1,$2,$3,u.id,u.oidc_issuer,u.oidc_subject,lower(u.email),u.display_name,
 	operator := faultID(t)
 	faultExec(t, f.ctx, f.admin, `INSERT INTO admin_users(id,oidc_issuer,oidc_subject,display_name,email,status,created_at,updated_at,version) VALUES($1,'https://id.example',$2,'Ops','ops@platform.example','active',$3,$3,1)`, operator, "reg5-ops-"+operator, now)
 	faultExec(t, f.ctx, f.admin, `INSERT INTO admin_role_bindings(id,user_id,role_key,tenant_id,merchant_id,granted_at,reason) VALUES($1,$2,'security_admin',NULL,NULL,$3,'operator fixture')`, faultID(t), operator, now)
-	if _, err := repository.DeleteAccount(f.ctx, principal(operator), true, now); err == nil || !strings.Contains(err.Error(), "platform operator") {
+	if _, err := repository.DeleteAccount(f.ctx, principal(operator), nil, now); err == nil || !strings.Contains(err.Error(), "platform operator") {
 		t.Fatalf("an operator cannot delete themselves: %v", err)
+	}
+
+	// A signup held by screening is decided by an operator before deletion.
+	request := faultID(t)
+	var accepted, created, held bool
+	var heldUser string
+	if err := runtime.QueryRow(f.ctx, `SELECT create_admin_signup_request($1,'Fixture Sanctioned Holding','DE','ecommerce',NULL,'2026-11-terms',$2,$3,'DE',true)`, request, now, now.Add(15*time.Minute)).Scan(&accepted); err != nil || !accepted {
+		t.Fatalf("held signup request: %v %v", accepted, err)
+	}
+	if err := runtime.QueryRow(f.ctx, `SELECT user_id::text,created,held FROM register_self_service_merchant($1,'https://id.example',$2,'held@shop.example','Held',$3,$4,$5,$6,$7)`,
+		request, "reg5-held-"+faultID(t), faultID(t), faultID(t), faultID(t), faultID(t), now).Scan(&heldUser, &created, &held); err != nil || !held {
+		t.Fatalf("held register: %v %v", held, err)
+	}
+	if _, err := repository.DeleteAccount(f.ctx, principal(heldUser), nil, now); err == nil || !strings.Contains(err.Error(), "under review") {
+		t.Fatalf("a held signup cannot be deleted away: %v", err)
 	}
 }

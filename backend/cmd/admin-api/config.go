@@ -34,6 +34,7 @@ type adminConfig struct {
 	TelegramBotUsername            string
 	AccountURL                     string
 	RecoveryURL                    string
+	FollowProviderEmail            bool
 	IdleTTL                        time.Duration
 	AbsoluteTTL                    time.Duration
 	RotationInterval               time.Duration
@@ -182,6 +183,9 @@ func loadAdminConfig() (adminConfig, error) {
 	// REG-5: the identity provider's account and password-recovery pages.
 	config.AccountURL = strings.TrimSpace(os.Getenv("ADMIN_IDP_ACCOUNT_URL"))
 	config.RecoveryURL = strings.TrimSpace(os.Getenv("ADMIN_IDP_RECOVERY_URL"))
+	if config.FollowProviderEmail, err = strconv.ParseBool(envOr("ADMIN_FOLLOW_IDP_EMAIL", "true")); err != nil {
+		return adminConfig{}, errors.New("ADMIN_FOLLOW_IDP_EMAIL must be true or false")
+	}
 	if config.SignupRegionHeader != "" && !signupRegionHeaderPattern.MatchString(config.SignupRegionHeader) {
 		return adminConfig{}, errors.New("ADMIN_SIGNUP_REGION_HEADER must be a plain HTTP header name")
 	}

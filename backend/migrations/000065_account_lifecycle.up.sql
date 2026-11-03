@@ -17,13 +17,14 @@ ALTER TABLE notification_jobs ADD COLUMN recipient_email text
   CHECK (recipient_email IS NULL OR (length(recipient_email) BETWEEN 3 AND 320 AND recipient_email LIKE '%_@_%._%'));
 ALTER TABLE notification_jobs DROP CONSTRAINT notification_jobs_event_check;
 ALTER TABLE notification_jobs ADD CONSTRAINT notification_jobs_event_check
-  CHECK (event IN ('paid','underpaid','review','webhook_failed','sign_in','sanctioned','email_changed'));
+  CHECK (event IN ('paid','underpaid','review','webhook_failed','sign_in','sanctioned','email_changed','account_deleted'));
 ALTER TABLE notification_jobs DROP CONSTRAINT notification_jobs_check;
 ALTER TABLE notification_jobs ADD CONSTRAINT notification_jobs_check
-  CHECK ((event IN ('sign_in','email_changed')) = (merchant_id IS NULL));
--- Only the email-change notice goes to an address other than the user's.
+  CHECK ((event IN ('sign_in','email_changed','account_deleted')) = (merchant_id IS NULL));
+-- Only the email-change and deletion notices go to a fixed address (the old
+-- one, or the one the deleted account had).
 ALTER TABLE notification_jobs ADD CONSTRAINT notification_jobs_recipient_check
-  CHECK (recipient_email IS NULL OR (event='email_changed' AND channel='email'));
+  CHECK (recipient_email IS NULL OR (event IN ('email_changed','account_deleted') AND channel='email'));
 
 -- As in 000063/000064, plus a fixed recipient for the email-change notice
 -- (the old address, which the user no longer has on file).
@@ -70,12 +71,14 @@ BEGIN
 END $$;
 
 -- Takes over the verified email the provider sent at login. Returns true
--- when it changed. The old address is told (with the new one masked).
+-- when it changed. A disposable or sanctions-listed domain is refused (and
+-- audited) like at signup. The old address is told, with the new one
+-- masked, at most three times a day; a linked Telegram chat is told too.
 CREATE FUNCTION sync_current_admin_email(p_email text,p_at timestamptz) RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path=pg_catalog,public SET row_security=off AS $$
 DECLARE actor uuid:=nullif(current_setting('app.admin_user_id',true),'')::uuid;
-  normalized text:=lower(btrim(p_email)); previous text; issuer text; subject text; chosen text; masked text;
+  normalized text:=lower(btrim(p_email)); previous text; issuer text; subject text; chosen text; masked text; email_domain text; refused text;
 BEGIN
   IF actor IS NULL OR normalized IS NULL OR length(normalized) NOT BETWEEN 3 AND 320 OR normalized NOT LIKE '%_@_%._%' THEN
     RAISE EXCEPTION 'invalid email' USING ERRCODE='OCP02';
@@ -84,18 +87,36 @@ BEGIN
    WHERE u.id=actor AND u.status='active' FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'not an active admin' USING ERRCODE='OCP01'; END IF;
   IF previous IS NOT DISTINCT FROM normalized THEN RETURN false; END IF;
+  email_domain := split_part(normalized,'@',2);
+  IF EXISTS (SELECT 1 FROM public.signup_blocked_email_domains d WHERE email_domain=d.domain OR email_domain LIKE '%.'||d.domain) THEN
+    refused := 'disposable_domain';
+  ELSIF EXISTS (SELECT 1 FROM public.signup_screening_entries e
+                 WHERE e.kind='domain' AND e.match_key IN (
+                   SELECT array_to_string(labels[i:],'.') FROM (SELECT string_to_array(public.signup_screening_domain_key(email_domain),'.') AS labels) x,
+                          generate_subscripts(labels,1) i WHERE i<cardinality(labels))) THEN
+    refused := 'listed_domain';
+  END IF;
+  IF refused IS NOT NULL THEN
+    PERFORM public.append_admin_audit(gen_random_uuid(),NULL,NULL,actor,NULL,'admin.user.email_change_refused','admin_user',actor::text,
+      'email-sync','verified email from the sign-in provider not taken over',NULL,NULL,
+      jsonb_build_object('reason',refused,'new_domain',email_domain),NULL,NULL,p_at);
+    RETURN false;
+  END IF;
   UPDATE public.admin_users SET email=normalized,updated_at=p_at,version=version+1 WHERE id=actor;
   UPDATE public.merchant_members SET email=normalized,updated_at=p_at,version=version+1
    WHERE admin_user_id=actor AND oidc_issuer=issuer AND oidc_subject=subject AND status<>'removed';
   PERFORM public.append_admin_audit(gen_random_uuid(),NULL,NULL,actor,NULL,'admin.user.email_changed','admin_user',actor::text,
     'email-sync','verified email changed at the sign-in provider',NULL,NULL,
     jsonb_build_object('previous_domain',split_part(coalesce(previous,''),'@',2),'new_domain',split_part(normalized,'@',2)),NULL,NULL,p_at);
-  IF previous IS NOT NULL AND previous LIKE '%_@_%._%' THEN
+  IF previous IS NOT NULL AND previous LIKE '%_@_%._%'
+     AND (SELECT count(*) FROM public.notification_jobs j WHERE j.user_id=actor AND j.event='email_changed' AND j.channel='email' AND j.created_at>p_at-interval '1 day')<3 THEN
     SELECT a.locale INTO chosen FROM public.notification_account_settings a WHERE a.user_id=actor;
-    masked := left(normalized,1)||'***@'||split_part(normalized,'@',2);
+    masked := left(normalized,1)||'***@'||email_domain;
     INSERT INTO public.notification_jobs(id,user_id,channel,event,dedupe_key,payload,locale,status,available_at,created_at,updated_at,recipient_email)
-    VALUES(gen_random_uuid(),actor,'email','email_changed','email_changed:'||md5(previous||chr(31)||normalized),
-           jsonb_build_object('new_email',masked,'changed_at',p_at),coalesce(chosen,'en'),'pending',p_at,p_at,p_at,previous)
+    SELECT gen_random_uuid(),actor,c.channel,'email_changed','email_changed:'||md5(previous||chr(31)||normalized||chr(31)||p_at::text),
+           jsonb_build_object('new_email',masked,'changed_at',p_at),coalesce(chosen,'en'),'pending',p_at,p_at,p_at,c.recipient
+      FROM (VALUES ('email',previous),('telegram',NULL)) c(channel,recipient)
+     WHERE c.channel='email' OR EXISTS (SELECT 1 FROM public.telegram_chat_links l WHERE l.user_id=actor)
     ON CONFLICT (user_id,channel,dedupe_key) DO NOTHING;
   END IF;
   RETURN true;
@@ -111,7 +132,9 @@ SET search_path=pg_catalog,public SET row_security=off AS $$
     JOIN public.merchant_member_role_bindings b ON b.member_id=m.id AND b.role_key='owner' AND b.revoked_at IS NULL
     JOIN public.merchants merchant ON merchant.id=m.merchant_id AND merchant.tenant_id=m.tenant_id AND merchant.status<>'disabled'
    WHERE m.admin_user_id=nullif(current_setting('app.admin_user_id',true),'')::uuid AND m.status='active'
+     -- Another owner counts only if their account can still sign in.
      AND NOT EXISTS (SELECT 1 FROM public.merchant_member_role_bindings ob JOIN public.merchant_members om ON om.id=ob.member_id
+                       JOIN public.admin_users ou ON ou.id=om.admin_user_id AND ou.status='active'
                       WHERE ob.merchant_id=m.merchant_id AND ob.role_key='owner' AND ob.revoked_at IS NULL
                         AND om.status='active' AND om.admin_user_id<>m.admin_user_id)
    ORDER BY m.merchant_id
@@ -150,27 +173,41 @@ BEGIN
   RETURN jsonb_strip_nulls(result);
 END $$;
 
--- Deletes the current user's account (see the header). Errors: OCP06 for a
--- platform operator, OCP05 when merchants would be left without an owner and
--- p_close_merchants is false. Returns the number of merchants closed.
-CREATE FUNCTION delete_current_admin_account(p_close_merchants boolean,p_at timestamptz) RETURNS integer
+-- Deletes the current user's account (see the header). p_close_merchants
+-- lists the merchants the user agreed to close; it must be exactly the set
+-- they alone own when this commits, else OCP05. Errors: OCP06 for a platform
+-- operator, OCP07 while the user's signup is under review. Returns the number
+-- of merchants closed. Run it SERIALIZABLE (with retries): with the
+-- merchant-settings writers also serializable, no owner change slips past.
+CREATE FUNCTION delete_current_admin_account(p_close_merchants uuid[],p_at timestamptz) RETURNS integer
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path=pg_catalog,public SET row_security=off AS $$
 DECLARE actor uuid:=nullif(current_setting('app.admin_user_id',true),'')::uuid; item record; closed integer:=0;
+  sole uuid[]; agreed uuid[]; stored_email text; chosen text;
 BEGIN
-  IF actor IS NULL OR NOT EXISTS (SELECT 1 FROM public.admin_users u WHERE u.id=actor AND u.status='active') THEN
+  -- The user row first, the same order as the email sync.
+  SELECT u.email INTO stored_email FROM public.admin_users u WHERE u.id=actor AND u.status='active' FOR UPDATE;
+  IF actor IS NULL OR NOT FOUND THEN
     RAISE EXCEPTION 'not an active admin' USING ERRCODE='OCP01';
   END IF;
   IF EXISTS (SELECT 1 FROM public.admin_role_bindings b WHERE b.user_id=actor AND b.tenant_id IS NULL AND b.revoked_at IS NULL AND (b.expires_at IS NULL OR b.expires_at>p_at)) THEN
     RAISE EXCEPTION 'platform operators are offboarded by another operator' USING ERRCODE='OCP06';
   END IF;
+  -- A signup held by screening is decided by an operator first; deleting it
+  -- would also wipe the identity behind a possible sanctions match.
+  IF EXISTS (SELECT 1 FROM public.merchant_signups ms JOIN public.merchant_signup_screenings sc ON sc.merchant_id=ms.merchant_id AND sc.tenant_id=ms.tenant_id
+              WHERE ms.admin_user_id=actor AND sc.status='review') THEN
+    RAISE EXCEPTION 'the signup is under review' USING ERRCODE='OCP07';
+  END IF;
   -- The owner guard's lock for every merchant the user belongs to, in a
-  -- fixed order, so no concurrent owner change can slip in.
+  -- fixed order (the guard trigger takes the same lock).
   FOR item IN SELECT DISTINCT m.merchant_id FROM public.merchant_members m WHERE m.admin_user_id=actor ORDER BY m.merchant_id LOOP
     PERFORM pg_advisory_xact_lock(hashtextextended(item.merchant_id::text||chr(31)||'merchant-owner-guard',0));
   END LOOP;
-  IF EXISTS (SELECT 1 FROM public.current_admin_sole_owned_merchants()) AND NOT coalesce(p_close_merchants,false) THEN
-    RAISE EXCEPTION 'merchants would be left without an owner' USING ERRCODE='OCP05';
+  sole := ARRAY(SELECT o.merchant_id FROM public.current_admin_sole_owned_merchants() o ORDER BY 1);
+  agreed := ARRAY(SELECT DISTINCT x FROM unnest(coalesce(p_close_merchants,'{}'::uuid[])) x ORDER BY 1);
+  IF sole<>agreed THEN
+    RAISE EXCEPTION 'the merchants to close differ from those the user alone owns' USING ERRCODE='OCP05';
   END IF;
   -- Close the merchants only this user owns; their owner record stays (the
   -- last-owner guard) but is pseudonymised below with every other record.
@@ -192,9 +229,21 @@ BEGIN
    WHERE admin_user_id=actor;
   UPDATE public.admin_role_bindings SET revoked_at=p_at,version=version+1 WHERE user_id=actor AND revoked_at IS NULL;
   UPDATE public.admin_sessions SET revoked_at=coalesce(revoked_at,p_at),revocation_reason=coalesce(revocation_reason,'account_deleted'),
-         oidc_subject='deleted:'||actor::text,source_address=NULL,device_label=NULL
+         oidc_subject='deleted:'||actor::text,source_address=NULL,device_label=NULL,user_agent_hash=NULL
    WHERE user_id=actor;
-  DELETE FROM public.notification_jobs WHERE user_id=actor AND status IN ('pending','retry','leased');
+  UPDATE public.admin_invitation_enrollments SET email='deleted-'||left(replace(invitation_id::text,'-',''),12)||'@account.invalid',oidc_subject='deleted:'||actor::text
+   WHERE user_id=actor;
+  -- Pending notices to a fixed address (the old email) still go out; every
+  -- other job, sent ones included, is removed with the account.
+  DELETE FROM public.notification_jobs WHERE user_id=actor AND NOT (recipient_email IS NOT NULL AND status IN ('pending','retry','leased'));
+  -- The address the account had is told it was deleted.
+  IF stored_email IS NOT NULL AND stored_email LIKE '%_@_%._%' THEN
+    SELECT a.locale INTO chosen FROM public.notification_account_settings a WHERE a.user_id=actor;
+    INSERT INTO public.notification_jobs(id,user_id,channel,event,dedupe_key,payload,locale,status,available_at,created_at,updated_at,recipient_email)
+    VALUES(gen_random_uuid(),actor,'email','account_deleted','account_deleted:'||actor::text,
+           jsonb_build_object('closed_merchants',closed,'deleted_at',p_at),coalesce(chosen,'en'),'pending',p_at,p_at,p_at,stored_email)
+    ON CONFLICT (user_id,channel,dedupe_key) DO NOTHING;
+  END IF;
   DELETE FROM public.notification_preferences WHERE user_id=actor;
   DELETE FROM public.notification_account_settings WHERE user_id=actor;
   DELETE FROM public.telegram_link_codes WHERE user_id=actor;
@@ -210,13 +259,13 @@ END $$;
 REVOKE ALL ON FUNCTION sync_current_admin_email(text,timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION current_admin_sole_owned_merchants() FROM PUBLIC;
 REVOKE ALL ON FUNCTION current_admin_account_export() FROM PUBLIC;
-REVOKE ALL ON FUNCTION delete_current_admin_account(boolean,timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION delete_current_admin_account(uuid[],timestamptz) FROM PUBLIC;
 
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='merchant_admin_runtime') THEN
     GRANT EXECUTE ON FUNCTION sync_current_admin_email(text,timestamptz),current_admin_sole_owned_merchants(),
-      current_admin_account_export(),delete_current_admin_account(boolean,timestamptz) TO merchant_admin_runtime;
+      current_admin_account_export(),delete_current_admin_account(uuid[],timestamptz) TO merchant_admin_runtime;
   END IF;
 END $$;
 

@@ -296,8 +296,8 @@ func (r *repositoryStub) AccountExport(context.Context, Principal) (json.RawMess
 func (r *repositoryStub) SoleOwnedMerchants(context.Context, Principal) ([]OwnedMerchant, error) {
 	return append([]OwnedMerchant{}, r.soleOwned...), nil
 }
-func (r *repositoryStub) DeleteAccount(_ context.Context, _ Principal, closeMerchants bool, _ time.Time) (int, error) {
-	if len(r.soleOwned) > 0 && !closeMerchants {
+func (r *repositoryStub) DeleteAccount(_ context.Context, _ Principal, closeMerchantIDs []string, _ time.Time) (int, error) {
+	if len(r.soleOwned) != len(closeMerchantIDs) {
 		return 0, ErrSoleOwner
 	}
 	r.deleted = true
@@ -328,7 +328,7 @@ func testService(repo Repository, now time.Time) *Service {
 	if err != nil {
 		panic(err)
 	}
-	return &Service{repository: repo, stateBox: box, config: ServiceConfig{IdleTTL: 15 * time.Minute, AbsoluteTTL: 8 * time.Hour, RotationInterval: 5 * time.Minute, StepUpTTL: 10 * time.Minute, RequiredACR: "urn:mfa", AcceptedAMR: map[string]bool{"otp": true}}, now: func() time.Time { return now }}
+	return &Service{repository: repo, stateBox: box, config: ServiceConfig{IdleTTL: 15 * time.Minute, AbsoluteTTL: 8 * time.Hour, RotationInterval: 5 * time.Minute, StepUpTTL: 10 * time.Minute, RequiredACR: "urn:mfa", AcceptedAMR: map[string]bool{"otp": true}, FollowProviderEmail: true}, now: func() time.Time { return now }}
 }
 
 func TestRBACScopeAndStepUpAreServerAuthoritative(t *testing.T) {

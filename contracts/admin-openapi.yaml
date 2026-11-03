@@ -248,9 +248,9 @@ paths:
       tags: [Account]
       operationId: deleteAccount
       summary: Delete the signed-in user's account
-      description: Needs an MFA session and the user's own email as confirmation. Ends every session and access, removes notification data and pseudonymises the user; the audit log and financial records stay. Merchants the user alone owns are closed only with close_merchants (else 409 owner_of_merchants). Platform operators get 409 platform_operator. Clears this browser's session cookies.
+      description: Needs a sign-in or step-up within the step-up window (else 403 step_up_required) and the user's own email as confirmation. Ends every session and access, removes notification data, pseudonymises the user and tells the stored address; the audit log and financial records stay. close_merchant_ids must be exactly the merchants the user alone owns (else 409 owner_of_merchants); those are closed. Platform operators get 409 platform_operator, a signup under review 409 signup_under_review. Clears this browser's session cookies.
       security: [{sessionCookie: [], csrfHeader: []}]
-      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [confirm_email, close_merchants], properties: {confirm_email: {type: string, maxLength: 320}, close_merchants: {type: boolean}}}}}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [confirm_email, close_merchant_ids], properties: {confirm_email: {type: string, maxLength: 320}, close_merchant_ids: {type: array, maxItems: 100, uniqueItems: true, items: {$ref: '#/components/schemas/UUID'}}}}}}}
       responses:
         '200': {description: Deleted, content: {application/json: {schema: {type: object, additionalProperties: false, required: [closed_merchants], properties: {closed_merchants: {type: integer, minimum: 0}}}}}}
         '400': {$ref: '#/components/responses/Problem'}

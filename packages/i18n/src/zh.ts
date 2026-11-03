@@ -1505,5 +1505,8 @@ export const zhCN = {
   "account.delete": "删除我的账户",
   "account.deleting": "正在删除…",
   "account.failed": "无法删除账户。请刷新页面后重试。",
-  "account.ownerConflict": "有商户将失去所有者。请勾选“关闭这些商户”，或先添加其他所有者。"
+  "account.ownerConflict": "有商户将失去所有者。请勾选“关闭这些商户”，或先添加其他所有者。",
+  "account.previewFailed": "无法检查删除账户会产生的影响。",
+  "account.deletedTitle": "您的账户已删除",
+  "account.deletedBody": "所有会话均已结束。确认邮件已发送至您的邮箱。您在登录提供方处的账户仍然存在；如有需要，请在那里删除。"
 } satisfies Messages;

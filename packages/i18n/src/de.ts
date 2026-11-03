@@ -1505,5 +1505,8 @@ export const de = {
   "account.delete": "Mein Konto löschen",
   "account.deleting": "Wird gelöscht…",
   "account.failed": "Das Konto konnte nicht gelöscht werden. Laden Sie die Seite neu und versuchen Sie es erneut.",
-  "account.ownerConflict": "Ein Händler hätte keinen Inhaber mehr. Wählen Sie „Diese Händler schließen“ oder fügen Sie zuerst einen weiteren Inhaber hinzu."
+  "account.ownerConflict": "Ein Händler hätte keinen Inhaber mehr. Wählen Sie „Diese Händler schließen“ oder fügen Sie zuerst einen weiteren Inhaber hinzu.",
+  "account.previewFailed": "Es konnte nicht geprüft werden, was das Löschen des Kontos bewirken würde.",
+  "account.deletedTitle": "Ihr Konto wurde gelöscht",
+  "account.deletedBody": "Alle Sitzungen sind beendet. Eine Bestätigung wurde an Ihre E-Mail gesendet. Ihr Konto beim Anmeldeanbieter besteht weiter; löschen Sie es dort, wenn Sie möchten."
 } satisfies Messages;

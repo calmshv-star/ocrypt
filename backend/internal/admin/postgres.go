@@ -791,15 +791,26 @@ func (r *PostgresRepository) SoleOwnedMerchants(ctx context.Context, principal P
 	return owned, classifyAdminDB(err)
 }
 
-// DeleteAccount runs the whole deletion in one serializable transaction.
-func (r *PostgresRepository) DeleteAccount(ctx context.Context, principal Principal, closeMerchants bool, at time.Time) (int, error) {
+// DeleteAccount runs the whole deletion in one serializable transaction,
+// retried on a serialization failure or deadlock (a session touched by
+// another tab, for example).
+func (r *PostgresRepository) DeleteAccount(ctx context.Context, principal Principal, closeMerchantIDs []string, at time.Time) (int, error) {
+	if closeMerchantIDs == nil {
+		closeMerchantIDs = []string{}
+	}
 	var closed int
-	err := pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{IsoLevel: pgx.Serializable}, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SELECT set_config('app.admin_user_id',$1,true)`, principal.UserID); err != nil {
-			return err
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		err = pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{IsoLevel: pgx.Serializable}, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, `SELECT set_config('app.admin_user_id',$1,true)`, principal.UserID); err != nil {
+				return err
+			}
+			return tx.QueryRow(ctx, `SELECT delete_current_admin_account($1::uuid[],$2)`, closeMerchantIDs, at).Scan(&closed)
+		})
+		if !retryableAdminTransaction(err) {
+			break
 		}
-		return tx.QueryRow(ctx, `SELECT delete_current_admin_account($1,$2)`, closeMerchants, at).Scan(&closed)
-	})
+	}
 	return closed, classifyAdminDB(err)
 }
 
@@ -1882,6 +1893,8 @@ func classifyAdminDB(err error) error {
 			return ErrSoleOwner
 		case "OCP06":
 			return ErrPlatformOperator
+		case "OCP07":
+			return ErrSignupUnderReview
 		}
 	}
 	return fmt.Errorf("admin persistence operation failed: %w", err)

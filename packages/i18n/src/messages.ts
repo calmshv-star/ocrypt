@@ -1503,7 +1503,10 @@ export const en = {
   "account.delete": "Delete my account",
   "account.deleting": "Deleting…",
   "account.failed": "The account could not be deleted. Refresh the page and try again.",
-  "account.ownerConflict": "A merchant would be left without an owner. Tick “Close these merchants” or add another owner first."
+  "account.ownerConflict": "A merchant would be left without an owner. Tick “Close these merchants” or add another owner first.",
+  "account.previewFailed": "Could not check what deleting the account would do.",
+  "account.deletedTitle": "Your account was deleted",
+  "account.deletedBody": "Every session has ended. A confirmation went to your email. Your account at the sign-in provider still exists; delete it there if you wish."
 } as const;
 
 export type MessageKey = keyof typeof en;

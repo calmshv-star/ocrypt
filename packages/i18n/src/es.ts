@@ -1505,5 +1505,8 @@ export const es = {
   "account.delete": "Eliminar mi cuenta",
   "account.deleting": "Eliminando…",
   "account.failed": "No se pudo eliminar la cuenta. Actualice la página e inténtelo de nuevo.",
-  "account.ownerConflict": "Un comercio se quedaría sin propietario. Marque «Cerrar estos comercios» o añada antes otro propietario."
+  "account.ownerConflict": "Un comercio se quedaría sin propietario. Marque «Cerrar estos comercios» o añada antes otro propietario.",
+  "account.previewFailed": "No se pudo comprobar qué haría la eliminación de la cuenta.",
+  "account.deletedTitle": "Su cuenta se ha eliminado",
+  "account.deletedBody": "Todas las sesiones han terminado. Se envió una confirmación a su correo. Su cuenta en el proveedor de acceso sigue existiendo; elimínela allí si lo desea."
 } satisfies Messages;

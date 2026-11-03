@@ -52,12 +52,12 @@ export class AdminClient {
     const response=await this.fetcher(`${this.origin}/admin/v1/auth/account-links`,{method:"GET",headers:new Headers({Accept:"application/json"}),credentials:"include",redirect:"error",cache:"no-store",signal}).catch(()=>null);
     const value:unknown=response?.ok?await response.json().catch(()=>null):null;
     const links=(typeof value==="object"&&value!==null?value:{}) as {account_url?:unknown;recovery_url?:unknown};
-    const https=(link:unknown)=>typeof link==="string"&&/^https:\/\/[^\s@]+$/.test(link)?link:undefined;
+    const https=(link:unknown)=>{if(typeof link!=="string")return undefined;try{const url=new URL(link);return url.protocol==="https:"&&!url.username&&!url.password&&!url.hash?url.toString():undefined}catch{return undefined}};
     return {accountURL:https(links.account_url),recoveryURL:https(links.recovery_url)};
   }
   accountExport(signal?:AbortSignal){return this.request<Record<string,unknown>>("/admin/v1/account/export",{signal})}
   accountDeletion(signal?:AbortSignal){return this.request<AccountDeletion>("/admin/v1/account/deletion",{signal})}
-  deleteAccount(confirmEmail:string,closeMerchants:boolean){return this.request<{closed_merchants:number}>("/admin/v1/account/delete",{method:"POST",body:{confirm_email:confirmEmail,close_merchants:closeMerchants}})}
+  deleteAccount(confirmEmail:string,closeMerchantIDs:string[]){return this.request<{closed_merchants:number}>("/admin/v1/account/delete",{method:"POST",body:{confirm_email:confirmEmail,close_merchant_ids:closeMerchantIDs}})}
   async beginSignup(form:SignupForm):Promise<string>{
     const response=await this.fetcher(`${this.origin}/admin/v1/auth/signup`,{method:"POST",headers:new Headers({Accept:"application/json","Content-Type":"application/json"}),body:JSON.stringify(form),credentials:"include",redirect:"error",cache:"no-store"});
     const value:unknown=await response.json().catch(()=>null);

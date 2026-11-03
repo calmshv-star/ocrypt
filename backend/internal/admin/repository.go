@@ -43,7 +43,7 @@ type AuthRepository interface {
 	SyncEmail(ctx context.Context, principal Principal, email string, at time.Time) (bool, error)
 	AccountExport(ctx context.Context, principal Principal) (json.RawMessage, error)
 	SoleOwnedMerchants(ctx context.Context, principal Principal) ([]OwnedMerchant, error)
-	DeleteAccount(ctx context.Context, principal Principal, closeMerchants bool, at time.Time) (int, error)
+	DeleteAccount(ctx context.Context, principal Principal, closeMerchantIDs []string, at time.Time) (int, error)
 	SubmitGoLive(ctx context.Context, principal Principal, scope Scope, requestID, preset string, addresses []GoLiveProvenAddress, at time.Time) error
 	PrepareGoLiveWallets(context.Context, Principal, string, time.Time) ([]GoLivePreparedWallet, error)
 	ListGoLiveReviews(context.Context, Principal, int) ([]GoLiveReview, error)

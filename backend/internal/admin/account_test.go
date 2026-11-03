@@ -54,7 +54,7 @@ func TestAccountExportIsADownload(t *testing.T) {
 
 func TestAccountDeletionNeedsTheEmailAndConsentToCloseMerchants(t *testing.T) {
 	handler, repo, _, raw, csrf := accountFixture(t)
-	repo.soleOwned = []OwnedMerchant{{TenantID: "t", MerchantID: "m", DisplayName: "Shop"}}
+	repo.soleOwned = []OwnedMerchant{{TenantID: "t", MerchantID: "018f22b0-4db4-7c58-8f18-4d2f9d7b6a51", DisplayName: "Shop"}}
 	call := func(method, path, body string) *httptest.ResponseRecorder {
 		var request *http.Request
 		if method == http.MethodGet {
@@ -70,13 +70,16 @@ func TestAccountDeletionNeedsTheEmailAndConsentToCloseMerchants(t *testing.T) {
 	if response := call(http.MethodGet, "/admin/v1/account/deletion", ""); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"display_name":"Shop"`) {
 		t.Fatalf("preview: %d %s", response.Code, response.Body.String())
 	}
-	if response := call(http.MethodPost, "/admin/v1/account/delete", `{"confirm_email":"someone@else.example","close_merchants":true}`); response.Code != http.StatusBadRequest || repo.deleted {
+	if response := call(http.MethodPost, "/admin/v1/account/delete", `{"confirm_email":"someone@else.example","close_merchant_ids":["018f22b0-4db4-7c58-8f18-4d2f9d7b6a51"]}`); response.Code != http.StatusBadRequest || repo.deleted {
 		t.Fatalf("the user's own email confirms: %d", response.Code)
 	}
-	if response := call(http.MethodPost, "/admin/v1/account/delete", `{"confirm_email":" Owner@Shop.example ","close_merchants":false}`); response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"owner_of_merchants"`) {
+	if response := call(http.MethodPost, "/admin/v1/account/delete", `{"confirm_email":"owner@shop.example","close_merchant_ids":["not-a-merchant"]}`); response.Code != http.StatusBadRequest {
+		t.Fatalf("merchant ids are validated: %d", response.Code)
+	}
+	if response := call(http.MethodPost, "/admin/v1/account/delete", `{"confirm_email":" Owner@Shop.example ","close_merchant_ids":[]}`); response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"owner_of_merchants"`) {
 		t.Fatalf("owned merchants need consent: %d %s", response.Code, response.Body.String())
 	}
-	response := call(http.MethodPost, "/admin/v1/account/delete", `{"confirm_email":"owner@shop.example","close_merchants":true}`)
+	response := call(http.MethodPost, "/admin/v1/account/delete", `{"confirm_email":"owner@shop.example","close_merchant_ids":["018f22b0-4db4-7c58-8f18-4d2f9d7b6a51"]}`)
 	if response.Code != http.StatusOK || !repo.deleted || !strings.Contains(response.Body.String(), `"closed_merchants":1`) {
 		t.Fatalf("delete: %d %s", response.Code, response.Body.String())
 	}
@@ -91,11 +94,26 @@ func TestAccountDeletionNeedsTheEmailAndConsentToCloseMerchants(t *testing.T) {
 	}
 }
 
-func TestPlatformOperatorsCannotDeleteThemselves(t *testing.T) {
+func TestPlatformOperatorsAndHeldRegistrantsCannotDeleteThemselves(t *testing.T) {
 	_, repo, service, _, _ := accountFixture(t)
 	principal := PrincipalFor(Identity{UserID: repo.identity.UserID, Email: "ops@platform.example", Bindings: []Binding{{Role: RoleSecurityAdmin, Permissions: map[Permission]bool{PermissionAuditRead: true}}}}, repo.session)
-	if _, err := service.DeleteAccount(t.Context(), AuthResult{Principal: principal}, AccountDeletionInput{ConfirmEmail: "ops@platform.example"}); !errors.Is(err, ErrPlatformOperator) || problemCode(err) != "platform_operator" || statusFor(err) != http.StatusConflict {
+	if _, err := service.DeleteAccount(t.Context(), AuthResult{Principal: principal, Session: repo.session}, AccountDeletionInput{ConfirmEmail: "ops@platform.example"}); !errors.Is(err, ErrPlatformOperator) || problemCode(err) != "platform_operator" || statusFor(err) != http.StatusConflict {
 		t.Fatalf("%v", err)
+	}
+	held := PrincipalFor(Identity{UserID: repo.identity.UserID, Email: "held@shop.example", SignupReview: "pending"}, repo.session)
+	if _, err := service.DeleteAccount(t.Context(), AuthResult{Principal: held, Session: repo.session}, AccountDeletionInput{ConfirmEmail: "held@shop.example"}); !errors.Is(err, ErrSignupUnderReview) || problemCode(err) != "signup_under_review" {
+		t.Fatalf("a held signup is decided first: %v", err)
+	}
+}
+
+func TestDeletionNeedsARecentSignInNotJustAnOpenSession(t *testing.T) {
+	handler, repo, _, raw, csrf := accountFixture(t)
+	old := time.Now().UTC().Add(-time.Hour)
+	repo.session.StepUpUntil = &old
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, mutationRequest(http.MethodPost, "/admin/v1/account/delete", `{"confirm_email":"owner@shop.example","close_merchant_ids":[]}`, raw, csrf))
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"step_up_required"`) || repo.deleted {
+		t.Fatalf("a months-old session must sign in again first: %d %s", response.Code, response.Body.String())
 	}
 }
 
@@ -111,6 +129,13 @@ func TestEmailChangedAtTheProviderIsTakenOver(t *testing.T) {
 	if repo.syncedEmail != "" {
 		t.Fatal("an unchanged email is not written")
 	}
+	service.config.FollowProviderEmail = false
+	repo.syncedEmail = ""
+	service.syncEmail(t.Context(), &identity, repo.session, "fourth@shop.example")
+	if repo.syncedEmail != "" {
+		t.Fatal("with following off the stored email stays")
+	}
+	service.config.FollowProviderEmail = true
 	repo.syncErr = errors.New("database unavailable")
 	before := identity.Email
 	service.syncEmail(t.Context(), &identity, repo.session, "third@shop.example")

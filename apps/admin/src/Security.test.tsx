@@ -106,8 +106,8 @@ describe("account", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Close these merchants" }));
     expect(remove).toBeEnabled();
     fireEvent.click(remove);
-    await waitFor(() => expect(live.deleteAccount).toHaveBeenCalledWith("Member@Shop.example", true));
-    await waitFor(() => expect(assign).toHaveBeenCalledWith("/"));
+    await waitFor(() => expect(live.deleteAccount).toHaveBeenCalledWith("Member@Shop.example", ["m"]));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("/#/account-deleted"));
     vi.unstubAllGlobals();
   });
 
@@ -121,6 +121,16 @@ describe("account", () => {
     render(wrap(<MemoryRouter initialEntries={["/security"]}><App client={client({ accountDeletion: vi.fn().mockResolvedValue({ sole_owned_merchants: [], platform_operator: true }) })} preview={false} /></MemoryRouter>));
     expect(await screen.findByText("Platform operators are removed by another operator.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete my account" })).not.toBeInTheDocument();
+  });
+
+  it("confirms a deleted account and retries a failed preview", async () => {
+    const view = render(wrap(<MemoryRouter initialEntries={["/account-deleted"]}><App client={client()} preview={false} /></MemoryRouter>));
+    expect(await screen.findByRole("heading", { name: "Your account was deleted" })).toBeInTheDocument();
+    view.unmount();
+    const preview = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue({ sole_owned_merchants: [], platform_operator: false });
+    render(wrap(<MemoryRouter initialEntries={["/security"]}><App client={client({ accountDeletion: preview })} preview={false} /></MemoryRouter>));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("button", { name: "Delete my account" })).toBeInTheDocument();
   });
 
   it("offers password recovery on the sign-in screen", async () => {

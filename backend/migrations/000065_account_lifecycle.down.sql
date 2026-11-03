@@ -1,6 +1,6 @@
 BEGIN;
 
-DROP FUNCTION IF EXISTS delete_current_admin_account(boolean,timestamptz);
+DROP FUNCTION IF EXISTS delete_current_admin_account(uuid[],timestamptz);
 DROP FUNCTION IF EXISTS current_admin_account_export();
 DROP FUNCTION IF EXISTS current_admin_sole_owned_merchants();
 DROP FUNCTION IF EXISTS sync_current_admin_email(text,timestamptz);
@@ -47,7 +47,7 @@ BEGIN
   END LOOP;
 END $$;
 
-DELETE FROM notification_jobs WHERE event='email_changed';
+DELETE FROM notification_jobs WHERE event IN ('email_changed','account_deleted');
 ALTER TABLE notification_jobs DROP CONSTRAINT notification_jobs_recipient_check;
 ALTER TABLE notification_jobs DROP CONSTRAINT notification_jobs_check;
 ALTER TABLE notification_jobs ADD CONSTRAINT notification_jobs_check CHECK ((event = 'sign_in') = (merchant_id IS NULL));

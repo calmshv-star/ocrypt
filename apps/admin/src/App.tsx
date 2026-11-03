@@ -84,6 +84,14 @@ function SignInFailedScreen({ reason }: { reason: string | null }) {
   return <main className="admin-access"><div className="admin-access__controls"><Select aria-label={t("common.locale")} onChange={(event) => setLocale(event.target.value as typeof locale)} value={locale}>{locales.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}</Select><ThemeToggle label={t("common.theme")} /></div><section role="alert"><div className="admin-access__brand"><span aria-hidden="true" className="mp-brand__mark"><span/><span/></span><strong>{PRODUCT_NAME}</strong></div><div className="admin-access__content"><span aria-hidden="true" className="admin-access__shield"><ShieldCheck size={24}/></span><div><h1>{t("admin.signInFailedTitle")}</h1><p>{t(`admin.signInFailed.${known}` as MessageKey)}</p></div></div>{client && <a className="mp-button mp-button--primary mp-button--md" href={client.loginURL("/")}>{t("common.signIn")}</a>}{sessionState === "ready" && <a className="admin-signup__signin" href="#/overview">{t("admin.signInFailed.back")}</a>}</section></main>;
 }
 
+// Where a deleted account lands: the session is gone, so this is a plain
+// confirmation with a way to sign in again.
+function AccountDeletedScreen() {
+  const { t } = useI18n();
+  const { client } = useAdmin();
+  return <main className="admin-access"><section role="status"><div className="admin-access__brand"><span aria-hidden="true" className="mp-brand__mark"><span/><span/></span><strong>{PRODUCT_NAME}</strong></div><div className="admin-access__content"><span aria-hidden="true" className="admin-access__shield"><ShieldCheck size={24}/></span><div><h1>{t("account.deletedTitle")}</h1><p>{t("account.deletedBody")}</p></div></div>{client && <a className="mp-button mp-button--secondary mp-button--md" href={client.loginURL("/")}>{t("common.signIn")}</a>}</section></main>;
+}
+
 function AccessScreen({ state }: { state: "loading" | "unauthenticated" | "error" | "scope" | "review" | "rejected" }) {
   const { locale, locales, localeNames, setLocale, t } = useI18n();
   const { client, signOut } = useAdmin();
@@ -215,6 +223,7 @@ function AdminApplication() {
 
   if (!admin.preview && location.pathname === "/signup" && admin.client) return <SignupPage client={admin.client} locale={locale} />;
   if (!admin.preview && location.pathname === "/sign-in-failed") return <SignInFailedScreen reason={new URLSearchParams(location.search).get("reason")} />;
+  if (!admin.preview && location.pathname === "/account-deleted") return <AccountDeletedScreen />;
   if (!admin.preview && location.pathname === "/invite") return <Suspense fallback={<div aria-busy="true" className="admin-route-loading"><span /><span /><span /></div>}><InvitationAcceptPage /></Suspense>;
   if (admin.sessionState === "loading") return <AccessScreen state="loading" />;
   if (admin.sessionState === "unauthenticated") return <AccessScreen state="unauthenticated" />;

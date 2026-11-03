@@ -25,15 +25,18 @@ Behaviour:
 1. Recovery: `ADMIN_IDP_RECOVERY_URL` and `ADMIN_IDP_ACCOUNT_URL` (https)
    are served publicly (`GET /admin/v1/auth/account-links`); the sign-in
    screen links to recovery, the Security page to the provider account.
-2. Email change: a login with a different verified email for the same
-   issuer and subject succeeds; the user and member emails change in one
-   transaction, it is audited, and the old address gets a notice with the
-   new one masked. A failed sync keeps the old emails consistent and retries
-   at the next login.
+2. Email change: a login (or invitation, or returning signup) with a
+   different verified email for the same issuer and subject succeeds; the
+   user and member emails change in one transaction, it is audited, and the
+   old address (and linked Telegram) gets a notice with the new one masked,
+   at most three a day. Disposable or listed domains are refused and audited.
+   `ADMIN_FOLLOW_IDP_EMAIL=false` keeps the strict behaviour. A failed sync
+   keeps the old emails consistent and retries at the next login.
 3. Export: `GET /admin/v1/account/export` downloads a JSON document with the
    profile, memberships, role bindings, the latest 500 sessions,
    notification settings and the latest 1000 audit events by the user.
-4. Deletion: `POST /admin/v1/account/delete` (MFA session, own email typed)
+4. Deletion: `POST /admin/v1/account/delete` (sign-in or step-up within the
+   step-up window, own email typed, the exact merchant ids to close)
    ends all sessions and access, deletes notification data, pseudonymises
    the user, memberships and sessions, frees the provider identity, and
    audits it. Merchants the user alone owns are closed only with consent

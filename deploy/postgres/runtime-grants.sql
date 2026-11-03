@@ -140,7 +140,7 @@ GRANT EXECUTE ON FUNCTION
   sync_current_admin_email(text,timestamptz),
   current_admin_sole_owned_merchants(),
   current_admin_account_export(),
-  delete_current_admin_account(boolean,timestamptz)
+  delete_current_admin_account(uuid[],timestamptz)
 TO merchant_admin_runtime;
 GRANT SELECT ON signup_business_types,signup_blocked_countries TO merchant_admin_runtime;
 GRANT INSERT ON payment_intent_versions,callback_events,callback_deliveries TO merchant_api_runtime;

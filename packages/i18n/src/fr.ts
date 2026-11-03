@@ -1505,5 +1505,8 @@ export const fr = {
   "account.delete": "Supprimer mon compte",
   "account.deleting": "Suppression…",
   "account.failed": "Impossible de supprimer le compte. Actualisez la page et réessayez.",
-  "account.ownerConflict": "Un marchand resterait sans propriétaire. Cochez « Fermer ces marchands » ou ajoutez d'abord un autre propriétaire."
+  "account.ownerConflict": "Un marchand resterait sans propriétaire. Cochez « Fermer ces marchands » ou ajoutez d'abord un autre propriétaire.",
+  "account.previewFailed": "Impossible de vérifier ce que la suppression du compte entraînerait.",
+  "account.deletedTitle": "Votre compte a été supprimé",
+  "account.deletedBody": "Toutes les sessions sont terminées. Une confirmation a été envoyée à votre e-mail. Votre compte chez le fournisseur de connexion existe toujours ; supprimez-le là-bas si vous le souhaitez."
 } satisfies Messages;

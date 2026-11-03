@@ -39,9 +39,9 @@ export function AccountSection() {
     setDeleting(true);
     setOutcome(null);
     try {
-      await admin.client.deleteAccount(confirm.trim(), closeMerchants);
+      await admin.client.deleteAccount(confirm.trim(), closeMerchants ? owned.map((merchant) => merchant.merchant_id) : []);
       cache.clear();
-      window.location.assign("/");
+      window.location.assign("/#/account-deleted");
     } catch (error) {
       const code = error instanceof AdminAPIError ? error.code : "";
       setOutcome(code === "step_up_required" ? "stepUp" : code === "owner_of_merchants" ? "ownerConflict" : "failed");
@@ -60,6 +60,8 @@ export function AccountSection() {
       {exporting === "failed" && <p className="security__outcome" role="alert">{t("account.exportFailed")}</p>}
     </SectionCard>
     <SectionCard description={t("account.deleteBody")} title={t("account.deleteTitle")}>
+      {deletion.isLoading && <div aria-busy="true" className="admin-route-loading"><span /><span /><span /></div>}
+      {deletion.error && <p className="admin-live-state" role="alert">{t("account.previewFailed")} <Button onClick={() => void deletion.refetch()} variant="secondary">{t("common.retry")}</Button></p>}
       {deletion.data?.platform_operator && <p className="admin-live-state">{t("account.operator")}</p>}
       {deletion.data && !deletion.data.platform_operator && <div className="account__delete">
         {owned.length > 0 && <>
@@ -67,7 +69,7 @@ export function AccountSection() {
           <ul>{owned.map((merchant) => <li key={merchant.merchant_id}>{merchant.display_name}</li>)}</ul>
           <label className="notifications__switch"><input checked={closeMerchants} onChange={() => setCloseMerchants(!closeMerchants)} type="checkbox" />{t("account.closeConfirm")}</label>
         </>}
-        <label>{t("account.confirmEmail")}<input autoComplete="off" onChange={(event) => setConfirm(event.target.value)} placeholder={email} spellCheck={false} type="email" value={confirm} /></label>
+        <label>{t("account.confirmEmail")}<input autoComplete="off" onChange={(event) => setConfirm(event.target.value)} spellCheck={false} type="email" value={confirm} /></label>
         <div className="go-live__submit"><Button disabled={!ready} onClick={() => void remove()} variant="danger"><Trash2 size={15} />{t(deleting ? "account.deleting" : "account.delete")}</Button></div>
         {outcome === "stepUp" && admin.client && <p role="alert">{t("signupReviews.stepUpBody")} <a href={admin.client.stepUpURL("/#/security")}>{t("signupReviews.stepUp")}</a></p>}
         {outcome === "ownerConflict" && <p role="alert">{t("account.ownerConflict")}</p>}

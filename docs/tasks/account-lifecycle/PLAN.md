@@ -8,9 +8,10 @@ Goal: REG-5: access recovery, email change and account deletion with data export
 - [x] Tests authored; expected failures inspected (route drift until the contract was written; S8 caught a fixture without granted_by and a wrong closed-merchant count).
 - [x] Dependencies, writer ownership, and common base assigned (single writer, `feat/stage2-account` on main).
 - [x] Implementation complete and focused checks pass.
-- [ ] Integrated diff independently reviewed; relevant checks repeated.
-- [ ] Completion evidence and remaining runtime/deployment limits recorded.
+- [x] Integrated diff independently reviewed; relevant checks repeated (findings and fixes in DECISIONS.md).
+- [x] Completion evidence and remaining runtime/deployment limits recorded (provider duties in the runbook; SPEC out of scope).
 
 ## Evidence
 
 - 2026-11-03: live `S8_account_lifecycle` on fresh `ocrypt_fault_test_20261103_62` (65 migrations and grants); `000065` up, down, up; `go test ./internal/admin/ ./internal/notifications/`; admin `Security.test.tsx` 10/10.
+- 2026-11-03, after review fixes: live `S8` on fresh `ocrypt_fault_test_20261103_69` (refused disposable domain, exact consent, disabled co-owner, deletion notice, surviving security notice, held signup); `go test ./internal/admin/ ./internal/notifications/`; admin `Security.test.tsx` 11/11.
