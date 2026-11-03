@@ -23,7 +23,8 @@ Behaviour:
 
 1. `GET /admin/v1/session/sessions` returns the user's active sessions (not
    revoked, idle and absolute expiry in the future), newest activity first,
-   at most 50, with `current` marking the calling session.
+   at most 50, with `current` marking the calling session. `expires_at` is
+   the absolute expiry, the latest moment the session can last.
 2. `POST /admin/v1/session/sessions/{id}/revoke` ends one of the user's other
    sessions. The current session, a malformed id, another user's session and
    an already ended one are refused (400 / 404). Audited as
@@ -54,6 +55,12 @@ Behaviour:
 | Cabinet list, current badge, end one, end others, failure, no others | `apps/admin/src/Security.test.tsx` |
 
 ## Out of scope
+
+- Ending the identity-provider session. A browser that is still signed in at
+  the IdP can start a new cabinet session without credentials; the page says
+  so and tells the user to sign out and change factors at the provider.
+  Forcing `max_age`/`auth_time` freshness on every login is a separate
+  decision for the operator's IdP (Dex does not enforce it).
 
 - Enrolling or removing passkeys and second factors (identity provider).
 - Notifications about a new sign-in (notifications task).

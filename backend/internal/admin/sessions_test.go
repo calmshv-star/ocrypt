@@ -9,11 +9,14 @@ import (
 
 func TestDeviceLabelKeepsOnlyBrowserAndSystem(t *testing.T) {
 	for ua, want := range map[string]string{
-		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36":                   "Chrome/macOS",
-		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0":           "Edge/Windows",
-		"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1": "Safari/iOS",
-		"Mozilla/5.0 (Android 15; Mobile; rv:132.0) Gecko/132.0 Firefox/132.0":                                                                    "Firefox/Android",
-		"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 OPR/115.0.0.0":                     "Opera/Linux",
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36":                          "Chrome/macOS",
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0":                  "Edge/Windows",
+		"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1":        "Safari/iOS",
+		"Mozilla/5.0 (Android 15; Mobile; rv:132.0) Gecko/132.0 Firefox/132.0":                                                                           "Firefox/Android",
+		"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 OPR/115.0.0.0":                            "Opera/Linux",
+		"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/130.0.6723.90 Mobile/15E148 Safari/604.1": "Chrome/iOS",
+		"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/132.0 Mobile/15E148 Safari/605.1.15":      "Firefox/iOS",
+		"Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36":                                 "Chrome/ChromeOS",
 		"curl/8.7.1": "Other/",
 		"":           "",
 	} {
@@ -52,7 +55,7 @@ func TestUsersSeeAndEndOnlyTheirOwnSessions(t *testing.T) {
 	if response := post("/admin/v1/session/sessions/" + other + "/revoke"); response.Code != http.StatusNoContent || repo.revokedSession != other || repo.revokedFor != repo.session.UserID {
 		t.Fatalf("revoke: %d %q %q", response.Code, repo.revokedSession, repo.revokedFor)
 	}
-	if !strings.Contains(repo.audit.Action, "admin.session.revoked") {
+	if repo.audit.Action != "admin.session.revoked" || repo.audit.ResourceID != other || repo.audit.ActorUserID != repo.session.UserID {
 		t.Fatalf("revocation must be audited: %+v", repo.audit)
 	}
 	repo.revokeErr = ErrNotFound
@@ -62,5 +65,8 @@ func TestUsersSeeAndEndOnlyTheirOwnSessions(t *testing.T) {
 	repo.revokeErr = nil
 	if response := post("/admin/v1/session/sessions/revoke-others"); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"revoked":1`) || repo.keptSession != repo.session.ID {
 		t.Fatalf("revoke others: %d %s", response.Code, response.Body.String())
+	}
+	if repo.audit.Action != "admin.session.revoked_others" || repo.audit.ActorUserID != repo.session.UserID {
+		t.Fatalf("revoking the others must be audited: %+v", repo.audit)
 	}
 }

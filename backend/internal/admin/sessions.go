@@ -30,13 +30,13 @@ func deviceLabel(userAgent string) string {
 	}
 	browser := "Other"
 	switch {
-	case strings.Contains(userAgent, "Edg/"):
+	case strings.Contains(userAgent, "Edg/"), strings.Contains(userAgent, "EdgiOS/"), strings.Contains(userAgent, "EdgA/"):
 		browser = "Edge"
-	case strings.Contains(userAgent, "OPR/"):
+	case strings.Contains(userAgent, "OPR/"), strings.Contains(userAgent, "OPiOS/"):
 		browser = "Opera"
-	case strings.Contains(userAgent, "Firefox/"):
+	case strings.Contains(userAgent, "Firefox/"), strings.Contains(userAgent, "FxiOS/"):
 		browser = "Firefox"
-	case strings.Contains(userAgent, "Chrome/"):
+	case strings.Contains(userAgent, "Chrome/"), strings.Contains(userAgent, "CriOS/"):
 		browser = "Chrome"
 	case strings.Contains(userAgent, "Safari/") && strings.Contains(userAgent, "Version/"):
 		browser = "Safari"
@@ -49,6 +49,8 @@ func deviceLabel(userAgent string) string {
 		system = "Android"
 	case strings.Contains(userAgent, "Windows"):
 		system = "Windows"
+	case strings.Contains(userAgent, "CrOS"):
+		system = "ChromeOS"
 	case strings.Contains(userAgent, "Mac OS X"), strings.Contains(userAgent, "Macintosh"):
 		system = "macOS"
 	case strings.Contains(userAgent, "Linux"):
@@ -80,19 +82,11 @@ func (s *Service) RevokeMySession(ctx context.Context, authenticated AuthResult,
 		return ErrInvalid
 	}
 	now := s.now()
-	if err := s.repository.RevokeUserSession(ctx, authenticated.Principal.UserID, sessionID, "revoked_by_user", now); err != nil {
-		return err
-	}
-	return s.repository.AppendAudit(ctx, AuditEntry{ActorUserID: authenticated.Principal.UserID, SessionID: authenticated.Session.ID, Action: "admin.session.revoked", ResourceType: "admin_session", ResourceID: sessionID, RequestID: authenticated.Session.ID, Reason: "revoked by its user", Details: json.RawMessage(`{}`), OccurredAt: now})
+	return s.repository.RevokeUserSession(ctx, authenticated.Principal.UserID, sessionID, "revoked_by_user", now, AuditEntry{ActorUserID: authenticated.Principal.UserID, SessionID: authenticated.Session.ID, Action: "admin.session.revoked", ResourceType: "admin_session", ResourceID: sessionID, RequestID: authenticated.Session.ID, Reason: "revoked by its user", Details: json.RawMessage(`{}`), OccurredAt: now})
 }
 
 // RevokeOtherSessions ends every session of the user but the current one.
 func (s *Service) RevokeOtherSessions(ctx context.Context, authenticated AuthResult) (int64, error) {
 	now := s.now()
-	count, err := s.repository.RevokeOtherSessions(ctx, authenticated.Principal.UserID, authenticated.Session.ID, "revoked_by_user", now)
-	if err != nil || count == 0 {
-		return count, err
-	}
-	details, _ := json.Marshal(map[string]int64{"revoked": count})
-	return count, s.repository.AppendAudit(ctx, AuditEntry{ActorUserID: authenticated.Principal.UserID, SessionID: authenticated.Session.ID, Action: "admin.session.revoked_others", ResourceType: "admin_session", ResourceID: authenticated.Session.ID, RequestID: authenticated.Session.ID, Reason: "other sessions revoked by their user", Details: details, OccurredAt: now})
+	return s.repository.RevokeOtherSessions(ctx, authenticated.Principal.UserID, authenticated.Session.ID, "revoked_by_user", now, AuditEntry{ActorUserID: authenticated.Principal.UserID, SessionID: authenticated.Session.ID, Action: "admin.session.revoked_others", ResourceType: "admin_session", ResourceID: authenticated.Session.ID, RequestID: authenticated.Session.ID, Reason: "other sessions revoked by their user", OccurredAt: now})
 }

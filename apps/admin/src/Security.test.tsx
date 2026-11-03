@@ -5,7 +5,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import type { AdminClient } from "./api/client";
+import { AdminAPIError, type AdminClient } from "./api/client";
 import type { AdminPrincipal, SessionSummary } from "./api/types";
 import { deviceName, signInMethods } from "./security";
 
@@ -43,20 +43,27 @@ describe("security settings", () => {
     expect(screen.getByText("Password")).toBeInTheDocument();
     expect(screen.getByText("Authenticator app code")).toBeInTheDocument();
     // Only the other session can be ended here; this one ends by signing out.
-    expect(screen.getAllByRole("button", { name: "End session" })).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "End session" }));
+    expect(screen.getAllByRole("button", { name: /^End session/ })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "End session: Chrome · macOS" }));
     await waitFor(() => expect(live.revokeSession).toHaveBeenCalledWith(laptop.id));
     expect(await screen.findByText("The session has ended.")).toBeInTheDocument();
     expect(live.mySessions).toHaveBeenCalledTimes(2);
   });
 
   it("signs out everywhere else and reports a failure plainly", async () => {
-    const live = client({ revokeSession: vi.fn().mockRejectedValue(new Error("gone")) });
+    const live = client({ revokeSession: vi.fn().mockRejectedValue(new Error("network")) });
     render(wrap(<MemoryRouter initialEntries={["/security"]}><App client={live} preview={false} /></MemoryRouter>));
     fireEvent.click(await screen.findByRole("button", { name: "Sign out everywhere else" }));
     expect(await screen.findByText("Other sessions ended: 1.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "End session" }));
+    fireEvent.click(screen.getByRole("button", { name: "End session: Chrome · macOS" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The session could not be ended.");
+  });
+
+  it("treats a session already ended elsewhere as ended", async () => {
+    const live = client({ revokeSession: vi.fn().mockRejectedValue(new AdminAPIError(404, "not_found", "Not found")) });
+    render(wrap(<MemoryRouter initialEntries={["/security"]}><App client={live} preview={false} /></MemoryRouter>));
+    fireEvent.click(await screen.findByRole("button", { name: "End session: Chrome · macOS" }));
+    expect(await screen.findByText("The session has ended.")).toBeInTheDocument();
   });
 
   it("shows when there is no other session", async () => {

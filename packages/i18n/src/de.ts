@@ -1443,5 +1443,6 @@ export const de = {
   "security.ended": "Die Sitzung wurde beendet.",
   "security.endedOthers": "Andere Sitzungen beendet: {count}.",
   "security.noOthers": "Sie sind nirgendwo sonst angemeldet.",
-  "security.failed": "Die Sitzung konnte nicht beendet werden. Aktualisieren Sie die Liste und versuchen Sie es erneut."
+  "security.failed": "Die Sitzung konnte nicht beendet werden. Aktualisieren Sie die Liste und versuchen Sie es erneut.",
+  "security.idpSignOut": "Das Beenden einer Sitzung meldet diesen Browser bei Ocrypt ab. Ein Browser, der bei Ihrem Anmeldeanbieter noch angemeldet ist, kann sich erneut anmelden. Wenn Sie vermuten, dass jemand Ihr Passwort oder Ihren zweiten Faktor kennt, melden Sie sich auch dort überall ab und ändern Sie beides."
 } satisfies Messages;

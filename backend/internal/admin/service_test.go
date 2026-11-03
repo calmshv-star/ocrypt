@@ -243,15 +243,15 @@ func (r *repositoryStub) LabelSession(context.Context, string, string) error { r
 func (r *repositoryStub) ListUserSessions(context.Context, string, time.Time) ([]SessionSummary, error) {
 	return append([]SessionSummary(nil), r.userSessions...), nil
 }
-func (r *repositoryStub) RevokeUserSession(_ context.Context, userID, sessionID, _ string, _ time.Time) error {
+func (r *repositoryStub) RevokeUserSession(_ context.Context, userID, sessionID, _ string, _ time.Time, audit AuditEntry) error {
 	if r.revokeErr != nil {
 		return r.revokeErr
 	}
-	r.revokedFor, r.revokedSession = userID, sessionID
+	r.revokedFor, r.revokedSession, r.audit = userID, sessionID, audit
 	return nil
 }
-func (r *repositoryStub) RevokeOtherSessions(_ context.Context, _ string, keep, _ string, _ time.Time) (int64, error) {
-	r.keptSession = keep
+func (r *repositoryStub) RevokeOtherSessions(_ context.Context, _ string, keep, _ string, _ time.Time, audit AuditEntry) (int64, error) {
+	r.keptSession, r.audit = keep, audit
 	return 1, nil
 }
 func (r *repositoryStub) Ping(context.Context) error { return nil }

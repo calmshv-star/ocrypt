@@ -1443,5 +1443,6 @@ export const zhCN = {
   "security.ended": "会话已结束。",
   "security.endedOthers": "已结束的其他会话：{count}。",
   "security.noOthers": "您没有在其他地方登录。",
-  "security.failed": "无法结束会话。请刷新列表后重试。"
+  "security.failed": "无法结束会话。请刷新列表后重试。",
+  "security.idpSignOut": "结束会话会让该浏览器退出 Ocrypt。仍在您的登录提供方处保持登录的浏览器可以再次登录，因此如果您怀疑他人知道您的密码或第二因素，请同时在登录提供方处退出所有会话并更改它们。"
 } satisfies Messages;

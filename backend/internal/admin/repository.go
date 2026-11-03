@@ -30,8 +30,8 @@ type AuthRepository interface {
 	GoLiveState(context.Context, Principal, Scope) (GoLiveState, error)
 	LabelSession(ctx context.Context, sessionID, label string) error
 	ListUserSessions(ctx context.Context, userID string, now time.Time) ([]SessionSummary, error)
-	RevokeUserSession(ctx context.Context, userID, sessionID, reason string, now time.Time) error
-	RevokeOtherSessions(ctx context.Context, userID, keepSessionID, reason string, now time.Time) (int64, error)
+	RevokeUserSession(ctx context.Context, userID, sessionID, reason string, now time.Time, audit AuditEntry) error
+	RevokeOtherSessions(ctx context.Context, userID, keepSessionID, reason string, now time.Time, audit AuditEntry) (int64, error)
 	SubmitGoLive(ctx context.Context, principal Principal, scope Scope, requestID, preset string, addresses []GoLiveProvenAddress, at time.Time) error
 	PrepareGoLiveWallets(context.Context, Principal, string, time.Time) ([]GoLivePreparedWallet, error)
 	ListGoLiveReviews(context.Context, Principal, int) ([]GoLiveReview, error)

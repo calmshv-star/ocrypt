@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LockKeyhole, LogOut, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { useAdmin } from "./AdminProvider";
+import { AdminAPIError } from "./api/client";
 import type { SessionSummary } from "./api/types";
 import { deviceName, signInMethods } from "./security";
 
@@ -34,8 +35,9 @@ export function SecurityPage() {
     try {
       if (id === "others") setOutcome({ kind: "endedOthers", count: (await admin.client.revokeOtherSessions()).revoked });
       else { await admin.client.revokeSession(id); setOutcome({ kind: "ended" }); }
-    } catch {
-      setOutcome({ kind: "failed" });
+    } catch (error) {
+      // Already ended elsewhere (404) is the outcome the user wanted.
+      setOutcome({ kind: error instanceof AdminAPIError && error.status === 404 ? "ended" : "failed" });
     } finally {
       setBusy(null);
       await cache.invalidateQueries({ queryKey: SESSIONS_KEY });
@@ -56,9 +58,10 @@ export function SecurityPage() {
           <strong>{deviceName(session.device, t)}</strong>{session.current && <Badge tone="positive">{t("security.current")}</Badge>}
           <small>{t("security.signedIn", { time: when(session.created_at) })} · {t("security.lastSeen", { time: when(session.last_seen_at) })} · {t("security.expires", { time: when(session.expires_at) })}</small>
         </div>
-        {!session.current && <Button disabled={busy !== null} onClick={() => void end(session.id)} variant="secondary">{t("security.end")}</Button>}
+        {!session.current && <Button aria-label={`${t("security.end")}: ${deviceName(session.device, t)}`} disabled={busy !== null} onClick={() => void end(session.id)} variant="secondary">{t("security.end")}</Button>}
       </li>)}</ul>
       {sessions.isSuccess && others.length === 0 && <p className="security__outcome">{t("security.noOthers")}</p>}
+      <p className="go-live__note">{t("security.idpSignOut")}</p>
     </SectionCard>
   </div>;
 }

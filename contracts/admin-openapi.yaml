@@ -178,6 +178,7 @@ paths:
       description: Newest activity first, at most 50. The device is a coarse browser/system label taken at sign-in; the raw User-Agent is never stored.
       responses:
         '200': {description: Sessions, content: {application/json: {schema: {type: object, additionalProperties: false, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/SessionSummary'}}}}}}}
+        '401': {$ref: '#/components/responses/Problem'}
   /admin/v1/session/sessions/{id}/revoke:
     post:
       tags: [Authentication]
@@ -189,6 +190,8 @@ paths:
       responses:
         '204': {description: Session ended}
         '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
         '404': {$ref: '#/components/responses/Problem'}
   /admin/v1/session/sessions/revoke-others:
     post:
@@ -198,6 +201,8 @@ paths:
       security: [{sessionCookie: [], csrfHeader: []}]
       responses:
         '200': {description: Sessions ended, content: {application/json: {schema: {type: object, additionalProperties: false, required: [revoked], properties: {revoked: {type: integer, minimum: 0}}}}}}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
   /admin/v1/session/csrf:
     post:
       tags: [Authentication]

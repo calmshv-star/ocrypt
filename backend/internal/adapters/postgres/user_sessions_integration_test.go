@@ -32,6 +32,10 @@ func (f *faultDatabase) userSessions(t *testing.T) {
 		return id
 	}
 	current, laptop, phone, foreign := session(user, time.Minute), session(user, time.Hour), session(user, 30*time.Minute), session(stranger, time.Minute)
+	// An idle-expired session is history: never listed, never rewritten by a
+	// revocation. (Invitation enrolments are excluded by the same purpose
+	// filter the list uses.)
+	expired := session(user, 3*time.Hour)
 	if err := repository.LabelSession(f.ctx, laptop, "Chrome/macOS"); err != nil {
 		t.Fatal(err)
 	}
@@ -53,17 +57,31 @@ func (f *faultDatabase) userSessions(t *testing.T) {
 			t.Fatalf("the first label must stay: %q", s.Device)
 		}
 	}
-	if err := repository.RevokeUserSession(f.ctx, user, foreign, "revoked_by_user", now); !errors.Is(err, admin.ErrNotFound) {
-		t.Fatalf("ending another user's session must be not found: %v", err)
+	audit := func(action, resource string) admin.AuditEntry {
+		return admin.AuditEntry{ActorUserID: user, SessionID: current, Action: action, ResourceType: "admin_session", ResourceID: resource, RequestID: current, Reason: "revoked by its user", Details: []byte(`{}`), OccurredAt: now}
 	}
-	if err := repository.RevokeUserSession(f.ctx, user, phone, "revoked_by_user", now); err != nil {
+	for _, id := range []string{foreign, expired} {
+		if err := repository.RevokeUserSession(f.ctx, user, id, "revoked_by_user", now, audit("admin.session.revoked", id)); !errors.Is(err, admin.ErrNotFound) {
+			t.Fatalf("another user's or an expired session must be not found: %v", err)
+		}
+	}
+	if err := repository.RevokeUserSession(f.ctx, user, phone, "revoked_by_user", now, audit("admin.session.revoked", phone)); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.RevokeUserSession(f.ctx, user, phone, "revoked_by_user", now); !errors.Is(err, admin.ErrNotFound) {
+	if err := repository.RevokeUserSession(f.ctx, user, phone, "revoked_by_user", now, audit("admin.session.revoked", phone)); !errors.Is(err, admin.ErrNotFound) {
 		t.Fatalf("an ended session must be not found: %v", err)
 	}
-	if count, err := repository.RevokeOtherSessions(f.ctx, user, current, "revoked_by_user", now); err != nil || count != 1 {
-		t.Fatalf("revoke others: %d %v", count, err)
+	if n := f.count(t, `SELECT count(*) FROM admin_audit_log WHERE action='admin.session.revoked' AND resource_id=$1`, phone); n != 1 {
+		t.Fatalf("one audit entry per revocation, written with it: %d", n)
+	}
+	if count, err := repository.RevokeOtherSessions(f.ctx, user, current, "revoked_by_user", now, audit("admin.session.revoked_others", current)); err != nil || count != 1 {
+		t.Fatalf("revoke others counts only active sessions: %d %v", count, err)
+	}
+	if n := f.count(t, `SELECT count(*) FROM admin_audit_log WHERE action='admin.session.revoked_others' AND details->>'revoked'='1'`); n != 1 {
+		t.Fatalf("revoking the others is audited with the count: %d", n)
+	}
+	if n := f.count(t, `SELECT count(*) FROM admin_sessions WHERE id=$1 AND revoked_at IS NULL`, expired); n != 1 {
+		t.Fatal("an expired session must keep its history")
 	}
 	if sessions, _ := repository.ListUserSessions(f.ctx, user, now); len(sessions) != 1 || sessions[0].ID != current {
 		t.Fatalf("only the current session must remain: %+v", sessions)

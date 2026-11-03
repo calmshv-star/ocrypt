@@ -1443,5 +1443,6 @@ export const es = {
   "security.ended": "La sesión se ha cerrado.",
   "security.endedOthers": "Otras sesiones cerradas: {count}.",
   "security.noOthers": "No hay sesiones iniciadas en ningún otro sitio.",
-  "security.failed": "No se pudo cerrar la sesión. Actualice la lista e inténtelo de nuevo."
+  "security.failed": "No se pudo cerrar la sesión. Actualice la lista e inténtelo de nuevo.",
+  "security.idpSignOut": "Cerrar una sesión desconecta ese navegador de Ocrypt. Un navegador que siga conectado en su proveedor de acceso puede volver a entrar, así que si sospecha que alguien conoce su contraseña o segundo factor, cierre también todas las sesiones allí y cámbielos."
 } satisfies Messages;

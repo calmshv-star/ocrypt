@@ -1443,5 +1443,6 @@ export const fr = {
   "security.ended": "La session est fermée.",
   "security.endedOthers": "Autres sessions fermées : {count}.",
   "security.noOthers": "Vous n'êtes connecté nulle part ailleurs.",
-  "security.failed": "Impossible de fermer la session. Actualisez la liste et réessayez."
+  "security.failed": "Impossible de fermer la session. Actualisez la liste et réessayez.",
+  "security.idpSignOut": "Fermer une session déconnecte ce navigateur d'Ocrypt. Un navigateur encore connecté chez votre fournisseur de connexion peut se reconnecter : si vous pensez que quelqu'un connaît votre mot de passe ou votre second facteur, déconnectez-vous aussi partout là-bas et changez-les."
 } satisfies Messages;

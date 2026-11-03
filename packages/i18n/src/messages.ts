@@ -1441,7 +1441,8 @@ export const en = {
   "security.ended": "The session has ended.",
   "security.endedOthers": "Other sessions ended: {count}.",
   "security.noOthers": "You are not signed in anywhere else.",
-  "security.failed": "The session could not be ended. Refresh the list and try again."
+  "security.failed": "The session could not be ended. Refresh the list and try again.",
+  "security.idpSignOut": "Ending a session signs that browser out of Ocrypt. A browser still signed in at your sign-in provider can sign in again, so if you suspect someone knows your password or second factor, also sign out everywhere and change them there."
 } as const;
 
 export type MessageKey = keyof typeof en;
