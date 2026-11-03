@@ -49,9 +49,30 @@ neither read the lists nor replace them):
 ```sh
 python3 scripts/signup_screening_import.py ofac --sdn SDN.CSV --alt ALT.CSV | psql "$OWNER_DATABASE_URL"
 python3 scripts/signup_screening_import.py un --xml consolidated.xml | psql "$OWNER_DATABASE_URL"
-# Optional names or domains your compliance team blocks (header kind,value,reference):
+# Optional names, domains or crypto addresses your compliance team blocks
+# (header kind,value,reference; an address row is "address,TRX T…,case-9"):
 python3 scripts/signup_screening_import.py operator --csv operator.csv | psql "$OWNER_DATABASE_URL"
 ```
+
+### Crypto addresses (payer screening)
+
+The same runs load the list's crypto addresses ("Digital Currency Address -
+ETH 0x…" in the OFAC remarks; operator rows of kind `address`) through
+`replace_sanctioned_addresses`, in the same transaction as the names. Only
+the families the platform watches are kept: EVM (one 0x account on every EVM
+chain), TRON (base58check, verified, with its 20 bytes in hex) and Solana;
+Bitcoin, Monero and other chains are skipped.
+
+Every new transfer's sender is checked when the scanner records it. A hit is
+an alert for each merchant whose payment address received it (cabinet page
+"Sanctions alerts") and a notification to everyone who gets that merchant's
+notifications. The payment is not changed: the platform holds no funds and
+the merchant decides. A failing check logs `sanctions screening skipped for
+transfer` and never blocks the scanner; alert on that log line. A listed
+address cannot be submitted as a go-live receiving address.
+
+Transfers are screened against the list loaded when they arrive; a refresh
+does not re-screen earlier transfers.
 
 Each run replaces one source in one transaction. A replacement that would
 empty an official list, shrink it to less than half of what is loaded, or

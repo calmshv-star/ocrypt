@@ -1476,5 +1476,15 @@ export const zhCN = {
   "notifications.save": "保存",
   "notifications.saved": "已保存。",
   "notifications.failed": "保存失败。请刷新页面后重试。",
-  "notifications.linkFailed": "无法创建 Telegram 链接。请重试。"
+  "notifications.linkFailed": "无法创建 Telegram 链接。请重试。",
+  "sanctions.nav": "制裁警报",
+  "sanctions.eyebrow": "合规",
+  "sanctions.body": "发送到您地址、且来自官方制裁名单（OFAC、联合国或运营方名单）中地址的付款。",
+  "sanctions.empty": "没有来自受制裁地址的付款。",
+  "sanctions.listTitle": "警报：{count}",
+  "sanctions.guidance": "Ocrypt 不持有也不转移资金，也不会更改这些付款。在履行订单或退回资金前，请咨询您的合规或法律顾问。",
+  "sanctions.from": "来自",
+  "sanctions.to": "至",
+  "sanctions.transaction": "交易",
+  "notifications.sanctionedAlways": "来自受制裁地址的付款总会通知给所有接收此商户通知的人。"
 } satisfies Messages;

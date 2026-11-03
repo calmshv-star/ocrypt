@@ -35,6 +35,10 @@ func TestRenderNamesTheEventInTheUsersLanguage(t *testing.T) {
 	if !strings.Contains(signIn.Text, "um 2026-11-03 09:15 UTC auf Firefox · Linux") || !strings.HasSuffix(signIn.Text, "/#/security") {
 		t.Fatal(signIn.Text)
 	}
+	sanctioned, _ := Render("sanctioned", "ru", json.RawMessage(`{"merchant":"Shop","network":"tron:mainnet","sender":"TXYZ","transaction":"ab12","amount_atomic":"2500000","asset_decimals":6,"asset":"tron:mainnet/usdt","reference":"SDN-301"}`), "https://cabinet.example")
+	if sanctioned.Subject != "Платёж с адреса из санкционного списка" || !strings.Contains(sanctioned.Text, "2.5 (tron:mainnet/usdt) в сети tron:mainnet пришли с адреса TXYZ") || !strings.Contains(sanctioned.Text, "(SDN-301)") || !strings.HasSuffix(sanctioned.Text, "/#/sanctions-alerts") {
+		t.Fatal(sanctioned.Text)
+	}
 	if _, err := Render("refund", "en", json.RawMessage(`{}`), "https://cabinet.example"); !errors.Is(err, ErrInvalid) {
 		t.Fatal("an unknown event must not render")
 	}

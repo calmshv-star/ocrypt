@@ -1,7 +1,7 @@
 import { useI18n, type MessageKey } from "@merchant/i18n";
 import { AppShell, Badge, Button, PRODUCT_NAME, Select, ThemeToggle, WorkspaceSwitcher, type ShellNavGroup } from "@merchant/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, Archive, BellRing, Blocks, CircleDollarSign, FileSpreadsheet, Fingerprint, GitCompareArrows, Rocket, KeyRound, Landmark, LayoutDashboard, Link2, LockKeyhole, RadioTower, ReceiptText, RefreshCw, Settings2, ShieldCheck, Sparkles, UserCheck } from "lucide-react";
+import { Activity, Archive, BellRing, Blocks, CircleDollarSign, FileSpreadsheet, Fingerprint, GitCompareArrows, Rocket, KeyRound, Landmark, LayoutDashboard, Link2, LockKeyhole, RadioTower, ReceiptText, RefreshCw, Settings2, ShieldAlert, ShieldCheck, Sparkles, UserCheck } from "lucide-react";
 import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AdminProvider, useAdmin } from "./AdminProvider";
@@ -49,6 +49,7 @@ const ProviderConfigurationPage = lazy(() => import("./ProviderConfigurationPage
 const RetentionControlPage = lazy(() => import("./RetentionControlPage").then((module) => ({ default: module.RetentionControlPage })));
 const OnboardingPage = lazy(() => import("./OnboardingPage").then((module) => ({ default: module.OnboardingPage })));
 const GoLivePage = lazy(() => import("./GoLivePage").then((module) => ({ default: module.GoLivePage })));
+const SanctionsAlertsPage = lazy(() => import("./SanctionsAlertsPage").then((module) => ({ default: module.SanctionsAlertsPage })));
 const NotificationsPage = lazy(() => import("./NotificationsPage").then((module) => ({ default: module.NotificationsPage })));
 const SecurityPage = lazy(() => import("./SecurityPage").then((module) => ({ default: module.SecurityPage })));
 const GoLiveReviewsPage = lazy(() => import("./GoLiveReviewsPage").then((module) => ({ default: module.GoLiveReviewsPage })));
@@ -159,6 +160,7 @@ function ProductionRoutes() {
     <Route element={<GoLiveReviewsPage />} path="/go-live-reviews" />
     <Route element={<SecurityPage />} path="/security" />
     <Route element={<NotificationsPage />} path="/notifications" />
+    <Route element={<SanctionsAlertsPage />} path="/sanctions-alerts" />
     <Route element={<Navigate replace to="/overview" />} path="*" />
   </Routes>;
 }
@@ -183,6 +185,7 @@ function AdminApplication() {
       admin.can("payments:read") && { label: t("nav.transfers"), href: "#/transfers", icon: Blocks, active: active("/transfers"), keywords: ["transactions"] },
       admin.can("payments:read") && { label: t("reports.nav"), href: "#/reports", icon: FileSpreadsheet, active: active("/reports"), keywords: ["accounting", "export", "xlsx"] },
       admin.scope?.merchantId && admin.can("go_live:request") && { label: t("goLive.nav"), href: "#/go-live", icon: Rocket, active: active("/go-live"), keywords: ["live", "production", "wallet"] },
+      !admin.preview && admin.scope?.merchantId && admin.can("payments:read") && { label: t("sanctions.nav"), href: "#/sanctions-alerts", icon: ShieldAlert, active: active("/sanctions-alerts"), keywords: ["sanctions", "ofac", "compliance", "aml"] },
       admin.can("unmatched:read") && { label: t("nav.unmatched"), href: "#/unmatched", icon: Fingerprint, active: active("/unmatched"), keywords: ["review"] },
       admin.can("payment_links:read") && { label: t("nav.paymentLinks"), href: "#/payment-links", icon: Link2, active: active("/payment-links") }
   ].filter(Boolean) as ShellNavGroup["items"];

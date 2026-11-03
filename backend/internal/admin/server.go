@@ -143,6 +143,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /admin/v1/session/sessions/revoke-others", s.authenticated(s.mutating(http.HandlerFunc(s.revokeOtherSessions))))
 	s.mux.Handle("POST /admin/v1/session/sessions/{id}/revoke", s.authenticated(s.mutating(http.HandlerFunc(s.revokeMySession))))
 	s.mux.Handle("GET /admin/v1/notifications", s.authenticated(http.HandlerFunc(s.notificationSettings)))
+	s.mux.Handle("GET /admin/v1/sanctions-alerts", s.authenticated(http.HandlerFunc(s.sanctionsAlerts)))
 	s.mux.Handle("PUT /admin/v1/notifications/merchant", s.authenticated(s.mutating(http.HandlerFunc(s.saveMerchantNotifications))))
 	s.mux.Handle("PUT /admin/v1/notifications/account", s.authenticated(s.mutating(http.HandlerFunc(s.saveAccountNotifications))))
 	s.mux.Handle("POST /admin/v1/notifications/telegram/link", s.authenticated(s.mutating(http.HandlerFunc(s.createTelegramLink))))
@@ -908,6 +909,15 @@ func optionalScope(w http.ResponseWriter, request *http.Request) (Scope, bool) {
 		return Scope{}, false
 	}
 	return scope, true
+}
+
+func (s *Server) sanctionsAlerts(w http.ResponseWriter, request *http.Request) {
+	auth, scope, ok := s.authorize(w, request, PermissionPaymentsRead)
+	if !ok {
+		return
+	}
+	alerts, err := s.service.SanctionsAlerts(request.Context(), auth.Principal, scope)
+	respond(w, map[string][]SanctionsAlert{"data": alerts}, err)
 }
 
 func (s *Server) notificationSettings(w http.ResponseWriter, request *http.Request) {

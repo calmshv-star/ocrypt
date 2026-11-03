@@ -733,6 +733,28 @@ func (r *PostgresRepository) UnlinkTelegram(ctx context.Context, principal Princ
 	}))
 }
 
+func (r *PostgresRepository) SanctionsAlerts(ctx context.Context, principal Principal, scope Scope, limit int) ([]SanctionsAlert, error) {
+	alerts := []SanctionsAlert{}
+	err := r.asActor(ctx, principal, pgx.ReadOnly, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id::text,chain_id,transaction_id,asset_id,from_address,to_address,amount_atomic,asset_decimals,matches,detected_at FROM list_sanctioned_transfer_alerts($1,$2,$3)`, scope.TenantID, scope.MerchantID, limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var alert SanctionsAlert
+			var decimals int16
+			if err := rows.Scan(&alert.ID, &alert.ChainID, &alert.TransactionID, &alert.AssetID, &alert.FromAddress, &alert.ToAddress, &alert.AmountAtomic, &decimals, &alert.Matches, &alert.DetectedAt); err != nil {
+				return err
+			}
+			alert.AssetDecimals = int(decimals)
+			alerts = append(alerts, alert)
+		}
+		return rows.Err()
+	})
+	return alerts, classifyAdminDB(err)
+}
+
 func (r *PostgresRepository) EnqueueSignInNotification(ctx context.Context, principal Principal, sessionID, locale string) error {
 	return classifyAdminDB(r.asActor(ctx, principal, pgx.ReadWrite, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `SELECT enqueue_current_admin_sign_in_notification($1,$2)`, sessionID, locale)

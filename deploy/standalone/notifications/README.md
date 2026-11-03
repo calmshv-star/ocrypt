@@ -9,6 +9,7 @@ Cabinet users choose which events reach them (`#/notifications`):
 | `review` | `payment.needs_review` | same |
 | `webhook_failed` | a delivery reaching `dead_letter` (one notice per endpoint and UTC hour) | users with `webhooks:read` |
 | `sign_in` | a fresh cabinet login (not step-up) | the user themself |
+| `sanctioned` | a transfer to the merchant's address from a sender on a sanctions list | everyone who gets the merchant's notifications, whatever events they chose |
 
 A self-service owner who saved nothing gets every merchant event by email.
 Everybody else subscribes on the page. Access is checked when the job is

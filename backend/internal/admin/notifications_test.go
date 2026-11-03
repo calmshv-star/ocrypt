@@ -126,3 +126,24 @@ func TestSignInAlertOnlyForAFreshLogin(t *testing.T) {
 		t.Fatal("preferred locale")
 	}
 }
+
+func TestSanctionsAlertsNeedPaymentAccessOnTheMerchant(t *testing.T) {
+	handler, _, _, raw, csrf, tenant, merchant := notificationFixture(t)
+	get := func(merchantID string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, "https://admin.example/admin/v1/sanctions-alerts", nil)
+		addAuth(request, raw, csrf)
+		request.Header.Set("X-Admin-Tenant-ID", tenant)
+		if merchantID != "" {
+			request.Header.Set("X-Admin-Merchant-ID", merchantID)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	if response := get(merchant); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"reference":"SDN-301"`) {
+		t.Fatalf("alerts: %d %s", response.Code, response.Body.String())
+	}
+	if response := get("018f22b0-4db4-7c58-8f18-4d2f9d7b6a99"); response.Code != http.StatusForbidden {
+		t.Fatalf("another merchant: %d", response.Code)
+	}
+}

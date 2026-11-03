@@ -31,10 +31,17 @@ type payload struct {
 	HTTPStatus    int    `json:"http_status"`
 	Device        string `json:"device"`
 	SignedInAt    string `json:"signed_in_at"`
+	Network       string `json:"network"`
+	Sender        string `json:"sender"`
+	Transaction   string `json:"transaction"`
+	AmountAtomic  string `json:"amount_atomic"`
+	AssetDecimals *int   `json:"asset_decimals"`
+	Asset         string `json:"asset"`
+	Reference     string `json:"reference"`
 }
 
 // cabinetPath is where each event is handled in the cabinet.
-var cabinetPath = map[string]string{"paid": "/#/intents", "underpaid": "/#/intents", "review": "/#/intents", "webhook_failed": "/#/webhooks", "sign_in": "/#/security"}
+var cabinetPath = map[string]string{"paid": "/#/intents", "underpaid": "/#/intents", "review": "/#/intents", "webhook_failed": "/#/webhooks", "sign_in": "/#/security", "sanctioned": "/#/sanctions-alerts"}
 
 // Render builds the message of a job in its locale (English when unknown).
 // Every value from the payload is reduced to printable text first.
@@ -64,6 +71,18 @@ func Render(event, locale string, raw json.RawMessage, cabinetURL string) (Messa
 		scale = *p.CurrencyScale
 	}
 	values["amount"] = decimal(p.AmountMinor, scale)
+	if event == "sanctioned" {
+		decimals := 0
+		if p.AssetDecimals != nil {
+			decimals = *p.AssetDecimals
+		}
+		values["amount"] = decimal(p.AmountAtomic, decimals)
+		values["asset"] = plain(p.Asset, 128, "—")
+		values["network"] = plain(p.Network, 64, "—")
+		values["sender"] = plain(p.Sender, 128, "—")
+		values["transaction"] = plain(p.Transaction, 128, "—")
+		values["reference"] = plain(p.Reference, 128, "—")
+	}
 	values["status"] = ""
 	if p.HTTPStatus >= 100 && p.HTTPStatus <= 599 {
 		values["status"] = fill(words["webhook_failed.status"], map[string]string{"code": fmt.Sprint(p.HTTPStatus)})
@@ -163,6 +182,8 @@ func deviceText(label, unknown string) string {
 
 var catalog = map[string]map[string]string{
 	"en": {
+		"sanctioned.subject":     "Payment from a sanctioned address",
+		"sanctioned.body":        "{merchant}: {amount} ({asset}) on {network} came from {sender}, which is on a sanctions list ({reference}). Transaction {transaction}. The payment is not changed automatically: review it before you fulfil the order or return funds.",
 		"paid.subject":           "Payment received: {amount} {currency}",
 		"paid.body":              "{merchant}: order {order} is paid, {amount} {currency}.",
 		"underpaid.subject":      "Underpaid order {order}",
@@ -182,6 +203,8 @@ var catalog = map[string]map[string]string{
 		"telegram.start":         "To get Ocrypt notifications here, open the cabinet, go to Notifications and press Connect Telegram.",
 	},
 	"ru": {
+		"sanctioned.subject":     "Платёж с адреса из санкционного списка",
+		"sanctioned.body":        "{merchant}: {amount} ({asset}) в сети {network} пришли с адреса {sender}, который есть в санкционном списке ({reference}). Транзакция {transaction}. Платёж автоматически не меняется: проверьте его, прежде чем выполнять заказ или возвращать средства.",
 		"paid.subject":           "Платёж получен: {amount} {currency}",
 		"paid.body":              "{merchant}: заказ {order} оплачен, {amount} {currency}.",
 		"underpaid.subject":      "Недоплата по заказу {order}",
@@ -201,6 +224,8 @@ var catalog = map[string]map[string]string{
 		"telegram.start":         "Чтобы получать сюда уведомления Ocrypt, откройте кабинет, раздел «Уведомления», и нажмите «Подключить Telegram».",
 	},
 	"zh": {
+		"sanctioned.subject":     "来自受制裁地址的付款",
+		"sanctioned.body":        "{merchant}：{network} 上的 {amount}（{asset}）来自 {sender}，该地址在制裁名单中（{reference}）。交易 {transaction}。付款不会被自动更改：请在履行订单或退回资金前进行审查。",
 		"paid.subject":           "已收到付款：{amount} {currency}",
 		"paid.body":              "{merchant}：订单 {order} 已付款，{amount} {currency}。",
 		"underpaid.subject":      "订单 {order} 付款不足",
@@ -220,6 +245,8 @@ var catalog = map[string]map[string]string{
 		"telegram.start":         "要在此接收 Ocrypt 通知，请打开后台，进入“通知”，然后点击“连接 Telegram”。",
 	},
 	"es": {
+		"sanctioned.subject":     "Pago desde una dirección sancionada",
+		"sanctioned.body":        "{merchant}: {amount} ({asset}) en {network} llegaron desde {sender}, que figura en una lista de sanciones ({reference}). Transacción {transaction}. El pago no se modifica automáticamente: revíselo antes de cumplir el pedido o devolver fondos.",
 		"paid.subject":           "Pago recibido: {amount} {currency}",
 		"paid.body":              "{merchant}: el pedido {order} está pagado, {amount} {currency}.",
 		"underpaid.subject":      "Pago insuficiente del pedido {order}",
@@ -239,6 +266,8 @@ var catalog = map[string]map[string]string{
 		"telegram.start":         "Para recibir aquí las notificaciones de Ocrypt, abra el panel, vaya a Notificaciones y pulse Conectar Telegram.",
 	},
 	"fr": {
+		"sanctioned.subject":     "Paiement depuis une adresse sanctionnée",
+		"sanctioned.body":        "{merchant} : {amount} ({asset}) sur {network} proviennent de {sender}, qui figure sur une liste de sanctions ({reference}). Transaction {transaction}. Le paiement n'est pas modifié automatiquement : examinez-le avant d'exécuter la commande ou de restituer des fonds.",
 		"paid.subject":           "Paiement reçu : {amount} {currency}",
 		"paid.body":              "{merchant} : la commande {order} est payée, {amount} {currency}.",
 		"underpaid.subject":      "Paiement insuffisant pour la commande {order}",
@@ -258,6 +287,8 @@ var catalog = map[string]map[string]string{
 		"telegram.start":         "Pour recevoir ici les notifications Ocrypt, ouvrez l'espace marchand, rubrique Notifications, et appuyez sur Connecter Telegram.",
 	},
 	"de": {
+		"sanctioned.subject":     "Zahlung von einer sanktionierten Adresse",
+		"sanctioned.body":        "{merchant}: {amount} ({asset}) im Netz {network} kamen von {sender}, die auf einer Sanktionsliste steht ({reference}). Transaktion {transaction}. Die Zahlung wird nicht automatisch geändert: Prüfen Sie sie, bevor Sie die Bestellung ausführen oder Geld zurückgeben.",
 		"paid.subject":           "Zahlung erhalten: {amount} {currency}",
 		"paid.body":              "{merchant}: Bestellung {order} ist bezahlt, {amount} {currency}.",
 		"underpaid.subject":      "Unterzahlung bei Bestellung {order}",

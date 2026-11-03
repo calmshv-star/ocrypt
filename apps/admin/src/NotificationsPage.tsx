@@ -108,6 +108,7 @@ export function NotificationsPage() {
           })}</tbody>
         </table>
         {current.telegram.available && !telegramReady && telegram.size > 0 && <p className="go-live__note">{t("notifications.telegramNeedsLink")}</p>}
+        <p className="go-live__note">{t("notifications.sanctionedAlways")}</p>
         <div className="go-live__submit"><Button disabled={busy} onClick={() => void saveEvents()}>{t("notifications.save")}</Button></div>
         {message("events")}
       </SectionCard>}

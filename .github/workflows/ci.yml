@@ -278,7 +278,10 @@ jobs:
                OR has_function_privilege('merchant_notification_worker','enqueue_merchant_notification(uuid,uuid,text,text,text,jsonb)','EXECUTE')
                OR has_function_privilege('merchant_admin_runtime','claim_notification_job(uuid,integer)','EXECUTE')
                OR has_function_privilege('merchant_admin_runtime','link_telegram_chat(bytea,bigint)','EXECUTE')
-               OR NOT has_function_privilege('merchant_admin_runtime','current_admin_notification_settings(uuid,uuid)','EXECUTE') THEN
+               OR NOT has_function_privilege('merchant_admin_runtime','current_admin_notification_settings(uuid,uuid)','EXECUTE')
+               OR NOT has_function_privilege('merchant_admin_runtime','list_sanctioned_transfer_alerts(uuid,uuid,integer)','EXECUTE')
+               OR has_function_privilege('merchant_admin_runtime','replace_sanctioned_addresses(text,jsonb)','EXECUTE')
+               OR has_function_privilege('merchant_scanner_worker','sanctioned_address_matches(text,text)','EXECUTE') THEN
               RAISE EXCEPTION 'notification worker or BFF function capability differs';
             END IF;
             IF EXISTS (SELECT 1 FROM information_schema.role_table_grants WHERE grantee IN ('merchant_invitation_delivery_worker','merchant_session_revocation_worker','merchant_notification_worker'))

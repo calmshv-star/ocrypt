@@ -38,6 +38,7 @@ type AuthRepository interface {
 	CreateTelegramLinkCode(ctx context.Context, principal Principal, codeHash [32]byte, at, expires time.Time) error
 	UnlinkTelegram(ctx context.Context, principal Principal, audit AuditEntry) error
 	EnqueueSignInNotification(ctx context.Context, principal Principal, sessionID, locale string) error
+	SanctionsAlerts(ctx context.Context, principal Principal, scope Scope, limit int) ([]SanctionsAlert, error)
 	SubmitGoLive(ctx context.Context, principal Principal, scope Scope, requestID, preset string, addresses []GoLiveProvenAddress, at time.Time) error
 	PrepareGoLiveWallets(context.Context, Principal, string, time.Time) ([]GoLivePreparedWallet, error)
 	ListGoLiveReviews(context.Context, Principal, int) ([]GoLiveReview, error)
