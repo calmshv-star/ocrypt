@@ -21,6 +21,7 @@ export type Permission =
 
 export type AdminScope = { tenantId: string; merchantId?: string };
 export type AdminPrincipal = { user_id: string; session_id: string; display_name: string; email?: string; roles: string[]; permissions: Permission[]; scopes: Array<{tenant_id?:string;merchant_id?:string}>; acr?:string; amr:string[]; step_up_until?:string; signup_review?:"pending"|"rejected" };
+export type SessionSummary = { id:string; created_at:string; last_seen_at:string; expires_at:string; device:string; amr:string[]; current:boolean };
 export type AcceptancePreset = "strict" | "standard" | "fast";
 export type GoLiveState = { environment:"test"|"live"; request_id?:string; request_status?:"pending"|"approved"|"rejected"; preset?:AcceptancePreset; requested_at?:string; screening_ready:boolean };
 export type GoLiveProofKind = "evm_personal_sign" | "solana_sign_message" | "tron_sign_message_v2";

@@ -613,6 +613,73 @@ func (r *PostgresRepository) RotateSession(ctx context.Context, old [32]byte, se
 	}))
 }
 
+func (r *PostgresRepository) LabelSession(ctx context.Context, sessionID, label string) error {
+	_, err := r.pool.Exec(ctx, `UPDATE admin_sessions SET device_label=$2 WHERE id=$1 AND device_label IS NULL`, sessionID, label)
+	return classifyAdminDB(err)
+}
+
+func (r *PostgresRepository) ListUserSessions(ctx context.Context, userID string, now time.Time) ([]SessionSummary, error) {
+	rows, err := r.pool.Query(ctx, `SELECT id::text,created_at,last_seen_at,absolute_expires_at,coalesce(device_label,''),amr
+FROM admin_sessions WHERE user_id=$1 AND `+activeUserSession+`
+ORDER BY last_seen_at DESC,id LIMIT 50`, userID, now)
+	if err != nil {
+		return nil, classifyAdminDB(err)
+	}
+	defer rows.Close()
+	sessions := []SessionSummary{}
+	for rows.Next() {
+		var session SessionSummary
+		if err := rows.Scan(&session.ID, &session.CreatedAt, &session.LastSeenAt, &session.ExpiresAt, &session.Device, &session.AMR); err != nil {
+			return nil, classifyAdminDB(err)
+		}
+		sessions = append(sessions, session)
+	}
+	return sessions, classifyAdminDB(rows.Err())
+}
+
+// activeUserSession is what the session list shows ($2 is now): an expired
+// session or an invitation enrolment is history, never listed or revoked.
+const activeUserSession = `purpose='admin' AND revoked_at IS NULL AND idle_expires_at>$2 AND absolute_expires_at>$2`
+
+// RevokeUserSession ends one active session of the user and writes the audit
+// entry in the same transaction; another user's or an ended session is not
+// found.
+func (r *PostgresRepository) RevokeUserSession(ctx context.Context, userID, sessionID, reason string, now time.Time, audit AuditEntry) error {
+	return classifyAdminDB(pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE admin_sessions SET revoked_at=$2,revocation_reason=$4 WHERE user_id=$1 AND id=$3 AND `+activeUserSession, userID, now, sessionID, reason)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return ErrNotFound
+		}
+		return r.appendAuditTx(ctx, tx, audit)
+	}))
+}
+
+// RevokeOtherSessions ends every other active session of the user; the audit
+// entry, with the count, commits with them.
+func (r *PostgresRepository) RevokeOtherSessions(ctx context.Context, userID, keepSessionID, reason string, now time.Time, audit AuditEntry) (int64, error) {
+	var count int64
+	err := pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE admin_sessions SET revoked_at=$2,revocation_reason=$4 WHERE user_id=$1 AND id<>$3 AND `+activeUserSession, userID, now, keepSessionID, reason)
+		if err != nil {
+			return err
+		}
+		if count = tag.RowsAffected(); count == 0 {
+			return nil
+		}
+		if audit.Details, err = json.Marshal(map[string]int64{"revoked": count}); err != nil {
+			return err
+		}
+		return r.appendAuditTx(ctx, tx, audit)
+	})
+	if err != nil {
+		return 0, classifyAdminDB(err)
+	}
+	return count, nil
+}
+
 func (r *PostgresRepository) RevokeSession(ctx context.Context, hash [32]byte, reason string, now time.Time) error {
 	tag, err := r.pool.Exec(ctx, `UPDATE admin_sessions SET revoked_at=$2,revocation_reason=$3 WHERE session_hash=$1 AND revoked_at IS NULL`, hash[:], now, reason)
 	if err == nil && tag.RowsAffected() != 1 {

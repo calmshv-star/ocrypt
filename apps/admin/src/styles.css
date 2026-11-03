@@ -690,6 +690,13 @@
 .go-live__proof { display: grid; gap: 8px; width: 100%; }
 .go-live__proof textarea { width: 100%; resize: vertical; }
 .go-live__note { margin: 10px 0 0; color: var(--mp-muted); font-size: 13px; }
+.security__methods { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; padding: 0; list-style: none; }
+.security__sessions { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.security__sessions li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--mp-border); border-radius: 12px; padding: 12px 14px; }
+.security__sessions li > div { display: grid; gap: 4px; min-width: 0; }
+.security__sessions li > div > strong { display: inline-flex; gap: 8px; align-items: center; }
+.security__sessions small { color: var(--mp-muted); overflow-wrap: anywhere; }
+.security__outcome { margin: 0 0 10px; color: var(--mp-muted); }
 .go-live__submit { display: grid; gap: 8px; justify-items: start; margin-top: 16px; }
 .go-live-review__addresses { display: grid; gap: 6px; margin: 0 0 12px; padding: 0; list-style: none; }
 .go-live-review__addresses code { overflow-wrap: anywhere; }
