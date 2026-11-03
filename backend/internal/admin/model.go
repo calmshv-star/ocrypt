@@ -250,6 +250,16 @@ type IntentRow struct {
 	ReceivedAssetDecimals *int16    `json:"received_asset_decimals,omitempty"`
 }
 
+// DailyTotal is one payment day and currency of the accounting report: paid
+// intents (settled or overpaid) at their exact invoice amount.
+type DailyTotal struct {
+	Day             string `json:"day"`
+	Currency        string `json:"currency"`
+	CurrencyScale   int16  `json:"currency_scale"`
+	PaidCount       int64  `json:"paid_count"`
+	PaidAmountMinor string `json:"paid_amount_minor"`
+}
+
 type TransferRow struct {
 	ID            string    `json:"id"`
 	ChainID       string    `json:"chain_id"`

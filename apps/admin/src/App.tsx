@@ -1,7 +1,7 @@
 import { useI18n, type MessageKey } from "@merchant/i18n";
 import { AppShell, Badge, Button, PRODUCT_NAME, Select, ThemeToggle, WorkspaceSwitcher, type ShellNavGroup } from "@merchant/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, Archive, Blocks, CircleDollarSign, Fingerprint, GitCompareArrows, KeyRound, Landmark, LayoutDashboard, Link2, RadioTower, ReceiptText, RefreshCw, Settings2, ShieldCheck, Sparkles, UserCheck } from "lucide-react";
+import { Activity, Archive, Blocks, CircleDollarSign, FileSpreadsheet, Fingerprint, GitCompareArrows, KeyRound, Landmark, LayoutDashboard, Link2, RadioTower, ReceiptText, RefreshCw, Settings2, ShieldCheck, Sparkles, UserCheck } from "lucide-react";
 import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AdminProvider, useAdmin } from "./AdminProvider";
@@ -47,6 +47,7 @@ const ProviderOperationsPage = lazy(() => import("./ProviderOperationsPage").the
 const ProviderConfigurationPage = lazy(() => import("./ProviderConfigurationPage").then((module) => ({ default: module.ProviderConfigurationPage })));
 const RetentionControlPage = lazy(() => import("./RetentionControlPage").then((module) => ({ default: module.RetentionControlPage })));
 const OnboardingPage = lazy(() => import("./OnboardingPage").then((module) => ({ default: module.OnboardingPage })));
+const ReportsPage = lazy(() => import("./ReportsPage").then((module) => ({ default: module.ReportsPage })));
 const SignupReviewsPage = lazy(() => import("./SignupReviewsPage").then((module) => ({ default: module.SignupReviewsPage })));
 const MigrationControlPage = lazy(() => import("./MigrationControlPage").then((module) => ({ default: module.MigrationControlPage })));
 
@@ -137,6 +138,7 @@ function ProductionRoutes() {
     <Route element={<RetentionControlPage />} path="/retention" />
     <Route element={<MigrationControlPage />} path="/migrations" />
     <Route element={<SignupReviewsPage />} path="/signup-reviews" />
+    <Route element={<ReportsPage />} path="/reports" />
     <Route element={<Navigate replace to="/overview" />} path="*" />
   </Routes>;
 }
@@ -159,6 +161,7 @@ function AdminApplication() {
       admin.can("dashboard:read") && { label: t("nav.overview"), href: "#/overview", icon: LayoutDashboard, active: active("/overview"), keywords: ["dashboard"] },
       admin.can("payments:read") && { label: t("nav.intents"), href: "#/intents", icon: CircleDollarSign, active: active("/intents"), keywords: ["orders"] },
       admin.can("payments:read") && { label: t("nav.transfers"), href: "#/transfers", icon: Blocks, active: active("/transfers"), keywords: ["transactions"] },
+      admin.can("payments:read") && { label: t("reports.nav"), href: "#/reports", icon: FileSpreadsheet, active: active("/reports"), keywords: ["accounting", "export", "xlsx"] },
       admin.can("unmatched:read") && { label: t("nav.unmatched"), href: "#/unmatched", icon: Fingerprint, active: active("/unmatched"), keywords: ["review"] },
       admin.can("payment_links:read") && { label: t("nav.paymentLinks"), href: "#/payment-links", icon: Link2, active: active("/payment-links") }
   ].filter(Boolean) as ShellNavGroup["items"];

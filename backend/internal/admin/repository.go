@@ -51,6 +51,7 @@ type InvitationLogin struct {
 type ReadRepository interface {
 	Overview(context.Context, Principal, Scope) (Overview, error)
 	ListIntents(context.Context, Principal, Scope, string, int) (Page[IntentRow], error)
+	DailyTotals(ctx context.Context, principal Principal, scope Scope, from, to, timeZone string) ([]DailyTotal, error)
 	ListTransfers(context.Context, Principal, Scope, string, int) (Page[TransferRow], error)
 	ListUnmatched(context.Context, Principal, Scope, string, int) (Page[UnmatchedRow], error)
 	ListWebhooks(context.Context, Principal, Scope, string, int) (Page[WebhookRow], error)

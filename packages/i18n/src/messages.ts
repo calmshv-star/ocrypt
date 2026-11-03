@@ -1334,7 +1334,23 @@ export const en = {
   "checkout.fee.high": "high network fee",
   "checkout.feeHint.low": "Sending on this network usually costs a few cents.",
   "checkout.feeHint.medium": "This network usually charges a noticeable fee to send. It is lower if your wallet has staked resources, such as energy on TRON.",
-  "checkout.feeHint.high": "This network usually charges the most to send. If your wallet supports a cheaper network from the list, choose it."
+  "checkout.feeHint.high": "This network usually charges the most to send. If your wallet supports a cheaper network from the list, choose it.",
+  "reports.nav": "Reports",
+  "reports.dailyTitle": "Daily totals",
+  "reports.dailyBody": "Paid payments per day for accounting, at the exact invoice amount fixed when the payment was created.",
+  "reports.period": "Period",
+  "reports.from": "From",
+  "reports.to": "To",
+  "reports.timeZone": "Time zone",
+  "reports.dailyNote": "A payment counts on the day it was paid in this time zone. Overpaid payments count at the invoice amount; the excess is not included.",
+  "reports.invalidPeriod": "The start of the period must not be after its end.",
+  "reports.empty": "No paid payments in this period.",
+  "reports.day": "Day",
+  "reports.paidCount": "Paid payments",
+  "reports.paidAmount": "Amount",
+  "reports.total": "Total",
+  "reports.exportXlsx": "Export XLSX",
+  "reports.paymentsSheet": "Payments"
 } as const;
 
 export type MessageKey = keyof typeof en;

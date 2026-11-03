@@ -796,6 +796,45 @@ func (r *PostgresRepository) ListIntents(ctx context.Context, p Principal, s Sco
 	return page, classifyAdminDB(err)
 }
 
+// DailyTotals sums paid intents per payment day in the given IANA time zone.
+// Days are calendar days of that zone; from and to are inclusive dates.
+func (r *PostgresRepository) DailyTotals(ctx context.Context, p Principal, s Scope, from, to, zone string) (rows []DailyTotal, err error) {
+	err = r.withinScope(ctx, p, s, pgx.ReadOnly, func(tx pgx.Tx) error {
+		var known bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_timezone_names WHERE name=$1)`, zone).Scan(&known); err != nil {
+			return err
+		}
+		if !known {
+			return ErrInvalid
+		}
+		args := []any{from, to, zone}
+		filter := ""
+		if s.MerchantID != "" {
+			args = append(args, s.MerchantID)
+			filter = " AND merchant_id=$4"
+		}
+		result, err := tx.Query(ctx, `SELECT to_char((settled_at AT TIME ZONE $3)::date,'YYYY-MM-DD'),currency::text,currency_scale,count(*),sum(amount_minor)::text
+FROM payment_intents
+WHERE status IN ('settled','overpaid')
+  AND settled_at >= ($1::date)::timestamp AT TIME ZONE $3
+  AND settled_at < (($2::date)+1)::timestamp AT TIME ZONE $3`+filter+`
+GROUP BY 1,2,3 ORDER BY 1,2,3`, args...)
+		if err != nil {
+			return err
+		}
+		defer result.Close()
+		for result.Next() {
+			var row DailyTotal
+			if err := result.Scan(&row.Day, &row.Currency, &row.CurrencyScale, &row.PaidCount, &row.PaidAmountMinor); err != nil {
+				return err
+			}
+			rows = append(rows, row)
+		}
+		return result.Err()
+	})
+	return rows, classifyAdminDB(err)
+}
+
 func (r *PostgresRepository) ListTransfers(ctx context.Context, p Principal, s Scope, cursor string, limit int) (page Page[TransferRow], err error) {
 	err = r.withinScope(ctx, p, s, pgx.ReadOnly, func(tx pgx.Tx) error {
 		args := []any{}

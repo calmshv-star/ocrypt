@@ -670,3 +670,12 @@
 .signup-review__decision [role="alert"] { color: var(--mp-negative); }
 .signup-review__decision [role="alert"] a { color: var(--mp-primary); font-weight: 600; }
 @media (max-width: 640px) { .signup-review__facts { grid-template-columns: minmax(0, 1fr); } }
+.admin-export__buttons { display: inline-flex; flex-wrap: wrap; gap: 8px; }
+.admin-report__filters { display: flex; flex-wrap: wrap; gap: 12px; }
+.admin-report__filters label { display: grid; gap: 4px; color: var(--mp-muted); font-size: 13px; }
+.admin-report__filters input, .admin-report__filters select { border: 1px solid var(--mp-border); border-radius: 10px; background: var(--mp-surface); color: var(--mp-text); padding: 7px 10px; font: inherit; }
+.admin-report__note { margin: 10px 0 0; color: var(--mp-muted); font-size: 13px; }
+.admin-report__table { width: 100%; border-collapse: collapse; }
+.admin-report__table th, .admin-report__table td { padding: 8px 10px; border-bottom: 1px solid var(--mp-border); text-align: left; }
+.admin-report__table tfoot th, .admin-report__table tfoot td { font-weight: 600; border-bottom: 0; }
+.admin-report__amount { font-family: var(--mp-font-mono); text-align: right !important; overflow-wrap: anywhere; }

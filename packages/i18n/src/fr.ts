@@ -1336,5 +1336,21 @@ export const fr = {
   "checkout.fee.high": "frais de réseau élevés",
   "checkout.feeHint.low": "Un envoi sur ce réseau coûte en général quelques centimes.",
   "checkout.feeHint.medium": "Ce réseau prélève en général des frais notables à l’envoi. Ils sont plus bas si votre portefeuille dispose de ressources mises en jeu, comme l’énergie sur TRON.",
-  "checkout.feeHint.high": "Ce réseau est en général le plus cher pour un envoi. Si votre portefeuille prend en charge un réseau moins cher de la liste, choisissez-le."
+  "checkout.feeHint.high": "Ce réseau est en général le plus cher pour un envoi. Si votre portefeuille prend en charge un réseau moins cher de la liste, choisissez-le.",
+  "reports.nav": "Rapports",
+  "reports.dailyTitle": "Totaux journaliers",
+  "reports.dailyBody": "Paiements encaissés par jour pour la comptabilité, au montant exact de la facture fixé à la création du paiement.",
+  "reports.period": "Période",
+  "reports.from": "Du",
+  "reports.to": "Au",
+  "reports.timeZone": "Fuseau horaire",
+  "reports.dailyNote": "Un paiement compte le jour où il a été encaissé dans ce fuseau. Un trop-perçu compte au montant de la facture ; l’excédent n’est pas inclus.",
+  "reports.invalidPeriod": "Le début de la période ne peut pas être après sa fin.",
+  "reports.empty": "Aucun paiement encaissé sur cette période.",
+  "reports.day": "Jour",
+  "reports.paidCount": "Paiements encaissés",
+  "reports.paidAmount": "Montant",
+  "reports.total": "Total",
+  "reports.exportXlsx": "Exporter en XLSX",
+  "reports.paymentsSheet": "Paiements"
 } satisfies Messages;

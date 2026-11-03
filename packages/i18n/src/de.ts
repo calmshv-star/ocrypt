@@ -1336,5 +1336,21 @@ export const de = {
   "checkout.fee.high": "hohe Netzwerkgebühr",
   "checkout.feeHint.low": "Eine Überweisung in diesem Netzwerk kostet meist nur wenige Cent.",
   "checkout.feeHint.medium": "Dieses Netzwerk verlangt beim Senden meist eine spürbare Gebühr. Sie ist niedriger, wenn Ihre Wallet gestakte Ressourcen hat, etwa Energie bei TRON.",
-  "checkout.feeHint.high": "Dieses Netzwerk ist beim Senden meist am teuersten. Unterstützt Ihre Wallet ein günstigeres Netzwerk aus der Liste, wählen Sie dieses."
+  "checkout.feeHint.high": "Dieses Netzwerk ist beim Senden meist am teuersten. Unterstützt Ihre Wallet ein günstigeres Netzwerk aus der Liste, wählen Sie dieses.",
+  "reports.nav": "Berichte",
+  "reports.dailyTitle": "Tagessummen",
+  "reports.dailyBody": "Bezahlte Zahlungen pro Tag für die Buchhaltung, zum genauen Rechnungsbetrag, der bei der Erstellung festgelegt wurde.",
+  "reports.period": "Zeitraum",
+  "reports.from": "Von",
+  "reports.to": "Bis",
+  "reports.timeZone": "Zeitzone",
+  "reports.dailyNote": "Eine Zahlung zählt an dem Tag, an dem sie in dieser Zeitzone bezahlt wurde. Überzahlungen zählen zum Rechnungsbetrag; der Überschuss ist nicht enthalten.",
+  "reports.invalidPeriod": "Der Beginn des Zeitraums darf nicht nach seinem Ende liegen.",
+  "reports.empty": "In diesem Zeitraum gibt es keine bezahlten Zahlungen.",
+  "reports.day": "Tag",
+  "reports.paidCount": "Bezahlte Zahlungen",
+  "reports.paidAmount": "Betrag",
+  "reports.total": "Summe",
+  "reports.exportXlsx": "XLSX exportieren",
+  "reports.paymentsSheet": "Zahlungen"
 } satisfies Messages;

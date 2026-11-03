@@ -1336,5 +1336,21 @@ export const es = {
   "checkout.fee.high": "comisión de red alta",
   "checkout.feeHint.low": "Enviar en esta red suele costar unos céntimos.",
   "checkout.feeHint.medium": "Esta red suele cobrar una comisión notable por enviar. Es menor si su monedero tiene recursos en staking, como energía en TRON.",
-  "checkout.feeHint.high": "Esta red suele ser la más cara para enviar. Si su monedero admite una red más barata de la lista, elíjala."
+  "checkout.feeHint.high": "Esta red suele ser la más cara para enviar. Si su monedero admite una red más barata de la lista, elíjala.",
+  "reports.nav": "Informes",
+  "reports.dailyTitle": "Totales diarios",
+  "reports.dailyBody": "Pagos cobrados por día para contabilidad, al importe exacto de la factura fijado al crear el pago.",
+  "reports.period": "Periodo",
+  "reports.from": "Desde",
+  "reports.to": "Hasta",
+  "reports.timeZone": "Zona horaria",
+  "reports.dailyNote": "Un pago cuenta el día en que se cobró en esta zona horaria. Los pagos con exceso cuentan al importe de la factura; el excedente no se incluye.",
+  "reports.invalidPeriod": "El inicio del periodo no puede ser posterior a su final.",
+  "reports.empty": "No hay pagos cobrados en este periodo.",
+  "reports.day": "Día",
+  "reports.paidCount": "Pagos cobrados",
+  "reports.paidAmount": "Importe",
+  "reports.total": "Total",
+  "reports.exportXlsx": "Exportar XLSX",
+  "reports.paymentsSheet": "Pagos"
 } satisfies Messages;

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -141,6 +142,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /admin/v1/overview", s.authenticated(http.HandlerFunc(s.overview)))
 	s.mux.Handle("GET /admin/v1/intents", s.authenticated(http.HandlerFunc(s.intents)))
 	s.mux.Handle("GET /admin/v1/transfers", s.authenticated(http.HandlerFunc(s.transfers)))
+	s.mux.Handle("GET /admin/v1/reports/daily-totals", s.authenticated(http.HandlerFunc(s.dailyTotals)))
 	s.mux.Handle("GET /admin/v1/unmatched", s.authenticated(http.HandlerFunc(s.unmatched)))
 	s.mux.Handle("GET /admin/v1/webhooks/endpoints", s.authenticated(s.managementHandler(PermissionWebhookSettingsRead, false)))
 	s.mux.Handle("POST /admin/v1/webhooks/endpoints", s.authenticated(s.mutating(s.managementHandler(PermissionWebhookSettingsWrite, true))))
@@ -797,6 +799,36 @@ func (s *Server) overview(w http.ResponseWriter, request *http.Request) {
 	}
 	value, err := s.repository.Overview(request.Context(), auth.Principal, scope)
 	respond(w, value, err)
+}
+
+var (
+	reportDayPattern  = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
+	reportZonePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$`)
+)
+
+// dailyTotals is the accounting report: paid intents per payment day and
+// currency between two inclusive dates, at most 366 days, in one time zone.
+func (s *Server) dailyTotals(w http.ResponseWriter, request *http.Request) {
+	auth, scope, ok := s.authorize(w, request, PermissionPaymentsRead)
+	if !ok {
+		return
+	}
+	query := request.URL.Query()
+	zone := query.Get("time_zone")
+	if zone == "" {
+		zone = "UTC"
+	}
+	from, fromErr := time.Parse(time.DateOnly, query.Get("from"))
+	to, toErr := time.Parse(time.DateOnly, query.Get("to"))
+	if !reportDayPattern.MatchString(query.Get("from")) || !reportDayPattern.MatchString(query.Get("to")) || fromErr != nil || toErr != nil || to.Before(from) || to.Sub(from) > 365*24*time.Hour || len(zone) > 64 || !reportZonePattern.MatchString(zone) {
+		respond[any](w, nil, ErrInvalid)
+		return
+	}
+	rows, err := s.repository.DailyTotals(request.Context(), auth.Principal, scope, query.Get("from"), query.Get("to"), zone)
+	if rows == nil {
+		rows = []DailyTotal{}
+	}
+	respond(w, map[string]any{"from": query.Get("from"), "to": query.Get("to"), "time_zone": zone, "data": rows}, err)
 }
 
 func (s *Server) intents(w http.ResponseWriter, request *http.Request) {

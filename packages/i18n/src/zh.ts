@@ -1336,5 +1336,21 @@ export const zhCN = {
   "checkout.fee.high": "网络费用高",
   "checkout.feeHint.low": "在此网络上转账通常只需几美分。",
   "checkout.feeHint.medium": "此网络的转账费用通常较明显。如果钱包中有质押资源（例如 TRON 的能量），费用会更低。",
-  "checkout.feeHint.high": "此网络的转账费用通常最高。如果您的钱包支持列表中更便宜的网络，请选择它。"
+  "checkout.feeHint.high": "此网络的转账费用通常最高。如果您的钱包支持列表中更便宜的网络，请选择它。",
+  "reports.nav": "报表",
+  "reports.dailyTitle": "每日汇总",
+  "reports.dailyBody": "按日统计的已付款项，供财务使用，金额为创建付款时锁定的准确账单金额。",
+  "reports.period": "期间",
+  "reports.from": "开始",
+  "reports.to": "结束",
+  "reports.timeZone": "时区",
+  "reports.dailyNote": "付款按所选时区中的付款日计入。超额付款按账单金额计入，不含超出部分。",
+  "reports.invalidPeriod": "期间开始日期不能晚于结束日期。",
+  "reports.empty": "此期间没有已付款项。",
+  "reports.day": "日期",
+  "reports.paidCount": "已付笔数",
+  "reports.paidAmount": "金额",
+  "reports.total": "合计",
+  "reports.exportXlsx": "导出 XLSX",
+  "reports.paymentsSheet": "付款"
 } satisfies Messages;

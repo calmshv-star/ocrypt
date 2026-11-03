@@ -24,6 +24,7 @@ type repositoryStub struct {
 	signupErr         error
 	signupOptionCalls int
 	signupRegions     []SignupRegion
+	dailyTotalsArgs   []string
 	signupReviews     []SignupReview
 	signupDecision    SignupDecision
 	signupDecisionErr error
@@ -132,6 +133,10 @@ func (r *repositoryStub) RevokeAllUserSessions(context.Context, string, string, 
 }
 func (r *repositoryStub) Overview(context.Context, Principal, Scope) (Overview, error) {
 	return Overview{}, nil
+}
+func (r *repositoryStub) DailyTotals(_ context.Context, _ Principal, scope Scope, from, to, zone string) ([]DailyTotal, error) {
+	r.dailyTotalsArgs = []string{scope.TenantID, scope.MerchantID, from, to, zone}
+	return []DailyTotal{{Day: from, Currency: "USD", CurrencyScale: 2, PaidCount: 1, PaidAmountMinor: "100"}}, nil
 }
 func (r *repositoryStub) ListIntents(context.Context, Principal, Scope, string, int) (Page[IntentRow], error) {
 	return Page[IntentRow]{}, nil

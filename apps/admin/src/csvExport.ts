@@ -2,6 +2,7 @@ import type { MessageKey } from "@merchant/i18n";
 import type { AdminClient } from "./api/client";
 import type { AdminScope, IntentRow } from "./api/types";
 import { describeIntentStatus } from "./paymentStatus";
+import type { XLSXCell } from "./xlsx";
 
 // Spreadsheet programs execute cells that start with these characters.
 const FORMULA_PREFIX = /^[=+\-@\t\r]/;
@@ -39,20 +40,30 @@ export async function collectIntents(client: AdminClient, scope: AdminScope, max
   }
 }
 
-export function intentsCSV(rows: IntentRow[], t: (key: MessageKey) => string): string {
+// One table for both exports; amounts are exact decimal strings marked as
+// numbers so a spreadsheet can sum them (XLSX keeps long ones as text).
+export function intentsTable(rows: IntentRow[], t: (key: MessageKey) => string): XLSXCell[][] {
   const header = ["admin.reference", "admin.identifier", "common.amount", "common.currency", "common.status", "reports.statusCode", "reports.received", "common.asset", "admin.createdAt", "admin.expiresAt"].map((key) => t(key as MessageKey));
-  return toCSV([header, ...rows.map((row) => [
+  return [header, ...rows.map((row): XLSXCell[] => [
     row.merchant_order_id,
     row.id,
-    exactMinor(row.amount_minor, row.currency_scale),
+    { number: exactMinor(row.amount_minor, row.currency_scale) },
     row.currency,
     t(describeIntentStatus(row).label),
     row.status,
-    row.received_amount_atomic !== undefined && row.received_asset_decimals !== undefined ? exactMinor(row.received_amount_atomic, row.received_asset_decimals) : "",
+    row.received_amount_atomic !== undefined && row.received_asset_decimals !== undefined ? { number: exactMinor(row.received_amount_atomic, row.received_asset_decimals) } : "",
     row.received_asset_symbol ?? "",
     row.created_at,
     row.expires_at
-  ])]);
+  ])];
+}
+
+export function tableCSV(rows: XLSXCell[][]): string {
+  return toCSV(rows.map((row) => row.map((value) => typeof value === "string" ? value : value.number)));
+}
+
+export function intentsCSV(rows: IntentRow[], t: (key: MessageKey) => string): string {
+  return tableCSV(intentsTable(rows, t));
 }
 
 export function downloadCSV(name: string, csv: string) {

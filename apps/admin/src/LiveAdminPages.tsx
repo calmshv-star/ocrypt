@@ -5,7 +5,8 @@ import { Activity, AlertTriangle, ArrowRight, CheckCircle2, CircleDollarSign, Cl
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { isStepUpError, useAdmin, useAdminQuery } from "./AdminProvider";
 import { OnboardingBanner } from "./OnboardingPage";
-import { collectIntents, downloadCSV, intentsCSV } from "./csvExport";
+import { collectIntents, downloadCSV, intentsTable, tableCSV } from "./csvExport";
+import { downloadXLSX, toXLSX } from "./xlsx";
 import { describeIntentStatus } from "./paymentStatus";
 import type { AdminScope, AssetRow, AuditRow, CandidateRow, IntentRow, Overview, Page, Permission, ReconciliationRow, TransferRow, UnmatchedRow, WebhookRow } from "./api/types";
 
@@ -292,12 +293,15 @@ function IntentsExportButton() {
   const admin = useAdmin();
   const [state, setState] = useState<"idle" | "busy" | "failed" | "truncated">("idle");
   const [count, setCount] = useState(0);
-  const exportCSV = async () => {
+  const exportAs = async (format: "csv" | "xlsx") => {
     if (!admin.scope || admin.preview || state === "busy") return;
     setState("busy");
     try {
       const { rows, truncated } = await collectIntents(admin.clientFor(new AbortController().signal), admin.scope);
-      downloadCSV(`payments-${new Date().toISOString().slice(0, 10)}.csv`, intentsCSV(rows, t));
+      const table = intentsTable(rows, t);
+      const name = `payments-${new Date().toISOString().slice(0, 10)}`;
+      if (format === "csv") downloadCSV(`${name}.csv`, tableCSV(table));
+      else downloadXLSX(`${name}.xlsx`, toXLSX(t("reports.paymentsSheet"), table));
       setCount(rows.length);
       setState(truncated ? "truncated" : "idle");
     } catch {
@@ -305,7 +309,7 @@ function IntentsExportButton() {
     }
   };
   return <span className="admin-export">
-    <Button disabled={state === "busy" || admin.preview} onClick={() => void exportCSV()} variant="secondary"><Download size={15} />{t(state === "busy" ? "reports.exporting" : "reports.exportCsv")}</Button>
+    <span className="admin-export__buttons"><Button disabled={state === "busy" || admin.preview} onClick={() => void exportAs("csv")} variant="secondary"><Download size={15} />{t(state === "busy" ? "reports.exporting" : "reports.exportCsv")}</Button><Button disabled={state === "busy" || admin.preview} onClick={() => void exportAs("xlsx")} variant="secondary"><Download size={15} />{t("reports.exportXlsx")}</Button></span>
     {state === "failed" && <small role="alert">{t("reports.exportFailed")}</small>}
     {state === "truncated" && <small role="status">{t("reports.exportTruncated", { count })}</small>}
   </span>;
