@@ -11,7 +11,7 @@ BEGIN
     'merchant_callback_worker','merchant_outbox_worker','merchant_resolution_worker',
     'merchant_proof_worker','merchant_plan_worker','merchant_financial_worker',
     'merchant_reconciliation_worker','merchant_settings_api_runtime',
-    'merchant_session_revocation_worker','merchant_invitation_delivery_worker',
+    'merchant_session_revocation_worker','merchant_invitation_delivery_worker','merchant_notification_worker',
     'retention_archive_worker','retention_control_scheduler','merchant_provider_health_worker','legacy_compat_runtime',
     'migration_control_worker','migration_traffic_actuator',
     'legacy_compat_admission_requester','legacy_compat_admission_approver'

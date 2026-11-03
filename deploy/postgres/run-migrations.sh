@@ -43,7 +43,7 @@ BEGIN
     'merchant_callback_worker','merchant_outbox_worker','merchant_resolution_worker',
     'merchant_proof_worker','merchant_plan_worker','merchant_financial_worker',
     'merchant_reconciliation_worker','merchant_settings_api_runtime',
-    'merchant_session_revocation_worker','merchant_invitation_delivery_worker',
+    'merchant_session_revocation_worker','merchant_invitation_delivery_worker','merchant_notification_worker',
     'retention_archive_worker'
   ] LOOP
     IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=required_role) THEN

@@ -14,7 +14,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 The admitted names are `api`, `worker`, `scanner`, `admin-api`, `management-api`,
 `platform-admin-api`, `platform-outbox-publisher`, `financial-api`, `financial-worker`, `rate-worker`, and
 `reconciliation-worker`, `retention-worker`, `provider-health-worker`, `merchant-settings-api`, and
-`merchant-session-revocation-worker`, and `merchant-invitation-delivery-worker`.
+`merchant-session-revocation-worker`, `merchant-invitation-delivery-worker`, and `notification-worker`.
 `Dockerfile.migrations` contains only PostgreSQL client tools, immutable SQL, the
 checksum runner, and grant artifacts. It is not a runtime image.
 

@@ -100,6 +100,12 @@ workloads:
     env:
       MERCHANT_SETTINGS_INVITE_NOTIFIER_URL: https://notifier.example.invalid/v1/invitations
     network: {httpsEgressPeers: [*httpsPeer]}
+  notification-worker:
+    enabled: true
+    env:
+      NOTIFICATION_CABINET_URL: https://admin.example.invalid
+      NOTIFICATION_EMAIL_RELAY_URL: https://notifier.example.invalid/v1/notifications
+    network: {httpsEgressPeers: [*httpsPeer]}
   financial-api:
     enabled: true
     env:

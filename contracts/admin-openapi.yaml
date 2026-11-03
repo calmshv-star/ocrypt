@@ -24,6 +24,7 @@ tags:
   - name: Retention control
   - name: Signup screening
   - name: Go-live
+  - name: Notifications
 paths:
   /admin/v1/auth/login:
     get:
@@ -211,6 +212,67 @@ paths:
       security: [{sessionCookie: []}]
       responses:
         '204': {description: Action token replaced and returned only as a Strict secure cookie}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/notifications:
+    get:
+      tags: [Notifications]
+      operationId: notificationSettings
+      summary: The user's email and Telegram notification settings
+      description: Every signed-in user has account (sign-in alert) settings. With a merchant scope the user reads payments of, the merchant section holds the chosen events; configured=false means nothing was saved and the defaults apply (every event by email for the self-service owner, none for others).
+      parameters: [{$ref: '#/components/parameters/OptionalTenant'}, {$ref: '#/components/parameters/Merchant'}]
+      responses:
+        '200': {description: Settings, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationSettings'}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/notifications/merchant:
+    put:
+      tags: [Notifications]
+      operationId: saveMerchantNotifications
+      summary: Save the user's events for the merchant scope
+      description: Needs payments:read on the merchant; webhook_failed also needs webhooks:read. Telegram events need the operator's bot.
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/RequiredMerchant'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [email_events, telegram_events, locale], properties: {email_events: {$ref: '#/components/schemas/NotificationEvents'}, telegram_events: {$ref: '#/components/schemas/NotificationEvents'}, locale: {$ref: '#/components/schemas/NotificationLocale'}}}}}}
+      responses:
+        '200': {description: Saved settings, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationSettings'}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/notifications/account:
+    put:
+      tags: [Notifications]
+      operationId: saveAccountNotifications
+      summary: Save the user's sign-in alert channels and language
+      security: [{sessionCookie: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/OptionalTenant'}, {$ref: '#/components/parameters/Merchant'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [sign_in_email, sign_in_telegram, locale], properties: {sign_in_email: {type: boolean}, sign_in_telegram: {type: boolean}, locale: {$ref: '#/components/schemas/NotificationLocale'}}}}}}
+      responses:
+        '200': {description: Saved settings, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationSettings'}}}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/notifications/telegram/link:
+    post:
+      tags: [Notifications]
+      operationId: createTelegramLink
+      summary: A one-time deep link that connects the user's Telegram chat to the operator's bot
+      description: The link is valid for 10 minutes and replaces earlier unused ones; only a hash of its code is stored. 404 when the operator runs no bot.
+      security: [{sessionCookie: [], csrfHeader: []}]
+      responses:
+        '200': {description: Link, content: {application/json: {schema: {type: object, additionalProperties: false, required: [url, expires_at], properties: {url: {type: string, format: uri, pattern: '^https://t\.me/'}, expires_at: {type: string, format: date-time}}}}}}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /admin/v1/notifications/telegram/unlink:
+    post:
+      tags: [Notifications]
+      operationId: unlinkTelegram
+      summary: Stop Telegram delivery for the user (audited)
+      security: [{sessionCookie: [], csrfHeader: []}]
+      responses:
+        '204': {description: Unlinked, or nothing was linked}
         '401': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
   /admin/v1/overview:
@@ -1271,6 +1333,7 @@ components:
     ID: {name: id, in: path, required: true, schema: {$ref: '#/components/schemas/UUID'}}
     Tenant: {name: X-Admin-Tenant-ID, in: header, required: true, schema: {$ref: '#/components/schemas/UUID'}}
     Merchant: {name: X-Admin-Merchant-ID, in: header, required: false, schema: {$ref: '#/components/schemas/UUID'}}
+    OptionalTenant: {name: X-Admin-Tenant-ID, in: header, required: false, schema: {$ref: '#/components/schemas/UUID'}, description: Omit for account-only settings.}
     RequiredMerchant: {name: X-Admin-Merchant-ID, in: header, required: true, schema: {$ref: '#/components/schemas/UUID'}}
     Cursor: {name: cursor, in: query, required: false, schema: {type: string, maxLength: 256}}
     Limit: {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
@@ -1462,6 +1525,18 @@ components:
     GoLiveProofChallenge: {type: object, additionalProperties: false, required: [kind,chain_id,address,display_address,tenant_id,merchant_id,nonce,issued_at,expires_at,message,token], properties: {kind: {type: string, enum: [evm_personal_sign, solana_sign_message, tron_sign_message_v2]}, chain_id: {type: string}, address: {type: string}, display_address: {type: string}, tenant_id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, nonce: {$ref: '#/components/schemas/UUID'}, issued_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time}, message: {type: string}, token: {type: string}}}
     GoLiveSubmission: {type: object, additionalProperties: false, required: [preset,proofs], properties: {preset: {type: string, enum: [strict, standard, fast]}, proofs: {type: array, minItems: 1, maxItems: 16, items: {type: object, additionalProperties: false, required: [token,signature], properties: {token: {type: string}, signature: {type: string}}}}}}
     GoLiveReview: {type: object, additionalProperties: false, required: [request_id,tenant_id,merchant_id,company_name,owner_email,preset,screening_status,addresses,requested_at], properties: {request_id: {$ref: '#/components/schemas/UUID'}, tenant_id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, company_name: {type: string}, owner_email: {type: string}, preset: {type: string, enum: [strict, standard, fast]}, screening_status: {type: string}, addresses: {type: array, items: {type: object, additionalProperties: false, required: [chain_id,address,canonical_address,proof_kind,admitted,routes_admitted], properties: {chain_id: {type: string}, address: {type: string}, canonical_address: {type: string}, proof_kind: {type: string}, wallet_id: {$ref: '#/components/schemas/UUID'}, admitted: {type: boolean}, routes_admitted: {type: boolean}}}}, requested_at: {type: string, format: date-time}}}
+    NotificationEvents: {type: array, maxItems: 4, uniqueItems: true, items: {type: string, enum: [paid, underpaid, review, webhook_failed]}}
+    NotificationLocale: {type: string, enum: [en, ru, zh, es, fr, de]}
+    NotificationSettings:
+      type: object
+      additionalProperties: false
+      required: [email, telegram, account]
+      properties:
+        email: {type: string, description: The address alerts go to (from the sign-in provider).}
+        locale: {type: string, description: The saved language; absent until the user saves settings.}
+        telegram: {type: object, additionalProperties: false, required: [available, linked], properties: {available: {type: boolean}, linked: {type: boolean}}}
+        account: {type: object, additionalProperties: false, required: [sign_in_email, sign_in_telegram], properties: {sign_in_email: {type: boolean}, sign_in_telegram: {type: boolean}}}
+        merchant: {type: object, additionalProperties: false, required: [configured, webhooks_allowed, email_events, telegram_events], properties: {configured: {type: boolean}, webhooks_allowed: {type: boolean}, email_events: {$ref: '#/components/schemas/NotificationEvents'}, telegram_events: {$ref: '#/components/schemas/NotificationEvents'}}}
     SessionSummary: {type: object, additionalProperties: false, required: [id,created_at,last_seen_at,expires_at,device,amr,current], properties: {id: {$ref: '#/components/schemas/UUID'}, created_at: {type: string, format: date-time}, last_seen_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time}, device: {type: string, pattern: '^([A-Za-z]{1,16}/[A-Za-z]{0,16})?$'}, amr: {type: array, items: {type: string}}, current: {type: boolean}}}
     SignupDecision: {type: object, additionalProperties: false, required: [decision,reason], properties: {decision: {type: string, enum: [approve, reject]}, reason: {type: string, minLength: 3, maxLength: 1000}}}
     OverviewMoney:

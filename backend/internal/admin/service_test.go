@@ -30,6 +30,11 @@ type repositoryStub struct {
 	userSessions                            []SessionSummary
 	revokedSession, revokedFor, keptSession string
 	revokeErr                               error
+	savedEmailEvents                        []string
+	savedLocale                             string
+	savedSignInEmail                        *bool
+	telegramCodeHash                        [32]byte
+	signInSession                           string
 	// go-live submission and decision as the repository received them
 	goLiveRequestID, goLivePreset, goLivePrepared string
 	goLiveAddresses                               []GoLiveProvenAddress
@@ -253,6 +258,33 @@ func (r *repositoryStub) RevokeUserSession(_ context.Context, userID, sessionID,
 func (r *repositoryStub) RevokeOtherSessions(_ context.Context, _ string, keep, _ string, _ time.Time, audit AuditEntry) (int64, error) {
 	r.keptSession, r.audit = keep, audit
 	return 1, nil
+}
+func (r *repositoryStub) NotificationSettings(_ context.Context, _ Principal, scope Scope) (NotificationSettings, error) {
+	settings := NotificationSettings{Email: "operator@example.com", Account: AccountNotifications{SignInEmail: true, SignInTelegram: true}}
+	if scope.MerchantID != "" {
+		settings.Merchant = &MerchantNotifications{EmailEvents: append([]string{}, r.savedEmailEvents...), TelegramEvents: []string{}}
+	}
+	return settings, nil
+}
+func (r *repositoryStub) SaveMerchantNotifications(_ context.Context, _ Principal, _ Scope, email, _ []string, locale string, _ time.Time) error {
+	r.savedEmailEvents, r.savedLocale = email, locale
+	return nil
+}
+func (r *repositoryStub) SaveAccountNotifications(_ context.Context, _ Principal, email, _ bool, locale string, _ time.Time, audit AuditEntry) error {
+	r.savedSignInEmail, r.savedLocale, r.audit = &email, locale, audit
+	return nil
+}
+func (r *repositoryStub) CreateTelegramLinkCode(_ context.Context, _ Principal, hash [32]byte, _, _ time.Time) error {
+	r.telegramCodeHash = hash
+	return nil
+}
+func (r *repositoryStub) UnlinkTelegram(_ context.Context, _ Principal, audit AuditEntry) error {
+	r.audit = audit
+	return nil
+}
+func (r *repositoryStub) EnqueueSignInNotification(_ context.Context, _ Principal, sessionID, locale string) error {
+	r.signInSession, r.savedLocale = sessionID, locale
+	return nil
 }
 func (r *repositoryStub) Ping(context.Context) error { return nil }
 

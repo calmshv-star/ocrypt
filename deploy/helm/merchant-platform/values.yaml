@@ -157,6 +157,8 @@ workloads:
     env:
       ADMIN_HTTP_ADDRESS: ":8081"
       ADMIN_PUBLIC_ORIGIN: "https://admin.example.invalid"
+      # The notification worker's bot; empty keeps Telegram off in the cabinet.
+      ADMIN_TELEGRAM_BOT_USERNAME: ""
       ADMIN_OIDC_ISSUER: "https://identity.example.invalid"
       ADMIN_OIDC_CLIENT_ID: merchant-admin
       ADMIN_OIDC_REDIRECT_URI: "https://admin.example.invalid/admin/v1/auth/callback"
@@ -687,6 +689,43 @@ workloads:
     resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 500m, memory: 256Mi}}
     pdb: {enabled: true, minAvailable: 1}
     autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 70}
+
+  notification-worker:
+    # Opt in after the email relay (origin, pinned CA, bearer Secret, a
+    # narrow port-443 egress peer) and/or the Telegram bot token Secret and
+    # an api.telegram.org egress peer exist. One replica: the Telegram poller
+    # also takes a database advisory lock, so a second replica only delivers.
+    enabled: false
+    replicas: 1
+    image: {repository: merchant-platform-notification-worker, tag: "0.1.0", digest: "", pullPolicy: IfNotPresent}
+    port: 9103
+    probeScheme: HTTP
+    workerIDEnv: NOTIFICATION_WORKER_ID
+    databaseAccess: true
+    env:
+      NOTIFICATION_CABINET_URL: ""
+      NOTIFICATION_EMAIL_RELAY_URL: ""
+      NOTIFICATION_EMAIL_RELAY_BEARER_FILE: /run/secrets/notification-relay-bearer
+      NOTIFICATION_EMAIL_RELAY_CA_FILE: /run/secrets/notification-relay-ca.pem
+      NOTIFICATION_HEALTH_ADDRESS: ":9103"
+      NOTIFICATION_POLL_INTERVAL: 1s
+      NOTIFICATION_LEASE: 30s
+      NOTIFICATION_BASE_BACKOFF: 10s
+      NOTIFICATION_MAX_BACKOFF: 1h
+      NOTIFICATION_MAX_ATTEMPTS: "8"
+      NOTIFICATION_BATCH_SIZE: "50"
+    secretEnv:
+      - {name: DATABASE_URL, secretRef: {name: merchant-platform-notification-worker, key: database-url}}
+    secretFiles:
+      - {path: /run/secrets/notification-relay-bearer, secretRef: {name: merchant-platform-notification-relay, key: bearer}}
+      - {path: /run/secrets/notification-relay-ca.pem, secretRef: {name: merchant-platform-notification-relay, key: ca.pem}}
+    secretDirectories: []
+    service: {enabled: false, port: 9103, portName: health}
+    serviceAccount: {annotations: {}}
+    network: {ingressFrom: [], internalEgress: [], httpsEgressPeers: []}
+    resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 500m, memory: 256Mi}}
+    pdb: {enabled: false, minAvailable: 1}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 2, targetCPUUtilizationPercentage: 70}
 
   financial-api:
     enabled: false

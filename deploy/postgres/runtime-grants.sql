@@ -11,7 +11,7 @@ GRANT USAGE ON SCHEMA public TO
   merchant_callback_worker,merchant_outbox_worker,merchant_resolution_worker,
   merchant_proof_worker,merchant_plan_worker,merchant_financial_worker,
   merchant_reconciliation_worker,merchant_settings_api_runtime,
-  merchant_session_revocation_worker,merchant_invitation_delivery_worker,retention_control_scheduler,
+  merchant_session_revocation_worker,merchant_invitation_delivery_worker,merchant_notification_worker,retention_control_scheduler,
   merchant_provider_health_worker,legacy_compat_runtime,migration_control_worker,migration_traffic_actuator,
   legacy_compat_admission_requester,legacy_compat_admission_approver;
 
@@ -19,18 +19,18 @@ GRANT USAGE ON SCHEMA public TO
 -- repeated deploys remove any pre-existing object drift before exact grants.
 REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM
   platform_outbox_publisher,merchant_settings_api_runtime,merchant_session_revocation_worker,
-  merchant_invitation_delivery_worker,retention_control_scheduler,merchant_provider_health_worker,legacy_compat_runtime,migration_control_worker,migration_traffic_actuator,
+  merchant_invitation_delivery_worker,merchant_notification_worker,retention_control_scheduler,merchant_provider_health_worker,legacy_compat_runtime,migration_control_worker,migration_traffic_actuator,
   legacy_compat_admission_requester,legacy_compat_admission_approver;
 REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM
   platform_outbox_publisher,merchant_settings_api_runtime,merchant_session_revocation_worker,
-  merchant_invitation_delivery_worker,retention_control_scheduler,merchant_provider_health_worker,legacy_compat_runtime,migration_control_worker,migration_traffic_actuator,
+  merchant_invitation_delivery_worker,merchant_notification_worker,retention_control_scheduler,merchant_provider_health_worker,legacy_compat_runtime,migration_control_worker,migration_traffic_actuator,
   legacy_compat_admission_requester,legacy_compat_admission_approver;
 REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public FROM
   platform_outbox_publisher,merchant_settings_api_runtime,merchant_session_revocation_worker,
-  merchant_invitation_delivery_worker,retention_control_scheduler,merchant_provider_health_worker,migration_control_worker,migration_traffic_actuator;
+  merchant_invitation_delivery_worker,merchant_notification_worker,retention_control_scheduler,merchant_provider_health_worker,migration_control_worker,migration_traffic_actuator;
 DO $database_connect$
 BEGIN
-  EXECUTE format('GRANT CONNECT ON DATABASE %I TO platform_outbox_publisher,merchant_settings_api_runtime,merchant_session_revocation_worker,merchant_invitation_delivery_worker,retention_control_scheduler,merchant_provider_health_worker,legacy_compat_runtime,legacy_compat_admission_requester,legacy_compat_admission_approver,migration_control_worker,migration_traffic_actuator',current_database());
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO platform_outbox_publisher,merchant_settings_api_runtime,merchant_session_revocation_worker,merchant_invitation_delivery_worker,merchant_notification_worker,retention_control_scheduler,merchant_provider_health_worker,legacy_compat_runtime,legacy_compat_admission_requester,legacy_compat_admission_approver,migration_control_worker,migration_traffic_actuator',current_database());
 END $database_connect$;
 
 -- Migration workload identities remain NOBYPASSRLS and function-only. The
@@ -129,7 +129,13 @@ GRANT EXECUTE ON FUNCTION
   merchant_go_live_state(uuid,uuid),
   list_go_live_requests(integer),
   prepare_go_live_wallets(uuid,timestamptz),
-  decide_go_live_request(uuid,text,text,timestamptz)
+  decide_go_live_request(uuid,text,text,timestamptz),
+  enqueue_current_admin_sign_in_notification(uuid,text),
+  current_admin_notification_settings(uuid,uuid),
+  set_current_admin_notification_preferences(uuid,uuid,text[],text[],text,timestamptz),
+  set_current_admin_account_notifications(boolean,boolean,text,timestamptz),
+  create_current_admin_telegram_link_code(bytea,timestamptz,timestamptz),
+  unlink_current_admin_telegram()
 TO merchant_admin_runtime;
 GRANT SELECT ON signup_business_types,signup_blocked_countries TO merchant_admin_runtime;
 GRANT INSERT ON payment_intent_versions,callback_events,callback_deliveries TO merchant_api_runtime;
@@ -540,6 +546,15 @@ GRANT EXECUTE ON FUNCTION merchant_invitation_delivery_keys_admitted(text[]),
   complete_merchant_invitation_delivery(uuid,uuid,text),
   fail_merchant_invitation_delivery(uuid,uuid,text,integer,integer)
 TO merchant_invitation_delivery_worker;
+-- Notification delivery and Telegram linking are function-only: the worker
+-- has no table privilege and reaches recipients only through claims.
+GRANT EXECUTE ON FUNCTION claim_notification_job(uuid,integer),
+  complete_notification_job(uuid,uuid,text),
+  fail_notification_job(uuid,uuid,text,integer,integer),
+  link_telegram_chat(bytea,bigint),
+  telegram_update_offset(),
+  advance_telegram_update_offset(bigint)
+TO merchant_notification_worker;
 
 -- The retention worker is cross-tenant only through audited SECURITY DEFINER
 -- functions. Its capability role remains NOLOGIN/NOBYPASSRLS and receives no

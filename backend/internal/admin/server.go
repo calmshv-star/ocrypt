@@ -142,6 +142,11 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /admin/v1/session/sessions", s.authenticated(http.HandlerFunc(s.mySessions)))
 	s.mux.Handle("POST /admin/v1/session/sessions/revoke-others", s.authenticated(s.mutating(http.HandlerFunc(s.revokeOtherSessions))))
 	s.mux.Handle("POST /admin/v1/session/sessions/{id}/revoke", s.authenticated(s.mutating(http.HandlerFunc(s.revokeMySession))))
+	s.mux.Handle("GET /admin/v1/notifications", s.authenticated(http.HandlerFunc(s.notificationSettings)))
+	s.mux.Handle("PUT /admin/v1/notifications/merchant", s.authenticated(s.mutating(http.HandlerFunc(s.saveMerchantNotifications))))
+	s.mux.Handle("PUT /admin/v1/notifications/account", s.authenticated(s.mutating(http.HandlerFunc(s.saveAccountNotifications))))
+	s.mux.Handle("POST /admin/v1/notifications/telegram/link", s.authenticated(s.mutating(http.HandlerFunc(s.createTelegramLink))))
+	s.mux.Handle("POST /admin/v1/notifications/telegram/unlink", s.authenticated(s.mutating(http.HandlerFunc(s.unlinkTelegram))))
 	s.mux.Handle("GET /admin/v1/overview", s.authenticated(http.HandlerFunc(s.overview)))
 	s.mux.Handle("GET /admin/v1/intents", s.authenticated(http.HandlerFunc(s.intents)))
 	s.mux.Handle("GET /admin/v1/transfers", s.authenticated(http.HandlerFunc(s.transfers)))
@@ -716,6 +721,7 @@ func (s *Server) callback(w http.ResponseWriter, request *http.Request) {
 	}
 	s.setCookies(w, *authenticated.Tokens, authenticated.Session.AbsoluteExpiresAt)
 	s.service.LabelSession(request.Context(), authenticated.Session, request.UserAgent())
+	s.service.NotifySignIn(request.Context(), authenticated, request.Header.Get("Accept-Language"))
 	if returnPath == "" {
 		returnPath = "/"
 	}
@@ -887,6 +893,68 @@ func (s *Server) refreshCSRF(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	s.setCSRFCookie(w, csrfToken, authenticated.Session.AbsoluteExpiresAt)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// optionalScope reads the scope headers when present; notifications work
+// for every user and add a merchant section for a merchant scope.
+func optionalScope(w http.ResponseWriter, request *http.Request) (Scope, bool) {
+	if request.Header.Get("X-Admin-Tenant-ID") == "" && request.Header.Get("X-Admin-Merchant-ID") == "" {
+		return Scope{}, true
+	}
+	scope, err := requestedScope(request)
+	if err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid_scope", "The scope is invalid.")
+		return Scope{}, false
+	}
+	return scope, true
+}
+
+func (s *Server) notificationSettings(w http.ResponseWriter, request *http.Request) {
+	scope, ok := optionalScope(w, request)
+	if !ok {
+		return
+	}
+	settings, err := s.service.NotificationSettings(request.Context(), authenticatedFrom(request.Context()).Principal, scope)
+	respond(w, settings, err)
+}
+
+func (s *Server) saveMerchantNotifications(w http.ResponseWriter, request *http.Request) {
+	scope, ok := optionalScope(w, request)
+	if !ok {
+		return
+	}
+	var input MerchantNotificationInput
+	if !s.decode(w, request, &input) {
+		return
+	}
+	settings, err := s.service.SaveMerchantNotifications(request.Context(), authenticatedFrom(request.Context()).Principal, scope, input)
+	respond(w, settings, err)
+}
+
+func (s *Server) saveAccountNotifications(w http.ResponseWriter, request *http.Request) {
+	scope, ok := optionalScope(w, request)
+	if !ok {
+		return
+	}
+	var input AccountNotificationInput
+	if !s.decode(w, request, &input) {
+		return
+	}
+	settings, err := s.service.SaveAccountNotifications(request.Context(), authenticatedFrom(request.Context()), scope, input)
+	respond(w, settings, err)
+}
+
+func (s *Server) createTelegramLink(w http.ResponseWriter, request *http.Request) {
+	link, err := s.service.CreateTelegramLink(request.Context(), authenticatedFrom(request.Context()).Principal)
+	respond(w, link, err)
+}
+
+func (s *Server) unlinkTelegram(w http.ResponseWriter, request *http.Request) {
+	if err := s.service.UnlinkTelegram(request.Context(), authenticatedFrom(request.Context())); err != nil {
+		respond[any](w, nil, err)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -84,6 +84,15 @@
 {{- if not (empty $outbox.network.httpsEgressPeers) }}{{- fail "JetStream outbox must not inherit arbitrary HTTPS egress" }}{{- end }}
 {{- end }}
 {{- $settings := index .Values.workloads "merchant-settings-api" -}}
+{{- $notifications := index .Values.workloads "notification-worker" -}}
+{{- if $notifications.enabled }}
+{{- if ne $notifications.workerIDEnv "NOTIFICATION_WORKER_ID" }}{{- fail "notification worker identity must come from the unique pod UID" }}{{- end }}
+{{- if not (hasPrefix "https://" (toString $notifications.env.NOTIFICATION_CABINET_URL)) }}{{- fail "notification cabinet URL must use HTTPS" }}{{- end }}
+{{- if and (empty $notifications.env.NOTIFICATION_EMAIL_RELAY_URL) (empty $notifications.env.NOTIFICATION_TELEGRAM_BOT_TOKEN_FILE) }}{{- fail "notification worker needs the email relay or a Telegram bot token" }}{{- end }}
+{{- if and (not (empty $notifications.env.NOTIFICATION_EMAIL_RELAY_URL)) (not (hasPrefix "https://" (toString $notifications.env.NOTIFICATION_EMAIL_RELAY_URL))) }}{{- fail "notification email relay URL must use HTTPS" }}{{- end }}
+{{- if empty $notifications.network.httpsEgressPeers }}{{- fail "notification worker requires explicitly admitted HTTPS egress peers" }}{{- end }}
+{{- if $notifications.service.enabled }}{{- fail "notification worker health must remain pod-private without a Service" }}{{- end }}
+{{- end }}
 {{- $invitationDelivery := index .Values.workloads "merchant-invitation-delivery-worker" -}}
 {{- if and $settings.enabled (eq (toString $settings.env.MERCHANT_SETTINGS_EMAIL_INVITES_ENABLED) "true") (not $invitationDelivery.enabled) }}{{- fail "email invitations require merchant-invitation-delivery-worker" }}{{- end }}
 {{- if $invitationDelivery.enabled }}
