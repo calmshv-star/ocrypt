@@ -1,0 +1,41 @@
+{
+  "chains": [
+    {
+      "name": "bsc",
+      "chain_id": 56,
+      "filter": {
+        "address": "0x55d398326f99059fF775485246999027B3197955",
+        "topics": [
+          "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+        ]
+      },
+      "finality_blocks": 15,
+      "recent_offset": 200,
+      "archive_age_blocks": 345600,
+      "span": 10,
+      "min_agreeing": 2,
+      "endpoints": [
+        {
+          "id": "publicnode",
+          "url": "https://bsc-rpc.publicnode.com"
+        },
+        {
+          "id": "blxr",
+          "url": "https://bsc.rpc.blxrbdn.com"
+        },
+        {
+          "id": "onerpc",
+          "url": "https://1rpc.io/bnb"
+        },
+        {
+          "id": "club48",
+          "url": "https://rpc-bsc.48.club"
+        },
+        {
+          "id": "fastnode",
+          "url": "https://public-bsc-mainnet.fastnode.io"
+        }
+      ]
+    }
+  ]
+}
