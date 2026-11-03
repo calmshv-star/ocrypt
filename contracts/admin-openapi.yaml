@@ -142,9 +142,7 @@ paths:
         - {name: state, in: query, required: true, schema: {type: string, minLength: 43}}
         - {name: code, in: query, required: true, schema: {type: string, minLength: 1}}
       responses:
-        '303': {description: Session and CSRF cookies set; invitation callbacks receive an inert invitation-bound session and a generic /#/invite redirect}
-        '401': {$ref: '#/components/responses/Problem'}
-        '403': {$ref: '#/components/responses/Problem'}
+        '303': {description: 'Session and CSRF cookies set; invitation callbacks receive an inert invitation-bound session and a generic /#/invite redirect. A failed callback sets no session and redirects to /#/sign-in-failed?reason= one of cancelled, provider, expired, not_allowed, mfa or failed.'}
   /admin/v1/auth/step-up:
     get:
       tags: [Authentication]

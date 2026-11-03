@@ -1322,5 +1322,13 @@ export const es = {
   "admin.reviewTitle": "Su solicitud está en revisión",
   "admin.reviewBody": "Revisamos cada cuenta nueva antes de que pueda aceptar pagos. Vuelva a iniciar sesión más tarde para ver el resultado.",
   "admin.rejectedTitle": "No pudimos abrir esta cuenta",
-  "admin.rejectedBody": "Su solicitud no superó nuestras comprobaciones. Contacte con soporte si cree que es un error."
+  "admin.rejectedBody": "Su solicitud no superó nuestras comprobaciones. Contacte con soporte si cree que es un error.",
+  "admin.signInFailedTitle": "No se completó el inicio de sesión",
+  "admin.signInFailed.cancelled": "Se canceló el inicio de sesión. Puede intentarlo de nuevo.",
+  "admin.signInFailed.expired": "El enlace de inicio de sesión caducó o ya se usó. Ocurre si el inicio tarda demasiado o continúa en otra pestaña. Inténtelo de nuevo.",
+  "admin.signInFailed.not_allowed": "Esta cuenta no tiene acceso al panel. Pida una invitación a su administrador o cree una cuenta.",
+  "admin.signInFailed.mfa": "Se requiere autenticación de dos factores. Configúrela con su proveedor de identidad y vuelva a iniciar sesión.",
+  "admin.signInFailed.provider": "El proveedor de identidad no pudo completar el inicio de sesión. Inténtelo en unos minutos.",
+  "admin.signInFailed.failed": "No se pudo completar el inicio de sesión. Inténtelo de nuevo.",
+  "admin.signInFailed.back": "Volver al panel"
 } satisfies Messages;

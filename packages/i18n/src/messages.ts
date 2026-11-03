@@ -1320,7 +1320,15 @@ export const en = {
   "admin.reviewTitle": "Your application is being reviewed",
   "admin.reviewBody": "We check every new account before it can accept payments. Sign in again later to see the result.",
   "admin.rejectedTitle": "We could not open this account",
-  "admin.rejectedBody": "Your application did not pass our checks. Contact support if you think this is a mistake."
+  "admin.rejectedBody": "Your application did not pass our checks. Contact support if you think this is a mistake.",
+  "admin.signInFailedTitle": "Sign-in did not complete",
+  "admin.signInFailed.cancelled": "Sign-in was cancelled. You can try again.",
+  "admin.signInFailed.expired": "The sign-in link expired or was already used. This happens when sign-in takes too long or continues in another tab. Try again.",
+  "admin.signInFailed.not_allowed": "This account has no access to the cabinet. Ask your administrator for an invitation, or create an account.",
+  "admin.signInFailed.mfa": "Two-factor authentication is required. Set it up with your identity provider, then sign in again.",
+  "admin.signInFailed.provider": "The identity provider could not complete sign-in. Try again in a few minutes.",
+  "admin.signInFailed.failed": "Sign-in could not be completed. Try again.",
+  "admin.signInFailed.back": "Back to the cabinet"
 } as const;
 
 export type MessageKey = keyof typeof en;

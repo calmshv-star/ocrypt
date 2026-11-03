@@ -1322,5 +1322,13 @@ export const zhCN = {
   "admin.reviewTitle": "您的申请正在审核中",
   "admin.reviewBody": "每个新账户在接受付款前都需要经过审核。请稍后重新登录查看结果。",
   "admin.rejectedTitle": "无法开通此账户",
-  "admin.rejectedBody": "您的申请未通过审核。如您认为有误，请联系支持团队。"
+  "admin.rejectedBody": "您的申请未通过审核。如您认为有误，请联系支持团队。",
+  "admin.signInFailedTitle": "登录未完成",
+  "admin.signInFailed.cancelled": "登录已取消，您可以重试。",
+  "admin.signInFailed.expired": "登录链接已过期或已被使用。登录耗时过长或在其他标签页中继续时会出现这种情况。请重试。",
+  "admin.signInFailed.not_allowed": "此账户无权访问控制台。请向管理员申请邀请，或创建账户。",
+  "admin.signInFailed.mfa": "需要双重验证。请在身份提供方完成设置后重新登录。",
+  "admin.signInFailed.provider": "身份提供方无法完成登录，请几分钟后重试。",
+  "admin.signInFailed.failed": "无法完成登录，请重试。",
+  "admin.signInFailed.back": "返回控制台"
 } satisfies Messages;

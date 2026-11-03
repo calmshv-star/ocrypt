@@ -1322,5 +1322,13 @@ export const fr = {
   "admin.reviewTitle": "Votre demande est en cours de vérification",
   "admin.reviewBody": "Nous vérifions chaque nouveau compte avant qu’il puisse accepter des paiements. Reconnectez-vous plus tard pour voir le résultat.",
   "admin.rejectedTitle": "Nous n’avons pas pu ouvrir ce compte",
-  "admin.rejectedBody": "Votre demande n’a pas passé nos contrôles. Contactez le support si vous pensez qu’il s’agit d’une erreur."
+  "admin.rejectedBody": "Votre demande n’a pas passé nos contrôles. Contactez le support si vous pensez qu’il s’agit d’une erreur.",
+  "admin.signInFailedTitle": "La connexion n’a pas abouti",
+  "admin.signInFailed.cancelled": "La connexion a été annulée. Vous pouvez réessayer.",
+  "admin.signInFailed.expired": "Le lien de connexion a expiré ou a déjà été utilisé. Cela arrive si la connexion prend trop de temps ou continue dans un autre onglet. Réessayez.",
+  "admin.signInFailed.not_allowed": "Ce compte n’a pas accès à l’espace. Demandez une invitation à votre administrateur ou créez un compte.",
+  "admin.signInFailed.mfa": "L’authentification à deux facteurs est requise. Configurez-la chez votre fournisseur d’identité, puis reconnectez-vous.",
+  "admin.signInFailed.provider": "Le fournisseur d’identité n’a pas pu terminer la connexion. Réessayez dans quelques minutes.",
+  "admin.signInFailed.failed": "La connexion n’a pas pu être terminée. Réessayez.",
+  "admin.signInFailed.back": "Retour à l’espace"
 } satisfies Messages;

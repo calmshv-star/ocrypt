@@ -669,23 +669,31 @@ func (s *Server) stepUp(w http.ResponseWriter, request *http.Request) {
 	http.Redirect(w, request, location, http.StatusSeeOther)
 }
 
+// callback finishes a browser navigation from the identity provider. A
+// failure redirects to a cabinet page with one generic reason instead of
+// showing a JSON problem; details stay in the server log.
 func (s *Server) callback(w http.ResponseWriter, request *http.Request) {
-	if request.URL.Query().Get("error") != "" {
-		writeProblem(w, http.StatusUnauthorized, "identity_provider_rejected", "Identity provider authentication failed.")
+	if providerError := request.URL.Query().Get("error"); providerError != "" {
+		slog.Warn("admin authentication rejected by identity provider", "error", providerError)
+		reason := "provider"
+		if providerError == "access_denied" {
+			reason = "cancelled"
+		}
+		s.callbackFailed(w, request, reason)
 		return
 	}
 	correlation, ok := uniqueCookie(request, oidcCookieName)
 	state := request.URL.Query().Get("state")
 	if !ok || len(state) < 43 || !tokenMatches(tokenHash(correlation), state) {
 		slog.Warn("admin authentication correlation rejected", "cookie_present", ok, "state_length", len(state))
-		writeProblem(w, http.StatusUnauthorized, "authentication_failed", "Authentication failed.")
+		s.callbackFailed(w, request, "expired")
 		return
 	}
 	s.clearOIDCCookie(w)
 	authenticated, returnPath, err := s.service.CompleteCallback(request.Context(), state, request.URL.Query().Get("code"))
 	if err != nil {
 		slog.Warn("admin authentication callback rejected", "error", err)
-		writeProblem(w, statusFor(err), "authentication_failed", "Authentication failed.")
+		s.callbackFailed(w, request, callbackFailureReason(err))
 		return
 	}
 	s.setCookies(w, *authenticated.Tokens, authenticated.Session.AbsoluteExpiresAt)
@@ -693,6 +701,27 @@ func (s *Server) callback(w http.ResponseWriter, request *http.Request) {
 		returnPath = "/"
 	}
 	http.Redirect(w, request, returnPath, http.StatusSeeOther)
+}
+
+func (s *Server) callbackFailed(w http.ResponseWriter, request *http.Request, reason string) {
+	s.clearOIDCCookie(w)
+	w.Header().Set("Cache-Control", "no-store")
+	http.Redirect(w, request, "/#/sign-in-failed?reason="+reason, http.StatusSeeOther)
+}
+
+// callbackFailureReason maps a callback error to the reason the sign-in
+// page explains: what the person can do next, never why exactly it failed.
+func callbackFailureReason(err error) string {
+	switch {
+	case errors.Is(err, ErrStepUpRequired):
+		return "mfa"
+	case errors.Is(err, ErrForbidden):
+		return "not_allowed"
+	case errors.Is(err, ErrUnauthenticated):
+		return "expired"
+	default:
+		return "failed"
+	}
 }
 
 func (s *Server) setOIDCCookie(w http.ResponseWriter, value string) {

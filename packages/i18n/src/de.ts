@@ -1322,5 +1322,13 @@ export const de = {
   "admin.reviewTitle": "Ihr Antrag wird geprüft",
   "admin.reviewBody": "Wir prüfen jedes neue Konto, bevor es Zahlungen annehmen kann. Melden Sie sich später erneut an, um das Ergebnis zu sehen.",
   "admin.rejectedTitle": "Dieses Konto konnte nicht eröffnet werden",
-  "admin.rejectedBody": "Ihr Antrag hat unsere Prüfung nicht bestanden. Wenden Sie sich an den Support, wenn Sie das für einen Fehler halten."
+  "admin.rejectedBody": "Ihr Antrag hat unsere Prüfung nicht bestanden. Wenden Sie sich an den Support, wenn Sie das für einen Fehler halten.",
+  "admin.signInFailedTitle": "Die Anmeldung wurde nicht abgeschlossen",
+  "admin.signInFailed.cancelled": "Die Anmeldung wurde abgebrochen. Sie können es erneut versuchen.",
+  "admin.signInFailed.expired": "Der Anmeldelink ist abgelaufen oder wurde bereits verwendet. Das passiert, wenn die Anmeldung zu lange dauert oder in einem anderen Tab weitergeht. Bitte erneut versuchen.",
+  "admin.signInFailed.not_allowed": "Dieses Konto hat keinen Zugriff auf das Portal. Bitten Sie Ihren Administrator um eine Einladung oder erstellen Sie ein Konto.",
+  "admin.signInFailed.mfa": "Zwei-Faktor-Authentifizierung ist erforderlich. Richten Sie sie bei Ihrem Identitätsanbieter ein und melden Sie sich erneut an.",
+  "admin.signInFailed.provider": "Der Identitätsanbieter konnte die Anmeldung nicht abschließen. Versuchen Sie es in einigen Minuten erneut.",
+  "admin.signInFailed.failed": "Die Anmeldung konnte nicht abgeschlossen werden. Bitte erneut versuchen.",
+  "admin.signInFailed.back": "Zurück zum Portal"
 } satisfies Messages;
