@@ -124,7 +124,9 @@ type CheckoutRoute struct {
 	Provider        string `json:"provider"`
 	ProviderID      string `json:"provider_id,omitempty"`
 	Network         string `json:"network,omitempty"`
+	NetworkName     string `json:"network_name,omitempty"`
 	Asset           string `json:"asset"`
+	AssetSymbol     string `json:"asset_symbol,omitempty"`
 	Amount          string `json:"amount"`
 	ReceivedAmount  string `json:"received_amount,omitempty"`
 	RemainingAmount string `json:"remaining_amount,omitempty"`
@@ -132,6 +134,7 @@ type CheckoutRoute struct {
 	TopUpAllowed    *bool  `json:"top_up_allowed,omitempty"`
 	Address         string `json:"address,omitempty"`
 	PaymentURL      string `json:"payment_url,omitempty"`
+	PaymentURI      string `json:"payment_uri,omitempty"`
 	TransactionHash string `json:"transaction_hash,omitempty"`
 	ExplorerURL     string `json:"explorer_url,omitempty"`
 }
@@ -148,7 +151,10 @@ type CheckoutSession struct {
 	ExpiresAt       time.Time       `json:"expires_at"`
 	SelectedRouteID string          `json:"selected_route_id"`
 	Routes          []CheckoutRoute `json:"routes"`
-	Version         int64           `json:"-"`
+	// DirectToMerchant is true only in the noncustodial edition, where every
+	// receiving address belongs to the merchant (CHK-6).
+	DirectToMerchant bool  `json:"direct_to_merchant,omitempty"`
+	Version          int64 `json:"-"`
 }
 
 type ReceiptTarget struct {

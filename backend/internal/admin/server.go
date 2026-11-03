@@ -131,6 +131,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /readyz", s.ready)
 	s.mux.HandleFunc("GET /admin/v1/auth/login", s.login)
 	s.mux.HandleFunc("POST /admin/v1/auth/invitation", s.invitationLogin)
+	s.mux.HandleFunc("POST /admin/v1/auth/signup", s.signup)
+	s.mux.HandleFunc("GET /admin/v1/auth/signup/options", s.signupOptions)
 	s.mux.HandleFunc("GET /admin/v1/auth/callback", s.callback)
 	s.mux.Handle("GET /admin/v1/auth/step-up", s.authenticated(http.HandlerFunc(s.stepUp)))
 	s.mux.Handle("GET /admin/v1/session/me", s.authenticated(http.HandlerFunc(s.me)))
@@ -556,6 +558,71 @@ func (s *Server) invitationLogin(w http.ResponseWriter, request *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"authorization_url": location})
 }
 
+// signup screens a self-service registration form and starts an OIDC login
+// that requires a verified email and MFA. It never reveals which rule
+// rejected a form.
+func (s *Server) signup(w http.ResponseWriter, request *http.Request) {
+	if enabled, _ := s.service.SignupEnabled(); !enabled {
+		writeProblem(w, http.StatusNotFound, "not_found", "The requested resource was not found.")
+		return
+	}
+	if !s.allowLoginInitiation(request) {
+		w.Header().Set("Retry-After", "60")
+		writeProblem(w, http.StatusTooManyRequests, "rate_limited", "Signup could not be started.")
+		return
+	}
+	if origins := request.Header.Values("Origin"); len(origins) != 1 || origins[0] != s.origin.String() || request.Header.Get("Sec-Fetch-Site") == "cross-site" {
+		writeProblem(w, http.StatusForbidden, "origin_rejected", "Request origin was rejected.")
+		return
+	}
+	contentTypes := request.Header.Values("Content-Type")
+	mediaType, parameters, err := mime.ParseMediaType(strings.Join(contentTypes, ","))
+	if len(contentTypes) != 1 || err != nil || mediaType != "application/json" || len(parameters) != 0 {
+		writeProblem(w, http.StatusBadRequest, "invalid_request", "Request body is invalid.")
+		return
+	}
+	request.Body = http.MaxBytesReader(w, request.Body, s.config.BodyLimit)
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+	var form SignupForm
+	var extra any
+	if decoder.Decode(&form) != nil || !errors.Is(decoder.Decode(&extra), io.EOF) {
+		writeProblem(w, http.StatusBadRequest, "invalid_request", "Request body is invalid.")
+		return
+	}
+	location, correlation, err := s.service.BeginSignup(request.Context(), form)
+	if errors.Is(err, ErrNotFound) {
+		writeProblem(w, http.StatusNotFound, "not_found", "The requested resource was not found.")
+		return
+	}
+	if errors.Is(err, ErrInvalid) {
+		writeProblem(w, http.StatusUnprocessableEntity, "signup_rejected", "This registration cannot be accepted. Check the form or contact support.")
+		return
+	}
+	if err != nil {
+		writeProblem(w, http.StatusServiceUnavailable, "signup_unavailable", "Signup is temporarily unavailable. Try again later.")
+		return
+	}
+	s.setOIDCCookie(w, correlation)
+	writeJSON(w, http.StatusOK, map[string]string{"authorization_url": location})
+}
+
+// signupOptions tells the public signup page whether registration is open,
+// which terms version to accept and which business types are allowed.
+func (s *Server) signupOptions(w http.ResponseWriter, request *http.Request) {
+	enabled, terms := s.service.SignupEnabled()
+	if !enabled {
+		writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
+		return
+	}
+	options, err := s.service.SignupOptions(request.Context())
+	if err != nil {
+		writeProblem(w, http.StatusServiceUnavailable, "unavailable", "Signup options are unavailable.")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "terms_version": terms, "business_types": options.BusinessTypes, "blocked_countries": options.BlockedCountries})
+}
+
 func (s *Server) allowLoginInitiation(request *http.Request) bool {
 	key := sourceAddress(request)
 	if key == "" {
@@ -733,7 +800,7 @@ func (s *Server) assets(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) financialSettings(w http.ResponseWriter, request *http.Request) {
-	auth, scope, ok := s.authorize(w, request, PermissionInfrastructureRead)
+	auth, scope, ok := s.authorizeWallets(w, request, false)
 	if !ok {
 		return
 	}
@@ -761,7 +828,7 @@ type watchWalletImportRequest struct {
 }
 
 func (s *Server) replaceWatchWalletAddress(w http.ResponseWriter, request *http.Request) {
-	auth, scope, ok := s.authorize(w, request, PermissionInfrastructureEdit)
+	auth, scope, ok := s.authorizeWallets(w, request, true)
 	if !ok {
 		return
 	}
@@ -790,7 +857,7 @@ func (s *Server) replaceWatchWalletAddress(w http.ResponseWriter, request *http.
 }
 
 func (s *Server) createWatchWalletImportChallenge(w http.ResponseWriter, request *http.Request) {
-	auth, scope, ok := s.authorize(w, request, PermissionInfrastructureEdit)
+	auth, scope, ok := s.authorizeWallets(w, request, true)
 	if !ok || scope.MerchantID == "" {
 		if ok {
 			respond[any](w, nil, ErrInvalid)
@@ -806,7 +873,7 @@ func (s *Server) createWatchWalletImportChallenge(w http.ResponseWriter, request
 }
 
 func (s *Server) importWatchWallets(w http.ResponseWriter, request *http.Request) {
-	auth, scope, ok := s.authorize(w, request, PermissionInfrastructureEdit)
+	auth, scope, ok := s.authorizeWallets(w, request, true)
 	if !ok || scope.MerchantID == "" {
 		if ok {
 			respond[any](w, nil, ErrInvalid)
@@ -1034,6 +1101,21 @@ func (s *Server) authorize(w http.ResponseWriter, request *http.Request, permiss
 		return AuthResult{}, Scope{}, false
 	}
 	resolved, err := auth.Principal.Authorize(permission, requested)
+	if err != nil {
+		writeProblem(w, statusFor(err), "forbidden", "Permission denied.")
+		return AuthResult{}, Scope{}, false
+	}
+	return auth, resolved, true
+}
+
+func (s *Server) authorizeWallets(w http.ResponseWriter, request *http.Request, write bool) (AuthResult, Scope, bool) {
+	auth := authenticatedFrom(request.Context())
+	requested, err := requestedScope(request)
+	if err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid_scope", "A valid tenant scope is required.")
+		return AuthResult{}, Scope{}, false
+	}
+	resolved, err := AuthorizeWallets(auth.Principal, requested, write)
 	if err != nil {
 		writeProblem(w, statusFor(err), "forbidden", "Permission denied.")
 		return AuthResult{}, Scope{}, false

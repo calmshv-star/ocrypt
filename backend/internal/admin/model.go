@@ -18,6 +18,8 @@ const (
 	PermissionWebhookReplay                  Permission = "webhooks:replay"
 	PermissionInfrastructureRead             Permission = "infrastructure:read"
 	PermissionInfrastructureEdit             Permission = "infrastructure:edit"
+	PermissionWalletsRead                    Permission = "wallets:read"
+	PermissionWalletsWrite                   Permission = "wallets:write"
 	PermissionReconcileRead                  Permission = "reconciliation:read"
 	PermissionAuditRead                      Permission = "audit:read"
 	PermissionTeamAdmin                      Permission = "team:admin"
@@ -87,6 +89,8 @@ const (
 	RoleTreasury        Role = "treasury_operator"
 	RoleSecurityAdmin   Role = "security_admin"
 	RoleAuditor         Role = "auditor"
+	// RoleMerchantOwner is projected from a self-service owner membership.
+	RoleMerchantOwner Role = "merchant_owner"
 )
 
 type Scope struct {
@@ -142,6 +146,7 @@ type LoginAttempt struct {
 	InvitationTenantID   string
 	InvitationMerchantID string
 	ExpectedEmail        string
+	SignupRequestID      string
 	CreatedAt            time.Time
 	ExpiresAt            time.Time
 }
@@ -433,4 +438,21 @@ type ActionRequest struct {
 	RequiresStepUp bool            `json:"requires_step_up"`
 	CreatedAt      time.Time       `json:"created_at"`
 	ExpiresAt      time.Time       `json:"expires_at"`
+}
+
+// SignupForm is the self-service registration form submitted before OIDC.
+type SignupForm struct {
+	CompanyName  string `json:"company_name"`
+	Country      string `json:"country"`
+	BusinessType string `json:"business_type"`
+	Website      string `json:"website,omitempty"`
+	TermsVersion string `json:"terms_version"`
+}
+
+// SelfServiceRegistration is the result of consuming a screened signup.
+type SelfServiceRegistration struct {
+	UserID     string
+	TenantID   string
+	MerchantID string
+	Created    bool
 }

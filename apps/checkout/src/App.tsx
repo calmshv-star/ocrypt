@@ -5,10 +5,10 @@ import QRCode from "qrcode";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 type CheckoutStatus = "pending" | "detected" | "partially_paid" | "confirming" | "needs_review" | "settled" | "expired" | "preparing_payment_route" | "payment_route_failed";
-type OnChainRoute = { id: string; provider: "on_chain"; network: string; asset: string; amount: string; address: string; receivedAmount?: string; remainingAmount?: string; paymentCount?: number; topUpAllowed?: boolean; transactionHash?: string };
+type OnChainRoute = { id: string; provider: "on_chain"; network: string; networkName?: string; asset: string; assetSymbol?: string; amount: string; address: string; receivedAmount?: string; remainingAmount?: string; paymentCount?: number; topUpAllowed?: boolean; transactionHash?: string; paymentURI?: string };
 type HostedRoute = { id: string; provider: "hosted_gateway"; providerId: string; asset: string; amount: string; paymentURL: string };
 type Route = OnChainRoute | HostedRoute;
-type CheckoutSession = { intentId: string; orderId: string; merchantName: string; amountMinor: string; currency: string; currencyScale: number; description: string; status: CheckoutStatus; expiresAt: string; routes: Route[]; selectedRouteId: string };
+type CheckoutSession = { intentId: string; orderId: string; merchantName: string; amountMinor: string; currency: string; currencyScale: number; description: string; status: CheckoutStatus; expiresAt: string; routes: Route[]; selectedRouteId: string; directToMerchant?: boolean };
 type PaymentLinkSelector = { provider: "on_chain"; chainId: string; assetId: string } | { provider: "hosted_gateway"; providerId: string; assetId: string };
 type PaymentLink = { name: string; amountMinor: string; currency: string; currencyScale: number; description: string; allowedRoutes: PaymentLinkSelector[]; expiresAt?: string };
 type ReturnTargets = { success?: string; cancel?: string };
@@ -16,6 +16,17 @@ type Redemption = { checkoutToken: string; checkoutURL: URL; session: CheckoutSe
 type ReceiptSubmission = { id: string; paymentId: string; status: "proof_queued" | "transaction_not_visible"; proofId?: string; chainId: string; transactionId?: string; message: string };
 
 const checkoutTokenPattern = /^cs_[A-Za-z0-9_-]{43}$/;
+// Wallet deep links the server may send (EIP-681, Solana Pay, ton://transfer).
+// Anything else is dropped so a link can never run script or open a web page.
+const paymentURIPattern = /^(?:ethereum:0x[0-9a-fA-F]{40}@[1-9][0-9]*|solana:[1-9A-HJ-NP-Za-km-z]{32,44}\?amount=|ton:\/\/transfer\/)[^\s]*$/;
+// Human names from the server; raw identifiers only as a fallback.
+const displayName = (value: unknown) => typeof value === "string" && value.trim() !== "" && 64 >= value.length ? value.trim() : undefined;
+function routeNetwork(route: Route) { return route.provider === "on_chain" ? route.networkName ?? route.network : ""; }
+function routeAsset(route: Route) { return route.provider === "on_chain" ? route.assetSymbol ?? route.asset : route.asset; }
+// A wallet link must name this route's own receiving address.
+function linkForRoute(uri: unknown, address: string) {
+  return typeof uri === "string" && uri.length <= 2048 && paymentURIPattern.test(uri) && uri.toLowerCase().includes(address.toLowerCase()) ? uri : undefined;
+}
 const paymentLinkTokenPattern = /^pl_[A-Za-z0-9_-]{43}$/;
 const fixtureRoutes: Route[] = [
   { id: "tron-usdt", provider: "on_chain", network: "Tron", asset: "USDT", amount: "1280.00", address: "TWb4A6kVtQJ4z9Yp2mR7sX8cN1hL5uD3eF", transactionHash: "70e31d825cf84e0114c93c5f29dbbe2408eeab421e8a14d49f97d6fba2483f0d" },
@@ -62,7 +73,7 @@ function fixtureSession(params: URLSearchParams): CheckoutSession {
   const expiresIn = Math.max(1, Number(params.get("expires_in") ?? 900));
   const status = readFixtureStatus(params);
   const routes = status === "partially_paid" ? fixtureRoutes.map((route, index) => index === 0 ? { ...route, receivedAmount: "980", remainingAmount: "300", paymentCount: 1, topUpAllowed: true } : route) : fixtureRoutes;
-  return { intentId: params.get("intent_id") ?? "pi_preview_01JQ8H6G2PE3", orderId: params.get("order_id") ?? "CHECKOUT-84913", merchantName: "Demo Store", amountMinor: "128000", currency: "USD", currencyScale: 2, description: "", status, expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(), routes, selectedRouteId: routes.some((route) => route.id === params.get("route")) ? params.get("route")! : routes[0]!.id };
+  return { intentId: params.get("intent_id") ?? "pi_preview_01JQ8H6G2PE3", orderId: params.get("order_id") ?? "CHECKOUT-84913", merchantName: "Demo Store", amountMinor: "128000", currency: "USD", currencyScale: 2, description: "", status, expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(), routes, selectedRouteId: routes.some((route) => route.id === params.get("route")) ? params.get("route")! : routes[0]!.id, directToMerchant: true };
 }
 
 function parseSession(value: unknown): CheckoutSession | null {
@@ -81,11 +92,11 @@ function parseSession(value: unknown): CheckoutSession | null {
       if (typeof candidate.network !== "string" || typeof candidate.address !== "string" || candidate.address.length < 16 || candidate.address.length > 256 || candidate.transaction_hash !== undefined && typeof candidate.transaction_hash !== "string" || candidate.provider_id !== undefined || candidate.payment_url !== undefined) return null;
       const hasProgress = candidate.received_amount !== undefined || candidate.remaining_amount !== undefined || candidate.payment_count !== undefined || candidate.top_up_allowed !== undefined;
       if (hasProgress && (typeof candidate.received_amount !== "string" || !/^[0-9]+(?:\.[0-9]+)?$/.test(candidate.received_amount) || typeof candidate.remaining_amount !== "string" || !/^[0-9]+(?:\.[0-9]+)?$/.test(candidate.remaining_amount) || typeof candidate.payment_count !== "number" || !Number.isSafeInteger(candidate.payment_count) || candidate.payment_count < 1 || typeof candidate.top_up_allowed !== "boolean" || candidate.top_up_allowed && /^0+(?:\.0+)?$/.test(candidate.remaining_amount))) return null;
-      parsedRoutes.push({ id: candidate.id, provider: "on_chain", network: candidate.network, asset: candidate.asset, amount: candidate.amount, address: candidate.address, receivedAmount: hasProgress ? candidate.received_amount as string : undefined, remainingAmount: hasProgress ? candidate.remaining_amount as string : undefined, paymentCount: hasProgress ? candidate.payment_count as number : undefined, topUpAllowed: hasProgress ? candidate.top_up_allowed as boolean : undefined, transactionHash: typeof candidate.transaction_hash === "string" ? candidate.transaction_hash : undefined });
+      parsedRoutes.push({ id: candidate.id, provider: "on_chain", network: candidate.network, asset: candidate.asset, amount: candidate.amount, address: candidate.address, receivedAmount: hasProgress ? candidate.received_amount as string : undefined, remainingAmount: hasProgress ? candidate.remaining_amount as string : undefined, paymentCount: hasProgress ? candidate.payment_count as number : undefined, topUpAllowed: hasProgress ? candidate.top_up_allowed as boolean : undefined, transactionHash: typeof candidate.transaction_hash === "string" ? candidate.transaction_hash : undefined , networkName: displayName(candidate.network_name), assetSymbol: displayName(candidate.asset_symbol), paymentURI: linkForRoute(candidate.payment_uri, candidate.address as string) });
       continue;
     }
     if (candidate.provider === "hosted_gateway") {
-      if (typeof candidate.provider_id !== "string" || typeof candidate.payment_url !== "string" || !safeProviderPaymentURL(candidate.payment_url) || candidate.network !== undefined || candidate.address !== undefined || candidate.transaction_hash !== undefined || candidate.explorer_url !== undefined || candidate.received_amount !== undefined || candidate.remaining_amount !== undefined || candidate.payment_count !== undefined || candidate.top_up_allowed !== undefined) return null;
+      if (typeof candidate.provider_id !== "string" || typeof candidate.payment_url !== "string" || !safeProviderPaymentURL(candidate.payment_url) || candidate.network !== undefined || candidate.network_name !== undefined || candidate.asset_symbol !== undefined || candidate.address !== undefined || candidate.payment_uri !== undefined || candidate.transaction_hash !== undefined || candidate.explorer_url !== undefined || candidate.received_amount !== undefined || candidate.remaining_amount !== undefined || candidate.payment_count !== undefined || candidate.top_up_allowed !== undefined) return null;
       parsedRoutes.push({ id: candidate.id, provider: "hosted_gateway", providerId: candidate.provider_id, asset: candidate.asset, amount: candidate.amount, paymentURL: candidate.payment_url });
       continue;
     }
@@ -93,7 +104,7 @@ function parseSession(value: unknown): CheckoutSession | null {
   }
   if (input.selected_route_id !== "" && !parsedRoutes.some((route) => route.id === input.selected_route_id)) return null;
   if (input.status === "partially_paid" && parsedRoutes.filter((route) => route.provider === "on_chain" && route.receivedAmount !== undefined && route.remainingAmount !== undefined).length !== 1) return null;
-  return { intentId: input.intent_id, orderId: input.order_id, merchantName: input.merchant_name, amountMinor: input.amount_minor, currency: input.currency, currencyScale: input.currency_scale, description: input.description, status: input.status as CheckoutStatus, expiresAt: input.expires_at, routes: parsedRoutes, selectedRouteId: input.selected_route_id };
+  return { intentId: input.intent_id, orderId: input.order_id, merchantName: input.merchant_name, amountMinor: input.amount_minor, currency: input.currency, currencyScale: input.currency_scale, description: input.description, status: input.status as CheckoutStatus, expiresAt: input.expires_at, routes: parsedRoutes, selectedRouteId: input.selected_route_id, directToMerchant: input.direct_to_merchant === true };
 }
 
 function safeProviderPaymentURL(value: string): boolean {
@@ -213,9 +224,16 @@ function readReturns(token: string): ReturnTargets {
   }
 }
 
-function CheckoutChrome({ children }: { children: ReactNode }) {
+function CheckoutChrome({ children, merchantName }: { children: ReactNode; merchantName?: string }) {
   const { locale, locales, localeNames, setLocale, t } = useI18n();
-  return <div className="checkout-page"><a className="mp-skip-link" href="#checkout-main">{t("common.skipContent")}</a><header className="checkout-header"><a aria-label={PRODUCT_NAME} className="checkout-brand" href="/"><span aria-hidden="true" className="checkout-brand__mark"><i /><i /></span><strong>{PRODUCT_NAME}</strong></a><div><Select aria-label={t("common.locale")} onChange={(event) => setLocale(event.target.value as typeof locale)} value={locale}>{locales.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}</Select><ThemeToggle label={t("common.theme")} /></div></header>{children}</div>;
+  return <div className="checkout-page"><a className="mp-skip-link" href="#checkout-main">{t("common.skipContent")}</a><header className="checkout-header"><a aria-label={PRODUCT_NAME} className="checkout-brand" href="/"><span aria-hidden="true" className="checkout-brand__mark"><i /><i /></span><strong>{PRODUCT_NAME}</strong></a><div><Select aria-label={t("common.locale")} onChange={(event) => setLocale(event.target.value as typeof locale)} value={locale}>{locales.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}</Select><ThemeToggle label={t("common.theme")} /></div></header>{children}{merchantName && <footer className="checkout-footer"><p>{t("checkout.paidTo", { merchant: merchantName })}</p><p data-testid="checkout-disclaimer">{t("checkout.poweredBy", { product: PRODUCT_NAME })}</p></footer>}</div>;
+}
+
+// CHK-8: the server refused the visitor's region (HTTP 451). The copy is
+// deliberately neutral and offers no retry.
+function CheckoutRegionUnavailable() {
+  const { t } = useI18n();
+  return <CheckoutChrome><main className="checkout-main checkout-main--state" id="checkout-main"><section className="checkout-state" data-testid="region-unavailable" role="alert"><span aria-hidden="true" className="checkout-state__icon"><LockKeyhole size={26} /></span><h1>{t("checkout.regionUnavailable")}</h1><p>{t("checkout.regionUnavailableHelp")}</p></section></main></CheckoutChrome>;
 }
 
 function CheckoutUnavailable({ loading = false }: { loading?: boolean }) {
@@ -226,11 +244,12 @@ function CheckoutUnavailable({ loading = false }: { loading?: boolean }) {
 function PaymentLinkPage({ token, onRedeemed }: { token: string; onRedeemed: (redemption: Redemption) => void }) {
   const { locale, t } = useI18n();
   const [link, setLink] = useState<PaymentLink | null>(null);
-  const [state, setState] = useState<"loading" | "ready" | "redeeming" | "unavailable" | "rate" | "conflict" | "error">("loading");
+  const [state, setState] = useState<"loading" | "ready" | "redeeming" | "unavailable" | "region" | "rate" | "conflict" | "error">("loading");
   useEffect(() => {
     const controller = new AbortController();
     void fetch(`${apiBase()}/v1/public/payment-links/${encodeURIComponent(token)}`, { headers: { Accept: "application/json" }, credentials: "omit", redirect: "error", cache: "no-store", signal: controller.signal }).then(async (response) => {
       if (response.status === 404) { setState("unavailable"); return; }
+      if (response.status === 451) { setState("region"); return; }
       if (response.status === 429) { setState("rate"); return; }
       if (!response.ok) { setState("error"); return; }
       const parsed = parsePaymentLink(await response.json());
@@ -245,6 +264,7 @@ function PaymentLinkPage({ token, onRedeemed }: { token: string; onRedeemed: (re
     try {
       const response = await fetch(`${apiBase()}/v1/public/payment-links/${encodeURIComponent(token)}/redeem`, { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", "Idempotency-Key": idempotency }, body: "{}", credentials: "omit", redirect: "error" });
       if (response.status === 404) { setState("unavailable"); return; }
+      if (response.status === 451) { setState("region"); return; }
       if (response.status === 409) { setState("conflict"); return; }
       if (response.status === 429) { setState("rate"); return; }
       if (response.status !== 201) { setState("error"); return; }
@@ -256,6 +276,7 @@ function PaymentLinkPage({ token, onRedeemed }: { token: string; onRedeemed: (re
       setState("error");
     }
   };
+  if (state === "region") return <CheckoutRegionUnavailable />;
   const errorCopy = state === "rate" ? "checkout.rateLimited" : state === "conflict" ? "checkout.redeemConflict" : state === "unavailable" ? "checkout.unavailable" : "admin.dataError";
   const selector = link?.allowedRoutes[0];
   return <CheckoutChrome><main className="checkout-main" id="checkout-main"><section className="checkout-intro"><Badge tone="info">{t("checkout.offer")}</Badge><h1>{t("checkout.paymentLinkTitle")}</h1><p>{t("checkout.paymentLinkDescription")}</p></section>{link && selector && (state === "ready" || state === "redeeming") ? <section className="checkout-card payment-link-card" data-testid="payment-link-offer"><div><Badge tone="violet">{t("checkout.offer")}</Badge><h2>{link.name}</h2>{link.description && <p>{link.description}</p>}</div><dl><div><dt>{t("checkout.offerAmount")}</dt><dd data-testid="payment-link-amount">{formatMinor(link.amountMinor, link.currencyScale)} {link.currency}</dd></div><div><dt>{t(selector.provider === "on_chain" ? "common.network" : "checkout.provider")}</dt><dd>{selector.provider === "on_chain" ? selector.chainId : selector.providerId} · {selector.assetId}</dd></div>{link.expiresAt && <div><dt>{t("checkout.offerExpires")}</dt><dd>{new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(Date.parse(link.expiresAt))}</dd></div>}</dl><Button data-testid="redeem-payment-link" disabled={state === "redeeming"} onClick={() => void redeem()}>{t(state === "redeeming" ? "checkout.redeeming" : "checkout.payNow")}</Button></section> : <div className="checkout-link-state" role={state === "loading" ? "status" : "alert"}><strong>{t(state === "loading" ? "checkout.loading" : errorCopy as MessageKey)}</strong>{state !== "loading" && <Button onClick={() => window.location.reload()} variant="secondary">{t("common.retry")}</Button>}</div>}</main></CheckoutChrome>;
@@ -267,6 +288,7 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
   const seed = fixture ? fixtureSession(params) : initialSession ?? null;
   const [session, setSession] = useState<CheckoutSession | null>(seed);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [regionBlocked, setRegionBlocked] = useState(false);
   const [routeId, setRouteId] = useState(seed?.selectedRouteId || seed?.routes.find((item) => item.provider === "on_chain" && item.receivedAmount !== undefined)?.id || seed?.routes[0]?.id || "");
   const [selecting, setSelecting] = useState(false);
   const [selectionFailed, setSelectionFailed] = useState(false);
@@ -298,6 +320,7 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
         const response = await fetch(`${apiBase()}/v1/checkout-sessions/${encodeURIComponent(token)}`, { headers, credentials: "omit", redirect: "error", cache: "no-store", signal: controller.signal });
         if (response.status === 304 && hasSession) { setLoadFailed(false); retryAttempt = 0; schedule(5000); return; }
         if (response.status === 404) { setSession(null); setLoadFailed(true); return; }
+        if (response.status === 451) { setSession(null); setRegionBlocked(true); return; }
         if (!response.ok) throw new Error("checkout_unavailable");
         const parsed = parseSession(await response.json());
         if (!parsed) throw new Error("invalid_checkout_contract");
@@ -339,6 +362,7 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
     try {
       const idempotency = stableIdempotency(`checkout-select:${token}:${nextRoute}`);
       const response = await fetch(`${apiBase()}/v1/checkout-sessions/${encodeURIComponent(token)}/select-route`, { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", "Idempotency-Key": idempotency }, body: JSON.stringify({ route_id: nextRoute }), credentials: "omit", redirect: "error" });
+      if (response.status === 451) { setRegionBlocked(true); return; }
       if (!response.ok) throw new Error("route_selection_failed");
       const parsed = parseSession(await response.json());
       if (!parsed || parsed.selectedRouteId !== nextRoute) throw new Error("invalid_route_selection");
@@ -355,12 +379,14 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
     try {
       const idempotency = stableIdempotency(`checkout-receipt:${token}:${file.name}:${file.size}:${file.lastModified}`);
       const response = await fetch(`${apiBase()}/v1/checkout-sessions/${encodeURIComponent(token)}/receipt`, { method: "POST", headers: { Accept: "application/json", "Content-Type": file.type, "Idempotency-Key": idempotency }, body: file, credentials: "omit", redirect: "error" });
+      if (response.status === 451) { setRegionBlocked(true); return; }
       if (response.status !== 202) throw new Error("receipt_upload_failed");
       const result = parseReceiptSubmission(await response.json());
       if (!result || result.paymentId !== paymentId) throw new Error("invalid_receipt_contract");
       setReceiptState(result.status === "proof_queued" ? "queued" : "missing");
     } catch { setReceiptState("error"); }
   };
+  if (regionBlocked) return <CheckoutRegionUnavailable />;
   if (!session) return <CheckoutUnavailable loading={!loadFailed} />;
   if (!route) {
     const preparationStatus = status === "payment_route_failed" || status === "expired" ? "payment_route_failed" : "preparing_payment_route";
@@ -378,7 +404,7 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
     : status === "settled"
       ? <small className="checkout-return-empty">{t("checkout.returnUnavailable")}</small>
       : null;
-  const routeLabel = route.provider === "on_chain" ? `${route.network} · ${route.asset}` : `${t("checkout.provider")} · ${route.asset}`;
+  const routeLabel = route.provider === "on_chain" ? `${routeNetwork(route)} · ${routeAsset(route)}` : `${t("checkout.provider")} · ${routeAsset(route)}`;
   const routeStatusTitle = route.provider === "hosted_gateway" && status === "pending" ? "checkout.providerPending" : route.provider === "hosted_gateway" && (status === "detected" || status === "confirming") ? "checkout.providerConfirming" : statusTitle;
   const routeStatusHelp = route.provider === "hosted_gateway" && (status === "pending" || status === "detected" || status === "confirming") ? "checkout.providerPendingHelp" : statusHelp;
   const statusSteps: MessageKey[] = route.provider === "hosted_gateway"
@@ -390,7 +416,7 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
   const badgeTone = status === "settled" ? "positive" : status === "expired" ? "negative" : status === "partially_paid" || status === "needs_review" ? "warning" : "info";
   const routeSelectable = status === "pending" && !session.selectedRouteId && session.routes.length > 1;
   const displayTotal = `${formatMinor(session.amountMinor, session.currencyScale)} ${session.currency}`;
-  return <CheckoutChrome><main className="checkout-main" id="checkout-main">
+  return <CheckoutChrome merchantName={session.directToMerchant && route.provider === "on_chain" ? session.merchantName : undefined}><main className="checkout-main" id="checkout-main">
     <section className="checkout-intro">
       <div className="checkout-intro__copy">{fixture && <Badge tone="violet">{t("checkout.preview")}</Badge>}<h1>{t("checkout.title")}</h1><p>{session.description || t("checkout.description")}</p></div>
       <div className="checkout-order-context"><strong>{session.merchantName}</strong><span>{session.orderId}</span><div><small>{t("checkout.offerAmount")}</small><b>{displayTotal}</b></div></div>
@@ -400,13 +426,13 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
     <div className="checkout-layout">
       <section className="checkout-card checkout-card--payment">
         <div className="checkout-route-head">
-          {routeSelectable ? <label><span>{selecting ? t("checkout.selectingRoute") : t("checkout.selectRoute")}</span><Select aria-label={t("checkout.selectRoute")} disabled={selecting} onChange={(event) => void selectRoute(event.target.value)} value={route.id}>{session.routes.map((item) => <option key={item.id} value={item.id}>{item.provider === "on_chain" ? `${item.network} · ${item.asset}` : `${t("checkout.provider")} · ${item.asset}`}</option>)}</Select></label> : <div className="checkout-route-fixed"><small>{t("checkout.selectRoute")}</small><strong><ShieldCheck size={16} />{routeLabel}</strong></div>}
+          {routeSelectable ? <label><span>{selecting ? t("checkout.selectingRoute") : t("checkout.selectRoute")}</span><Select aria-label={t("checkout.selectRoute")} disabled={selecting} onChange={(event) => void selectRoute(event.target.value)} value={route.id}>{session.routes.map((item) => <option key={item.id} value={item.id}>{item.provider === "on_chain" ? `${routeNetwork(item)} · ${routeAsset(item)}` : `${t("checkout.provider")} · ${routeAsset(item)}`}</option>)}</Select></label> : <div className="checkout-route-fixed"><small>{t("checkout.selectRoute")}</small><strong><ShieldCheck size={16} />{routeLabel}</strong></div>}
           <Badge tone={badgeTone}>{t(routeStatusTitle)}</Badge>
         </div>
         {isPartial && <div className="checkout-progress" data-testid="payment-progress">
-          <div><small>{t("checkout.expectedAmount")}</small><strong>{route.amount} <span>{route.asset}</span></strong></div>
-          <div><small>{t("checkout.receivedAmount")}</small><strong data-testid="payment-received">{route.receivedAmount} <span>{route.asset}</span></strong></div>
-          <div><small>{t("checkout.remainingAmount")}</small><strong data-testid="payment-remaining">{route.remainingAmount} <span>{route.asset}</span></strong></div>
+          <div><small>{t("checkout.expectedAmount")}</small><strong>{route.amount} <span>{routeAsset(route)}</span></strong></div>
+          <div><small>{t("checkout.receivedAmount")}</small><strong data-testid="payment-received">{route.receivedAmount} <span>{routeAsset(route)}</span></strong></div>
+          <div><small>{t("checkout.remainingAmount")}</small><strong data-testid="payment-remaining">{route.remainingAmount} <span>{routeAsset(route)}</span></strong></div>
         </div>}
         {route.provider === "on_chain" ? <div className="checkout-payment-grid">
           <div className="checkout-qr">
@@ -415,18 +441,20 @@ function CheckoutPage({ token, initialSession, fixture }: { token: string; initi
             <span data-testid="payment-network"><ShieldCheck size={14} />{routeLabel}</span>
           </div>
           <div className="checkout-payment-data">
-            <div><small>{t(amountLabel)}</small><strong data-copy-value={amountToSend} data-testid="payment-amount">{amountToSend} <span>{route.asset}</span></strong><p className="checkout-fiat-equivalent" data-testid="payment-fiat-equivalent">≈ {displayTotal}</p>{canSendToRoute && <Button data-testid="copy-amount" onClick={() => void copy("amount", amountToSend)} size="sm" variant="secondary">{copied === "amount" ? <Check size={14} /> : <Copy size={14} />}{copied === "amount" ? t("common.copied") : t("checkout.copyAmount")}</Button>}</div>
+            <div><small>{t(amountLabel)}</small><strong data-copy-value={amountToSend} data-testid="payment-amount">{amountToSend} <span>{routeAsset(route)}</span></strong><p className="checkout-fiat-equivalent" data-testid="payment-fiat-equivalent">≈ {displayTotal}</p>{canSendToRoute && <Button data-testid="copy-amount" onClick={() => void copy("amount", amountToSend)} size="sm" variant="secondary">{copied === "amount" ? <Check size={14} /> : <Copy size={14} />}{copied === "amount" ? t("common.copied") : t("checkout.copyAmount")}</Button>}</div>
             <div><small>{t("checkout.address")}</small><code data-testid="payment-address">{route.address}</code>{canSendToRoute && <Button data-testid="copy-address" onClick={() => void copy("address", route.address)} size="sm" variant="secondary">{copied === "address" ? <Check size={14} /> : <Copy size={14} />}{copied === "address" ? t("common.copied") : t("checkout.copyAddress")}</Button>}</div>
+            {canSendToRoute && route.paymentURI && <div className="checkout-wallet-link"><a className="mp-button mp-button--primary mp-button--md" data-testid="open-in-wallet" href={route.paymentURI}><ExternalLink aria-hidden="true" size={16} />{t("checkout.openInWallet", { network: routeNetwork(route) })}</a><small>{t("checkout.openInWalletHelp")}</small></div>}
             {isPartial && <p className={route.topUpAllowed ? "checkout-topup-note" : "checkout-topup-note is-locked"} data-testid="top-up-instruction">{t(route.topUpAllowed ? "checkout.topUpInstruction" : "checkout.topUpUnavailable")}</p>}
             <div className="checkout-expiry"><Clock3 size={16} /><span>{t("checkout.expiresIn", { time: remaining })}</span></div>
           </div>
+          {canSendToRoute && <div className="checkout-transfer-guidance is-network" data-testid="payment-network-warning"><CircleAlert aria-hidden="true" size={20} /><div><strong>{t("checkout.wrongNetworkTitle", { asset: routeAsset(route), network: routeNetwork(route) })}</strong><p>{t("checkout.wrongNetworkHelp")}</p></div></div>}
           {canSendToRoute && <div className="checkout-transfer-guidance" data-testid="payment-fee-warning"><CircleAlert aria-hidden="true" size={20} /><div><strong>{t("checkout.networkFeeTitle")}</strong><p>{t("checkout.networkFeeHelp")}</p></div></div>}
-        </div> : <div className="checkout-provider"><ShieldCheck size={42} /><small>{t("checkout.providerAmount")}</small><strong data-testid="payment-amount">{route.amount} <span>{route.asset}</span></strong><p>{t("checkout.providerInstructions")}</p>{status !== "expired" && status !== "settled" && <a className="checkout-provider-link" data-testid="provider-payment-link" href={route.paymentURL} rel="noopener noreferrer" target="_blank">{t("checkout.continueProvider")}<ExternalLink size={16} /></a>}<div className="checkout-expiry"><Clock3 size={16} /><span>{t("checkout.expiresIn", { time: remaining })}</span></div></div>}
+        </div> : <div className="checkout-provider"><ShieldCheck size={42} /><small>{t("checkout.providerAmount")}</small><strong data-testid="payment-amount">{route.amount} <span>{routeAsset(route)}</span></strong><p>{t("checkout.providerInstructions")}</p>{status !== "expired" && status !== "settled" && <a className="checkout-provider-link" data-testid="provider-payment-link" href={route.paymentURL} rel="noopener noreferrer" target="_blank">{t("checkout.continueProvider")}<ExternalLink size={16} /></a>}<div className="checkout-expiry"><Clock3 size={16} /><span>{t("checkout.expiresIn", { time: remaining })}</span></div></div>}
         <div className={`checkout-status is-${status}`} role="status"><span>{status === "settled" ? <CheckCircle2 size={22} /> : <RadioTower size={22} />}</span><div><strong>{t(routeStatusTitle)}</strong><p>{t(routeStatusHelp)}</p></div></div>
         {route.provider === "on_chain" && status !== "settled" && status !== "expired" && <details className={`checkout-receipt is-${receiptState}`} data-testid="receipt-assistance" open={receiptState !== "idle" || undefined}><summary><span aria-hidden="true">{receiptState === "queued" ? <FileCheck2 size={20} /> : <Upload size={20} />}</span><strong>{t(receiptState === "queued" ? "checkout.receiptQueued" : receiptState === "missing" ? "checkout.receiptMissing" : receiptState === "error" ? "checkout.receiptFailed" : receiptState === "uploading" ? "checkout.receiptUploading" : "checkout.receiptTitle")}</strong><ChevronDown aria-hidden="true" size={17} /></summary><div className="checkout-receipt__body"><p>{t(receiptState === "queued" ? "checkout.receiptQueuedHelp" : receiptState === "missing" ? "checkout.receiptMissingHelp" : receiptState === "error" ? "checkout.receiptFailedHelp" : "checkout.receiptHelp")}</p>{(receiptState === "idle" || receiptState === "missing" || receiptState === "error") && <label className="checkout-receipt-button"><Upload size={14} />{t(receiptState === "idle" ? "checkout.receiptAction" : "checkout.receiptRetry")}<input accept="image/jpeg,image/png,image/webp" data-testid="receipt-file" onChange={(event) => { const file=event.target.files?.[0]; if(file) void submitReceipt(file); event.currentTarget.value=""; }} type="file" /></label>}</div></details>}
         <ol aria-label={t("common.status")} className="checkout-steps">{statusSteps.map((key, index) => <li className={index + 1 <= step ? "is-complete" : ""} key={key}><span>{index + 1 <= step ? <Check size={12} /> : index + 1}</span><strong>{t(key)}</strong></li>)}</ol>
       </section>
-      <aside className="checkout-card checkout-summary"><h2>{t("common.details")}</h2><strong className="checkout-summary__merchant">{session.merchantName}</strong><dl><div><dt>{t("checkout.order")}</dt><dd>{session.orderId}</dd></div>{route.provider === "on_chain" ? <div><dt>{t("common.network")}</dt><dd>{route.network}</dd></div> : <div><dt>{t("checkout.provider")}</dt><dd>{route.providerId}</dd></div>}<div><dt>{t("common.asset")}</dt><dd>{route.asset}</dd></div>{route.provider === "on_chain" && route.paymentCount !== undefined && <div><dt>{t("checkout.paymentCount")}</dt><dd>{route.paymentCount}</dd></div>}</dl><details className="checkout-technical"><summary>{t("checkout.intent")}</summary><code>{session.intentId}</code></details>{explorerUrl && <a className="checkout-explorer" href={explorerUrl} rel="noreferrer" target="_blank">{t("checkout.openExplorer")}<ExternalLink size={14} /></a>}{returnControl}<p><LockKeyhole size={16} />{t(route.provider === "hosted_gateway" ? "checkout.providerSecureNote" : "checkout.secureNote")}</p></aside>
+      <aside className="checkout-card checkout-summary"><h2>{t("common.details")}</h2><strong className="checkout-summary__merchant">{session.merchantName}</strong><dl><div><dt>{t("checkout.order")}</dt><dd>{session.orderId}</dd></div>{route.provider === "on_chain" ? <div><dt>{t("common.network")}</dt><dd>{routeNetwork(route)}</dd></div> : <div><dt>{t("checkout.provider")}</dt><dd>{route.providerId}</dd></div>}<div><dt>{t("common.asset")}</dt><dd>{routeAsset(route)}</dd></div>{route.provider === "on_chain" && route.paymentCount !== undefined && <div><dt>{t("checkout.paymentCount")}</dt><dd>{route.paymentCount}</dd></div>}</dl><details className="checkout-technical"><summary>{t("checkout.intent")}</summary><code>{session.intentId}</code></details>{explorerUrl && <a className="checkout-explorer" href={explorerUrl} rel="noreferrer" target="_blank">{t("checkout.openExplorer")}<ExternalLink size={14} /></a>}{returnControl}<p><LockKeyhole size={16} />{t(route.provider === "hosted_gateway" ? "checkout.providerSecureNote" : "checkout.secureNote")}</p></aside>
     </div>
   </main></CheckoutChrome>;
 }

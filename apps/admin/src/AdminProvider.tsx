@@ -38,7 +38,7 @@ const previewPrincipal: AdminPrincipal = {
     "webhook_settings:rotate", "api_clients:read", "api_clients:write", "api_clients:rotate", "management_audit:read",
     "matching_policy:read", "matching_policy:write", "matching_policy:approve",
     "matching_policy:activate", "platform_config:read", "platform_config:write", "platform_config:request", "platform_config:approve",
-    "platform_config:schedule", "platform_config:activate", "platform_config:rollback", "platform_config:emergency", "financial:read",
+    "platform_config:schedule", "platform_config:activate", "platform_config:rollback", "platform_config:emergency", "financial:read", "wallets:read", "wallets:write",
   ],
   scopes: [{ tenant_id: "10000000-0000-4000-8000-000000000003", merchant_id: "10000000-0000-4000-8000-000000000004" }],
   amr: ["preview"]

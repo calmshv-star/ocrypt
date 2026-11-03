@@ -848,3 +848,8 @@
   .payment-link-card dl > div { align-items: flex-start; flex-direction: column; gap: 4px; }
   .payment-link-card dd { text-align: left; }
 }
+.checkout-footer { display: grid; gap: 4px; justify-items: center; padding: 8px 16px 28px; color: var(--mp-muted); font-size: 12px; text-align: center; }
+.checkout-footer p { margin: 0; max-width: 560px; }
+.checkout-wallet-link { display: grid; gap: 6px; justify-items: start; }
+.checkout-wallet-link a { text-decoration: none; }
+.checkout-wallet-link small { color: var(--mp-muted); font-size: 12px; line-height: 1.45; }

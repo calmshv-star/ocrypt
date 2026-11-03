@@ -36,8 +36,8 @@ export function FinancialSettingsPage() {
   const { t } = useI18n();
   const admin = useAdmin();
   const queryClient = useQueryClient();
-  const canRead = admin.can("infrastructure:read");
-  const canEdit = admin.can("infrastructure:edit");
+  const canRead = admin.can("infrastructure:read") || admin.can("wallets:read");
+  const canEdit = admin.can("infrastructure:edit") || admin.can("wallets:write");
   const scope = admin.scope;
   const [editing,setEditing] = useState("");
   const [address,setAddress] = useState("");

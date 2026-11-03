@@ -83,6 +83,9 @@ describe("hosted checkout", () => {
     expect(screen.getByTestId("payment-fiat-equivalent")).toHaveTextContent("≈ 1280.00 USD");
     expect(screen.getByText("This QR code contains only the receiving address. Enter the amount separately.")).toBeInTheDocument();
     expect(screen.getByTestId("payment-fee-warning")).toHaveTextContent("wallet or exchange may add or deduct its fee");
+    expect(screen.getByTestId("payment-network-warning")).toHaveTextContent("Send only USDT on Tron");
+    expect(screen.getByTestId("checkout-disclaimer")).toHaveTextContent("payment software, not the recipient of funds");
+    expect(screen.getByText("The payment goes directly to Demo Store.")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("update the payment status automatically");
     expect(screen.getByText(/Time remaining to pay:/)).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Select a payment route" })).not.toBeInTheDocument();
@@ -112,6 +115,43 @@ describe("hosted checkout", () => {
     expect(document.querySelector('a[href*="evil.example"]')).toBeNull();
     expect(screen.getByRole("link", { name: "Open transaction explorer" })).toHaveAttribute("href", "https://tronscan.org/#/transaction/70e31d825cf84e0114c93c5f29dbbe2408eeab421e8a14d49f97d6fba2483f0d");
     expect(fetch).toHaveBeenCalledWith(`https://merchant-api.example/v1/checkout-sessions/${csToken}`, expect.objectContaining({ credentials: "omit", redirect: "error" }));
+  });
+
+  it("opens the payer's wallet only through a vetted payment link (CHK-2)", async () => {
+    vi.stubEnv("VITE_CHECKOUT_FIXTURE_MODE", "false"); vi.stubEnv("VITE_CHECKOUT_API_URL", "https://merchant-api.example");
+    const link = "ethereum:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48@1/transfer?address=0x8077444bed90f3ca9157ab8bf8d2c51103b2ce89&uint256=1280000000";
+    const base = session("pending", routeTwo);
+    const withLink = { ...base, routes: [base.routes[0]!, { ...base.routes[1]!, network_name: "Ethereum", asset_symbol: "USDC", payment_uri: link }] };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(withLink)));
+    window.history.replaceState({}, "", `/checkout?token=${csToken}`);
+    const view = renderCheckout();
+    expect(await screen.findByTestId("open-in-wallet")).toHaveAttribute("href", link);
+    expect(screen.getByTestId("open-in-wallet")).toHaveTextContent("Open in wallet · Ethereum");
+    expect(screen.getByTestId("payment-network-warning")).toHaveTextContent("Send only USDC on Ethereum");
+    expect(screen.getByTestId("payment-amount")).toHaveTextContent("1280.00 USDC");
+    view.unmount();
+    // A link to another address, or on a route that no longer takes a transfer, is never shown.
+    const elsewhere = "ethereum:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48@1/transfer?address=0x1111111111111111111111111111111111111111&uint256=1280000000";
+    const closed = [
+      { ...base, routes: [base.routes[0]!, { ...base.routes[1]!, payment_uri: elsewhere }] },
+      { ...session("settled", routeTwo), routes: [base.routes[0]!, { ...base.routes[1]!, payment_uri: link }] },
+      { ...session("partially_paid", routeTwo), routes: [base.routes[0]!, { ...base.routes[1]!, payment_uri: link, received_amount: "1", remaining_amount: "1279", payment_count: 1, top_up_allowed: false }] }
+    ];
+    for (const body of closed) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(body)));
+      const next = renderCheckout();
+      expect(await screen.findByTestId("payment-address")).toBeInTheDocument();
+      expect(screen.queryByTestId("open-in-wallet")).not.toBeInTheDocument();
+      next.unmount();
+    }
+    for (const forged of ["javascript:alert(1)", "https://evil.example/pay", "ethereum:0x8077444bed90f3ca9157ab8bf8d2c51103b2ce89@1 onclick"]) {
+      const bad = { ...base, routes: [base.routes[0]!, { ...base.routes[1]!, payment_uri: forged }] };
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(bad)));
+      const next = renderCheckout();
+      expect(await screen.findByTestId("payment-address")).toBeInTheDocument();
+      expect(screen.queryByTestId("open-in-wallet")).not.toBeInTheDocument();
+      next.unmount();
+    }
   });
 
   it("uses canonical EVM chain identifiers for the transaction explorer", async () => {
@@ -325,6 +365,45 @@ describe("hosted checkout", () => {
     expect(screen.queryByRole("link", { name: "Cancel and return" })).not.toBeInTheDocument();
     expect(document.querySelector('a[href*="evil.example"]')).toBeNull();
     await waitFor(() => expect(window.sessionStorage.getItem(`checkout-returns:${csToken}`)).not.toContain("/cancel"));
+  });
+
+  it("says the payment goes to the merchant only when the server guarantees it (CHK-6)", async () => {
+    vi.stubEnv("VITE_CHECKOUT_FIXTURE_MODE", "false"); vi.stubEnv("VITE_CHECKOUT_API_URL", "https://merchant-api.example");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(session("pending"))));
+    window.history.replaceState({}, "", `/checkout?token=${csToken}`);
+    const custodial = renderCheckout();
+    expect(await screen.findByTestId("payment-address")).toBeInTheDocument();
+    expect(screen.queryByTestId("checkout-disclaimer")).not.toBeInTheDocument();
+    custodial.unmount();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ ...session("pending"), direct_to_merchant: true })));
+    renderCheckout();
+    expect(await screen.findByTestId("checkout-disclaimer")).toHaveTextContent("not the recipient of funds");
+    expect(screen.getByText("The payment goes directly to Demo Store.")).toBeInTheDocument();
+  });
+
+  it("shows the region message when route selection is refused", async () => {
+    vi.stubEnv("VITE_CHECKOUT_FIXTURE_MODE", "false"); vi.stubEnv("VITE_CHECKOUT_API_URL", "https://merchant-api.example");
+    vi.stubGlobal("fetch", vi.fn((input: string) => Promise.resolve(String(input).endsWith("/select-route") ? response({ error: { code: "unavailable_in_region" } }, 451) : response(session("pending", "")))));
+    window.history.replaceState({}, "", `/checkout?token=${csToken}`);
+    renderCheckout();
+    fireEvent.change(await screen.findByRole("combobox", { name: "Select a payment route" }), { target: { value: routeTwo } });
+    expect(await screen.findByTestId("region-unavailable")).toBeInTheDocument();
+  });
+
+  it("shows a neutral, final message when the region is refused and stops polling", async () => {
+    vi.stubEnv("VITE_CHECKOUT_FIXTURE_MODE", "false"); vi.stubEnv("VITE_CHECKOUT_API_URL", "https://merchant-api.example");
+    const refused = response({ error: { code: "unavailable_in_region", message: "This payment page is not available in your region." } }, 451);
+    const fetchMock = vi.fn().mockResolvedValue(refused);
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState({}, "", `/checkout?token=${csToken}`);
+    const view = renderCheckout();
+    expect(await screen.findByTestId("region-unavailable")).toHaveTextContent("not available in your region");
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    view.unmount();
+    window.history.replaceState({}, "", `/pay?token=${plToken}`);
+    renderCheckout();
+    expect(await screen.findByTestId("region-unavailable")).toBeInTheDocument();
   });
 
   it("shows stale-state feedback and recovers after a transient polling failure", async () => {

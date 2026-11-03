@@ -115,6 +115,19 @@ TLS 1.3 is mandatory. The in-process public capability limiter is only a
 per-instance safety bound; production ingress must enforce a cluster-wide rate
 limit without trusting caller-supplied forwarding headers.
 
+Public payment pages can be refused for sanctioned regions (checkout
+requirement CHK-8). Set `MANAGEMENT_BLOCKED_REGIONS` to comma-separated ISO
+3166-1 alpha-2 codes (for example `CU,IR,KP,SY`) and
+`MANAGEMENT_REGION_HEADER` to the header in which the edge proxy puts the
+visitor's country (for example `CF-IPCountry`). Refused requests get HTTP 451
+`unavailable_in_region` with a neutral message. The gate is only as good as
+the edge: it must overwrite any client-supplied value of that header. A
+repeated header, or any value other than one region code (for example a
+comma-joined `DE, IR`), is refused. Requests without the header are served,
+and so is `XX` (unknown to the edge) unless listed; add `T1` to refuse Tor
+exits. CORS preflights are not gated, so the browser can read the 451. The gate
+is off unless both variables are set.
+
 `go run ./cmd/worker` requires exactly one of `DATABASE_URL` or
 `DATABASE_URL_FILE`, plus `WORKER_ID`, and comma-separated
 `WORKER_ROLES` chosen from `settlements`, `callbacks`, `outbox`, `resolutions`,

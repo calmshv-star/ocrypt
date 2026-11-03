@@ -17,6 +17,7 @@ import (
 	"unicode"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/checkout"
+	"github.com/calmshv-star/ocrypt/backend/internal/edition"
 	"github.com/calmshv-star/ocrypt/backend/internal/ids"
 	"github.com/calmshv-star/ocrypt/backend/internal/money"
 	"github.com/calmshv-star/ocrypt/backend/internal/webhook"
@@ -264,7 +265,9 @@ func (s *Service) RedeemPaymentLink(ctx context.Context, token, origin string, i
 		return PaymentLinkRedemption{}, false, err
 	}
 	checkoutURL := strings.TrimRight(s.publicBase.String(), "/") + "/checkout?token=" + url.QueryEscape(checkoutToken)
-	return s.repository.RedeemPaymentLink(ctx, hash, checkoutToken, checkoutURL, checkoutHash, input, idem)
+	redemption, replay, err := s.repository.RedeemPaymentLink(ctx, hash, checkoutToken, checkoutURL, checkoutHash, input, idem)
+	redemption.Session.DirectToMerchant = edition.NonCustodial
+	return redemption, replay, err
 }
 
 func (s *Service) GetPaymentLink(ctx context.Context, p Principal, id string) (PaymentLink, error) {
@@ -347,7 +350,9 @@ func (s *Service) PublicCheckout(ctx context.Context, token, origin string) (Che
 	if err != nil {
 		return CheckoutSession{}, ErrNotFound
 	}
-	return s.repository.PublicCheckout(ctx, hash, origin)
+	session, err := s.repository.PublicCheckout(ctx, hash, origin)
+	session.DirectToMerchant = edition.NonCustodial
+	return session, err
 }
 
 func (s *Service) SelectCheckoutRoute(ctx context.Context, token, origin, routeID string, idem Idempotency) (CheckoutSession, bool, error) {
@@ -355,7 +360,9 @@ func (s *Service) SelectCheckoutRoute(ctx context.Context, token, origin, routeI
 	if err != nil || !ids.Valid(routeID) {
 		return CheckoutSession{}, false, ErrNotFound
 	}
-	return s.repository.SelectCheckoutRoute(ctx, hash, origin, routeID, idem)
+	session, replay, err := s.repository.SelectCheckoutRoute(ctx, hash, origin, routeID, idem)
+	session.DirectToMerchant = edition.NonCustodial
+	return session, replay, err
 }
 
 func (s *Service) CreateWebhookEndpoint(ctx context.Context, p Principal, input WebhookEndpointInput, idem Idempotency) (WebhookEndpointSecret, bool, error) {

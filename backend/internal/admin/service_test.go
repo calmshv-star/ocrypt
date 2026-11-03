@@ -9,16 +9,35 @@ import (
 )
 
 type repositoryStub struct {
-	identity     Identity
-	session      Session
-	invitation   InvitationLogin
-	attempt      LoginAttempt
-	action       ActionRequest
-	rotated      Session
-	revoked      bool
-	claimErr     error
-	walletInput  WatchWalletReplacement
-	walletImport WatchWalletImport
+	identity          Identity
+	session           Session
+	invitation        InvitationLogin
+	attempt           LoginAttempt
+	action            ActionRequest
+	rotated           Session
+	revoked           bool
+	claimErr          error
+	walletInput       WatchWalletReplacement
+	walletImport      WatchWalletImport
+	signupForms       []SignupForm
+	signupOK          bool
+	signupErr         error
+	signupOptionCalls int
+	registration      SelfServiceRegistration
+	registerErr       error
+	sessions          []Session
+}
+
+func (r *repositoryStub) CreateSignupRequest(_ context.Context, _ string, form SignupForm, _, _ time.Time) (bool, error) {
+	r.signupForms = append(r.signupForms, form)
+	return r.signupOK, r.signupErr
+}
+func (r *repositoryStub) RegisterSelfServiceMerchant(context.Context, LoginAttempt, IDTokenClaims, time.Time) (SelfServiceRegistration, error) {
+	return r.registration, r.registerErr
+}
+func (r *repositoryStub) SignupOptions(context.Context) ([]string, []string, error) {
+	r.signupOptionCalls++
+	return []string{"ecommerce", "saas"}, []string{"IR", "KP"}, nil
 }
 
 func (r *repositoryStub) LookupInvitation(context.Context, [32]byte) (InvitationLogin, error) {

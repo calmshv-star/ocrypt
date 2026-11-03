@@ -24,6 +24,12 @@ const managementAPIVersion = "2026-08-01"
 type HTTPConfig struct {
 	BodyLimit       int64
 	PublicPerMinute int
+	// RegionHeader names the request header in which the trusted edge proxy
+	// puts the visitor's ISO 3166-1 alpha-2 country. Public payment pages are
+	// refused for BlockedRegions. Requests without the header are served: the
+	// edge must overwrite any client-supplied value.
+	RegionHeader   string
+	BlockedRegions []string
 }
 
 type Server struct {
@@ -32,6 +38,8 @@ type Server struct {
 	mux           *http.ServeMux
 	bodyLimit     int64
 	limiter       *fixedWindowLimiter
+	regionHeader  string
+	blocked       map[string]struct{}
 }
 
 func NewServer(service *Service, authenticator Authenticator, config HTTPConfig) (*Server, error) {
@@ -44,7 +52,18 @@ func NewServer(service *Service, authenticator Authenticator, config HTTPConfig)
 	if config.PublicPerMinute < 10 || config.PublicPerMinute > 10_000 {
 		return nil, errors.New("public rate limit must be 10..10000 requests/minute")
 	}
-	server := &Server{service: service, authenticator: authenticator, mux: http.NewServeMux(), bodyLimit: config.BodyLimit, limiter: newFixedWindowLimiter(config.PublicPerMinute, 10_000)}
+	blocked := make(map[string]struct{}, len(config.BlockedRegions))
+	for _, code := range config.BlockedRegions {
+		if !validRegionCode(code) {
+			return nil, fmt.Errorf("blocked region %q must be an upper-case ISO 3166-1 alpha-2 code or an edge pseudo-region such as T1", code)
+		}
+		blocked[code] = struct{}{}
+	}
+	header := http.CanonicalHeaderKey(strings.TrimSpace(config.RegionHeader))
+	if len(blocked) > 0 && !validHeaderName(header) {
+		return nil, errors.New("blocked regions need a valid region header from the trusted edge proxy")
+	}
+	server := &Server{service: service, authenticator: authenticator, mux: http.NewServeMux(), bodyLimit: config.BodyLimit, limiter: newFixedWindowLimiter(config.PublicPerMinute, 10_000), regionHeader: header, blocked: blocked}
 	server.routes()
 	return server, nil
 }
@@ -277,7 +296,7 @@ func (s *Server) submitReceipt(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) checkoutPreflight(w http.ResponseWriter, request *http.Request) {
-	if !s.allowPublic(w, request, request.PathValue("token")) {
+	if !s.allowPublicRate(w, request, request.PathValue("token")) {
 		return
 	}
 	origin, valid := requestOrigin(request)
@@ -790,6 +809,19 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 }
 
 func (s *Server) allowPublic(w http.ResponseWriter, request *http.Request, token string) bool {
+	if s.regionBlocked(request) {
+		// The neutral message carries no merchant data, so any page may read it.
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		writeProblem(w, request, http.StatusUnavailableForLegalReasons, "unavailable_in_region", "This payment page is not available in your region.")
+		return false
+	}
+	return s.allowPublicRate(w, request, token)
+}
+
+// allowPublicRate applies only the public rate limit. CORS preflights use it
+// directly: a refused preflight would surface as a network error and hide the
+// 451 that the following request returns.
+func (s *Server) allowPublicRate(w http.ResponseWriter, request *http.Request, token string) bool {
 	host, _, err := net.SplitHostPort(request.RemoteAddr)
 	if err != nil {
 		host = request.RemoteAddr
@@ -837,5 +869,45 @@ func (l *fixedWindowLimiter) Allow(key string, now time.Time) bool {
 	}
 	entry.count++
 	l.entries[key] = entry
+	return true
+}
+
+// regionBlocked fails closed when the edge header is repeated or holds anything
+// but one region code, because a trusted proxy sets exactly one. An edge that
+// appends instead of overwriting produces "DE, IR" and is refused too.
+func (s *Server) regionBlocked(request *http.Request) bool {
+	if len(s.blocked) == 0 {
+		return false
+	}
+	values := request.Header.Values(s.regionHeader)
+	if len(values) == 0 {
+		return false
+	}
+	if len(values) > 1 {
+		return true
+	}
+	region := strings.ToUpper(strings.TrimSpace(values[0]))
+	if !validRegionCode(region) {
+		return true
+	}
+	_, blocked := s.blocked[region]
+	return blocked
+}
+
+// validRegionCode accepts ISO 3166-1 alpha-2 codes and the edge
+// pseudo-regions XX (unknown) and T1 (Tor), which can be blocked like any code.
+func validRegionCode(code string) bool {
+	return len(code) == 2 && code[0] >= 'A' && code[0] <= 'Z' && (code[1] >= 'A' && code[1] <= 'Z' || code[1] >= '0' && code[1] <= '9')
+}
+
+func validHeaderName(name string) bool {
+	if name == "" || len(name) > 64 {
+		return false
+	}
+	for _, r := range name {
+		if !(r == '-' || r >= '0' && r <= '9' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z') {
+			return false
+		}
+	}
 	return true
 }

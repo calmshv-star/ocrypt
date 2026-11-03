@@ -1,9 +1,12 @@
 import { useI18n, type MessageKey } from "@merchant/i18n";
 import { Badge, Button, DataTable, Input, PageHeader, SectionCard, StatCard, StatusBadge, type DataTableColumn } from "@merchant/ui";
 import { useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ArrowRight, CheckCircle2, CircleDollarSign, Clock3, FileClock, RadioTower, RefreshCw, Scale, Webhook, X } from "lucide-react";
+import { Activity, AlertTriangle, ArrowRight, CheckCircle2, CircleDollarSign, Clock3, Download, FileClock, RadioTower, RefreshCw, Scale, Webhook, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { isStepUpError, useAdmin, useAdminQuery } from "./AdminProvider";
+import { OnboardingBanner } from "./OnboardingPage";
+import { collectIntents, downloadCSV, intentsCSV } from "./csvExport";
+import { describeIntentStatus } from "./paymentStatus";
 import type { AdminScope, AssetRow, AuditRow, CandidateRow, IntentRow, Overview, Page, Permission, ReconciliationRow, TransferRow, UnmatchedRow, WebhookRow } from "./api/types";
 
 type Resource = "intents" | "transfers" | "assets" | "reconciliation" | "audit";
@@ -145,6 +148,7 @@ export function LiveOverviewPage() {
       eyebrow={<><Activity size={13} />{t(admin.preview ? "common.previewData" : "admin.connected")}</>}
       title={t("page.overview.title")}
     />
+    {!admin.preview && admin.scope?.merchantId && can("wallets:read") && <OnboardingBanner />}
     <PageState permission="dashboard:read" query={queryState}>
       {overview ? <>
         <section aria-label={t("overview.keyMetrics")} className="admin-stat-grid">
@@ -227,7 +231,7 @@ export function LiveOverviewPage() {
                       ? <small>{formatAtomic(intent.received_amount_atomic, intent.received_asset_decimals)} {intent.received_asset_symbol}</small>
                       : null}
                   </span>
-                  <StatusBadge status={intent.status}>{t(overviewIntentStatusKey(intent.status))}</StatusBadge>
+                  <IntentStatus intent={intent} />
                   <time dateTime={intent.created_at}>{formatDate(intent.created_at, locale)}</time>
                 </a>)}
               </div>}
@@ -283,14 +287,38 @@ function formatOverviewDay(value:string, locale:string) {
   return Number.isFinite(parsed) ? new Intl.DateTimeFormat(locale, { weekday:"short", timeZone:"UTC" }).format(parsed) : value;
 }
 
-function overviewIntentStatusKey(status:string):MessageKey {
-  if (status === "settled") return "status.settled";
-  if (status === "observed") return "status.observed";
-  if (status === "confirmed") return "status.confirmed";
-  if (status === "partially_paid") return "status.partiallyPaid";
-  if (status === "expired" || status === "cancelled") return "status.expired";
-  if (status === "needs_review" || status === "reorg_review" || status === "overpaid" || status === "reversed") return "status.needsReview";
-	return "status.pending";
+function IntentsExportButton() {
+  const { t } = useI18n();
+  const admin = useAdmin();
+  const [state, setState] = useState<"idle" | "busy" | "failed" | "truncated">("idle");
+  const [count, setCount] = useState(0);
+  const exportCSV = async () => {
+    if (!admin.scope || admin.preview || state === "busy") return;
+    setState("busy");
+    try {
+      const { rows, truncated } = await collectIntents(admin.clientFor(new AbortController().signal), admin.scope);
+      downloadCSV(`payments-${new Date().toISOString().slice(0, 10)}.csv`, intentsCSV(rows, t));
+      setCount(rows.length);
+      setState(truncated ? "truncated" : "idle");
+    } catch {
+      setState("failed");
+    }
+  };
+  return <span className="admin-export">
+    <Button disabled={state === "busy" || admin.preview} onClick={() => void exportCSV()} variant="secondary"><Download size={15} />{t(state === "busy" ? "reports.exporting" : "reports.exportCsv")}</Button>
+    {state === "failed" && <small role="alert">{t("reports.exportFailed")}</small>}
+    {state === "truncated" && <small role="status">{t("reports.exportTruncated", { count })}</small>}
+  </span>;
+}
+
+function IntentStatus({ intent, detailed = false }: { intent: IntentRow; detailed?: boolean }) {
+  const { t } = useI18n();
+  const admin = useAdmin();
+  const view = describeIntentStatus(intent);
+  const badge = <StatusBadge status={view.badge}>{t(view.label)}</StatusBadge>;
+  if (!detailed) return badge;
+  const action = view.action && admin.can(view.action.href === "#/unmatched" ? "unmatched:read" : "payment_links:write") ? view.action : undefined;
+  return <span className="admin-intent-status">{badge}<small>{t(view.hint, { minutes: view.minutesLeft ?? 0 })}</small>{action && <a href={action.href}>{t(action.label)}</a>}</span>;
 }
 
 function transferStatusKey(status:string):MessageKey {
@@ -332,7 +360,7 @@ export function LiveResourcePage({ resource }: { resource: Resource }) {
     const items = pageItems(query.data);
     if (resource === "intents") return {
       labels: [t("admin.reference"), t("admin.identifier"), t("admin.exactAmount"), t("common.status"), t("admin.createdAt"), t("admin.expiresAt")],
-      rows: (items as IntentRow[]).map((item) => ({ id: item.id, cells: [item.merchant_order_id, <code>{short(item.id)}</code>, `${formatExactMinor(item.amount_minor, item.currency_scale)} ${item.currency}`, <StatusBadge status={item.status}>{t(overviewIntentStatusKey(item.status))}</StatusBadge>, formatDate(item.created_at, locale), formatDate(item.expires_at, locale)] }))
+      rows: (items as IntentRow[]).map((item) => ({ id: item.id, cells: [item.merchant_order_id, <code>{short(item.id)}</code>, `${formatExactMinor(item.amount_minor, item.currency_scale)} ${item.currency}`, <IntentStatus detailed intent={item} />, formatDate(item.created_at, locale), formatDate(item.expires_at, locale)] }))
     };
     if (resource === "transfers") return {
       labels: [t("admin.transaction"), t("admin.chain"), t("common.asset"), t("common.amount"), t("admin.confirmations"), t("common.status"), t("admin.observedAt")],
@@ -388,7 +416,7 @@ export function LiveResourcePage({ resource }: { resource: Resource }) {
   };
   const Icon = resource === "assets" ? RadioTower : resource === "reconciliation" ? Scale : resource === "audit" ? FileClock : Activity;
   return <div className="admin-page">
-    <PageHeader actions={<Button onClick={() => void query.refetch()} variant="secondary"><RefreshCw size={15} />{t("common.refresh")}</Button>} description={t(resourceDescription(resource))} eyebrow={<><Icon size={13} />{t("admin.connected")}</>} title={t(resourceTitle(resource))} />
+    <PageHeader actions={<>{resource === "intents" && <IntentsExportButton />}<Button onClick={() => void query.refetch()} variant="secondary"><RefreshCw size={15} />{t("common.refresh")}</Button></>} description={t(resourceDescription(resource))} eyebrow={<><Icon size={13} />{t("admin.connected")}</>} title={t(resourceTitle(resource))} />
     <PageState permission={permission} query={query}>
       {rows.length === 0 ? <StatePanel state="empty" /> : <DataTable columns={columns} data={rows} empty={t("admin.emptyTitle")} getRowKey={(row) => row.id} nextLabel={t("common.next")} onPageChange={changePage} page={page} pages={pages} previousLabel={t("common.previous")} rowsLabel={t("common.rows")} />}
     </PageState>

@@ -70,6 +70,68 @@ paths:
         '403': {$ref: '#/components/responses/Problem'}
         '404': {$ref: '#/components/responses/Problem'}
         '429': {$ref: '#/components/responses/Problem'}
+  /admin/v1/auth/signup:
+    post:
+      tags: [Authentication]
+      summary: Start self-service registration with a screened form, verified email and MFA
+      description: >-
+        Available only when ADMIN_SELF_SERVICE_SIGNUP=true; otherwise 404. Same-origin browser
+        initiation only. PostgreSQL screens the form (blocked countries, prohibited business types,
+        https website) through create_admin_signup_request before the OIDC redirect; a rejection is
+        opaque. The callback consumes the request once and creates a tenant, a test-mode merchant
+        and its owner; a returning identity is logged in to its existing merchant.
+      security: []
+      parameters:
+        - {name: Origin, in: header, required: true, schema: {type: string, format: uri}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [company_name, country, business_type, terms_version]
+              properties:
+                company_name: {type: string, minLength: 2, maxLength: 120}
+                country: {type: string, pattern: '^[A-Za-z]{2}$', description: ISO 3166-1 alpha-2}
+                business_type: {type: string, pattern: '^[a-z][a-z_]{1,39}$'}
+                website: {type: string, format: uri, pattern: '^https://', maxLength: 255}
+                terms_version: {type: string, minLength: 1, maxLength: 64}
+      responses:
+        '200':
+          description: Generic pinned authorization URL; an HttpOnly OIDC correlation cookie is set.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [authorization_url]
+                properties: {authorization_url: {type: string, format: uri}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+        '429': {$ref: '#/components/responses/Problem'}
+  /admin/v1/auth/signup/options:
+    get:
+      tags: [Authentication]
+      summary: Public self-service registration options
+      security: []
+      responses:
+        '200':
+          description: Whether registration is open, the terms version to accept and the allowed business types.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [enabled]
+                properties:
+                  enabled: {type: boolean}
+                  terms_version: {type: string}
+                  business_types: {type: array, items: {type: string}}
+                  blocked_countries: {type: array, items: {type: string, pattern: '^[A-Z]{2}$'}}
+        '503': {$ref: '#/components/responses/Problem'}
   /admin/v1/auth/callback:
     get:
       tags: [Authentication]

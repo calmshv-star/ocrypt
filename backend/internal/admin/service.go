@@ -8,8 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/ids"
 )
@@ -27,6 +30,14 @@ type ServiceConfig struct {
 	// context. Token signature, issuer, audience, nonce, PKCE and email checks
 	// are still enforced by the OIDC verifier.
 	PasswordOnly bool
+	// SelfServiceSignup opens registration without an invitation. Every new
+	// account starts as one test-mode merchant owned by the registrant.
+	SelfServiceSignup bool
+	// SignupTermsVersion is the terms version a registrant must accept.
+	SignupTermsVersion string
+	// SignupTTL bounds a signup request and its OIDC attempt. A registrant
+	// creates the IdP account, verifies the email and enrolls MFA inside it.
+	SignupTTL time.Duration
 }
 
 const maxAdminSessionTTL = 10 * 365 * 24 * time.Hour
@@ -44,7 +55,21 @@ type Service struct {
 	stateBox   SecretBox
 	config     ServiceConfig
 	now        func() time.Time
+
+	// The public signup page asks for options on every visit; they change
+	// only by migration, so they are cached briefly.
+	signupMu      sync.Mutex
+	signupCached  SignupOptions
+	signupExpires time.Time
 }
+
+// SignupOptions is what the public signup page may know before registration.
+type SignupOptions struct {
+	BusinessTypes    []string
+	BlockedCountries []string
+}
+
+const signupOptionsTTL = time.Minute
 
 func NewService(repository Repository, provider *OIDCProvider, stateBox SecretBox, config ServiceConfig) (*Service, error) {
 	if repository == nil || provider == nil || stateBox == nil {
@@ -65,11 +90,20 @@ func NewService(repository Repository, provider *OIDCProvider, stateBox SecretBo
 	if config.StepUpTTL < time.Minute || config.StepUpTTL > 30*time.Minute || config.RequiredACR == "" || len(config.AcceptedAMR) == 0 {
 		return nil, errors.New("admin MFA/step-up policy is required and must expire within thirty minutes")
 	}
+	if config.SelfServiceSignup && (config.SignupTermsVersion == "" || len(config.SignupTermsVersion) > 64) {
+		return nil, errors.New("self-service signup requires a terms version of at most 64 characters")
+	}
+	if config.SelfServiceSignup && (config.SignupTTL < 5*time.Minute || config.SignupTTL > time.Hour) {
+		return nil, errors.New("self-service signup TTL must be between five minutes and one hour")
+	}
+	if config.SelfServiceSignup && config.PasswordOnly {
+		return nil, errors.New("self-service signup requires MFA and cannot run in password-only mode")
+	}
 	return &Service{repository: repository, provider: provider, stateBox: stateBox, config: config, now: func() time.Time { return time.Now().UTC() }}, nil
 }
 
 func (s *Service) BeginLogin(ctx context.Context, returnPath string) (string, string, error) {
-	return s.begin(ctx, returnPath, "login", "", nil, InvitationLogin{})
+	return s.begin(ctx, returnPath, "login", "", nil, InvitationLogin{}, "")
 }
 
 func (s *Service) BeginInvitationLogin(ctx context.Context, digest [sha256.Size]byte) (string, string, error) {
@@ -80,16 +114,98 @@ func (s *Service) BeginInvitationLogin(ctx context.Context, digest [sha256.Size]
 	if invitation.ID == "" || invitation.TenantID == "" || invitation.MerchantID == "" || normalizeAdminEmail(invitation.Email) == "" {
 		return "", "", ErrNotFound
 	}
-	return s.begin(ctx, "/#/invite", "invitation", "", nil, invitation)
+	return s.begin(ctx, "/#/invite", "invitation", "", nil, invitation, "")
+}
+
+// SignupEnabled reports whether self-service registration is open, and the
+// terms version a registrant must accept.
+func (s *Service) SignupEnabled() (bool, string) {
+	return s.config.SelfServiceSignup, s.config.SignupTermsVersion
+}
+
+// SignupOptions lists the business types open for registration and the
+// countries it is closed for, so the form can explain a refusal up front.
+func (s *Service) SignupOptions(ctx context.Context) (SignupOptions, error) {
+	if !s.config.SelfServiceSignup {
+		return SignupOptions{}, ErrNotFound
+	}
+	now := s.now()
+	s.signupMu.Lock()
+	defer s.signupMu.Unlock()
+	if now.Before(s.signupExpires) {
+		return s.signupCached, nil
+	}
+	types, blocked, err := s.repository.SignupOptions(ctx)
+	if err != nil {
+		return SignupOptions{}, err
+	}
+	s.signupCached, s.signupExpires = SignupOptions{BusinessTypes: types, BlockedCountries: blocked}, now.Add(signupOptionsTTL)
+	return s.signupCached, nil
+}
+
+// BeginSignup screens a registration form in PostgreSQL and starts an OIDC
+// login that requires MFA. Rejections never say which rule failed.
+func (s *Service) BeginSignup(ctx context.Context, form SignupForm) (string, string, error) {
+	if !s.config.SelfServiceSignup {
+		return "", "", ErrNotFound
+	}
+	form, ok := normalizeSignupForm(form)
+	if !ok || form.TermsVersion != s.config.SignupTermsVersion {
+		return "", "", ErrInvalid
+	}
+	requestID, err := ids.New()
+	if err != nil {
+		return "", "", err
+	}
+	now := s.now()
+	accepted, err := s.repository.CreateSignupRequest(ctx, requestID, form, now, now.Add(s.config.SignupTTL))
+	if err != nil {
+		return "", "", err
+	}
+	if !accepted {
+		return "", "", ErrInvalid
+	}
+	return s.begin(ctx, "/#/onboarding", "signup", "", nil, InvitationLogin{}, requestID)
+}
+
+func normalizeSignupForm(form SignupForm) (SignupForm, bool) {
+	form.CompanyName = strings.TrimSpace(form.CompanyName)
+	form.Country = strings.ToUpper(strings.TrimSpace(form.Country))
+	form.BusinessType = strings.TrimSpace(form.BusinessType)
+	form.Website = strings.TrimSpace(form.Website)
+	form.TermsVersion = strings.TrimSpace(form.TermsVersion)
+	for _, r := range form.CompanyName {
+		if unicode.In(r, unicode.Cc, unicode.Cf) {
+			return form, false
+		}
+	}
+	nameLength := len([]rune(form.CompanyName))
+	if nameLength < 2 || nameLength > 120 || len(form.Country) != 2 || form.Country[0] < 'A' || form.Country[0] > 'Z' || form.Country[1] < 'A' || form.Country[1] > 'Z' {
+		return form, false
+	}
+	if len(form.BusinessType) < 2 || len(form.BusinessType) > 40 || strings.Trim(form.BusinessType, "abcdefghijklmnopqrstuvwxyz_") != "" {
+		return form, false
+	}
+	if form.Website != "" {
+		parsed, err := url.Parse(form.Website)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || len(form.Website) > 255 || strings.ContainsAny(form.Website, " \t\r\n") {
+			return form, false
+		}
+	}
+	return form, form.TermsVersion != ""
 }
 
 func (s *Service) BeginStepUp(ctx context.Context, authenticated AuthResult, returnPath string) (string, string, error) {
-	return s.begin(ctx, returnPath, "step_up", authenticated.Principal.UserID, authenticated.Session.SessionHash[:], InvitationLogin{})
+	return s.begin(ctx, returnPath, "step_up", authenticated.Principal.UserID, authenticated.Session.SessionHash[:], InvitationLogin{}, "")
 }
 
-func (s *Service) begin(ctx context.Context, returnPath, purpose, expectedUserID string, existingHash []byte, invitation InvitationLogin) (string, string, error) {
+func (s *Service) begin(ctx context.Context, returnPath, purpose, expectedUserID string, existingHash []byte, invitation InvitationLogin, signupRequestID string) (string, string, error) {
 	if !safeReturnPath(returnPath) {
 		return "", "", ErrInvalid
+	}
+	ttl := s.config.LoginTTL
+	if purpose == "signup" {
+		ttl = s.config.SignupTTL
 	}
 	state, err := randomToken(32)
 	if err != nil {
@@ -108,12 +224,12 @@ func (s *Service) begin(ctx context.Context, returnPath, purpose, expectedUserID
 		return "", "", err
 	}
 	now := s.now()
-	attempt := LoginAttempt{StateHash: tokenHash(state), Nonce: nonce, EncryptedVerifier: sealed, Purpose: purpose, ExpectedUserID: expectedUserID, ExistingSessionHash: append([]byte(nil), existingHash...), ReturnPath: returnPath, InvitationID: invitation.ID, InvitationTenantID: invitation.TenantID, InvitationMerchantID: invitation.MerchantID, ExpectedEmail: normalizeAdminEmail(invitation.Email), CreatedAt: now, ExpiresAt: now.Add(s.config.LoginTTL)}
+	attempt := LoginAttempt{StateHash: tokenHash(state), Nonce: nonce, EncryptedVerifier: sealed, Purpose: purpose, ExpectedUserID: expectedUserID, ExistingSessionHash: append([]byte(nil), existingHash...), ReturnPath: returnPath, InvitationID: invitation.ID, InvitationTenantID: invitation.TenantID, InvitationMerchantID: invitation.MerchantID, ExpectedEmail: normalizeAdminEmail(invitation.Email), SignupRequestID: signupRequestID, CreatedAt: now, ExpiresAt: now.Add(ttl)}
 	if err := s.repository.PutLoginAttempt(ctx, attempt); err != nil {
 		return "", "", err
 	}
 	prompt, acr := "", ""
-	if purpose == "step_up" || purpose == "invitation" {
+	if purpose == "step_up" || purpose == "invitation" || purpose == "signup" {
 		prompt, acr = "login", s.config.RequiredACR
 	}
 	location, err := s.provider.AuthorizationURL(state, nonce, verifier, prompt, acr)
@@ -163,6 +279,9 @@ func (s *Service) CompleteCallback(ctx context.Context, state, code string) (Aut
 			return AuthResult{}, "", newErr
 		}
 		return AuthResult{Principal: PrincipalFor(identity, session), Session: session, Tokens: &tokens, MFAAt: now}, "/#/invite", nil
+	}
+	if attempt.Purpose == "signup" {
+		return s.completeSignup(ctx, attempt, claims, now)
 	}
 	identity, err := s.repository.FindIdentity(ctx, claims.Issuer, claims.Subject)
 	if err != nil || identity.Status != "active" {
@@ -217,6 +336,39 @@ func (s *Service) CompleteCallback(ctx context.Context, state, code string) (Aut
 	}
 	principal := PrincipalFor(identity, session)
 	return AuthResult{Principal: principal, Session: session, Tokens: &tokens, MFAAt: now}, attempt.ReturnPath, nil
+}
+
+// completeSignup consumes the screened signup request after OIDC with a
+// verified email and MFA, then opens an ordinary admin session. A returning
+// identity is logged in to its existing merchant instead of a new one.
+func (s *Service) completeSignup(ctx context.Context, attempt LoginAttempt, claims IDTokenClaims, now time.Time) (AuthResult, string, error) {
+	if !s.config.SelfServiceSignup || attempt.SignupRequestID == "" || !claims.EmailVerified || normalizeAdminEmail(claims.Email) == "" {
+		return AuthResult{}, "", ErrForbidden
+	}
+	registration, err := s.repository.RegisterSelfServiceMerchant(ctx, attempt, claims, now)
+	if err != nil || registration.UserID == "" {
+		return AuthResult{}, "", fmt.Errorf("register self-service merchant (%v): %w", err, ErrForbidden)
+	}
+	identity, err := s.repository.FindIdentity(ctx, claims.Issuer, claims.Subject)
+	if err != nil || identity.Status != "active" || identity.UserID != registration.UserID {
+		return AuthResult{}, "", fmt.Errorf("resolve registered identity (%v): %w", err, ErrForbidden)
+	}
+	tokens, session, err := s.newSession(identity, claims, now)
+	if err != nil {
+		return AuthResult{}, "", err
+	}
+	if err := s.repository.CreateSession(ctx, session); err != nil {
+		return AuthResult{}, "", err
+	}
+	if err := s.repository.AppendAudit(ctx, AuditEntry{ActorUserID: identity.UserID, SessionID: session.ID, Action: "admin.session.created", ResourceType: "admin_session", ResourceID: session.ID, RequestID: session.ID, Reason: "self-service signup authentication", Details: json.RawMessage(`{}`), OccurredAt: now}); err != nil {
+		_ = s.repository.RevokeSession(ctx, session.SessionHash, "audit_write_failed", now)
+		return AuthResult{}, "", err
+	}
+	returnPath := "/#/onboarding"
+	if !registration.Created {
+		returnPath = "/#/overview"
+	}
+	return AuthResult{Principal: PrincipalFor(identity, session), Session: session, Tokens: &tokens, MFAAt: now}, returnPath, nil
 }
 
 func (s *Service) newSession(identity Identity, claims IDTokenClaims, now time.Time) (SessionTokens, Session, error) {
@@ -334,8 +486,38 @@ func (s *Service) RefreshCSRF(ctx context.Context, authenticated AuthResult) (st
 	return csrfToken, nil
 }
 
+// AuthorizeWallets admits platform operators (infrastructure) and merchant
+// owners (wallets) to the same merchant-scoped watch-only wallet operations.
+func AuthorizeWallets(principal Principal, scope Scope, write bool) (Scope, error) {
+	operator, merchant := PermissionInfrastructureRead, PermissionWalletsRead
+	if write {
+		operator, merchant = PermissionInfrastructureEdit, PermissionWalletsWrite
+	}
+	resolved, err := principal.Authorize(operator, scope)
+	if err == nil {
+		return resolved, nil
+	}
+	if scope.MerchantID == "" {
+		return Scope{}, err
+	}
+	return principal.Authorize(merchant, scope)
+}
+
+// authorizeWalletWrite also requires recent MFA: changing where customers pay
+// must not be possible with only a stolen or long-lived session cookie.
+func (s *Service) authorizeWalletWrite(principal Principal, scope Scope) (Scope, error) {
+	resolved, err := AuthorizeWallets(principal, scope, true)
+	if err != nil {
+		return Scope{}, err
+	}
+	if err := principal.RequireStepUp(s.now(), s.config.RequiredACR, s.config.AcceptedAMR); err != nil {
+		return Scope{}, err
+	}
+	return resolved, nil
+}
+
 func (s *Service) ReplaceWatchWalletAddress(ctx context.Context, principal Principal, scope Scope, walletID string, input WatchWalletReplacement) (FinancialSettingsWallet, error) {
-	resolved, err := principal.Authorize(PermissionInfrastructureEdit, scope)
+	resolved, err := s.authorizeWalletWrite(principal, scope)
 	if err != nil {
 		return FinancialSettingsWallet{}, err
 	}
@@ -346,7 +528,7 @@ func (s *Service) ReplaceWatchWalletAddress(ctx context.Context, principal Princ
 }
 
 func (s *Service) CreateWatchWalletImportChallenge(principal Principal, scope Scope, domain, kind, address string, wallets []WatchWalletImportItem) (WatchWalletImportChallenge, error) {
-	_, err := principal.Authorize(PermissionInfrastructureEdit, scope)
+	_, err := s.authorizeWalletWrite(principal, scope)
 	if err != nil {
 		return WatchWalletImportChallenge{}, err
 	}
@@ -377,7 +559,7 @@ func (s *Service) CreateWatchWalletImportChallenge(principal Principal, scope Sc
 }
 
 func (s *Service) ImportWatchWallets(ctx context.Context, principal Principal, scope Scope, domain string, input WatchWalletImport) (WatchWalletImportResult, error) {
-	resolved, err := principal.Authorize(PermissionInfrastructureEdit, scope)
+	resolved, err := s.authorizeWalletWrite(principal, scope)
 	if err != nil {
 		return WatchWalletImportResult{}, err
 	}
