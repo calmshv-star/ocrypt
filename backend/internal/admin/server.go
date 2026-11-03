@@ -941,7 +941,7 @@ func (s *Server) saveAccountNotifications(w http.ResponseWriter, request *http.R
 	if !s.decode(w, request, &input) {
 		return
 	}
-	settings, err := s.service.SaveAccountNotifications(request.Context(), authenticatedFrom(request.Context()).Principal, scope, input)
+	settings, err := s.service.SaveAccountNotifications(request.Context(), authenticatedFrom(request.Context()), scope, input)
 	respond(w, settings, err)
 }
 

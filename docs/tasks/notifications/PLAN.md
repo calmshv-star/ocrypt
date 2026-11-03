@@ -8,9 +8,10 @@ Goal: Email and Telegram notifications for cabinet users: chosen payment and web
 - [x] Tests authored; expected failures inspected (route drift until the contract was written; live S6 failed on fixtures and one wrong locale expectation before passing).
 - [x] Dependencies, writer ownership, and common base assigned (single writer, `feat/stage2-notifications` on top of `feat/stage2-sessions`).
 - [x] Implementation complete and focused checks pass.
-- [ ] Integrated diff independently reviewed; relevant checks repeated.
-- [ ] Completion evidence and remaining runtime/deployment limits recorded.
+- [x] Integrated diff independently reviewed; relevant checks repeated (findings and fixes in DECISIONS.md).
+- [x] Completion evidence and remaining runtime/deployment limits recorded (owner items in DECISIONS.md; sanctioned-address event out of scope).
 
 ## Evidence
 
 - 2026-11-03: full live suite (18 cases) on fresh `ocrypt_fault_test_20261103_44` with 63 migrations and runtime grants; `000063` down, up and grants; `go test ./internal/notifications/ ./internal/admin/`; admin `Notifications.test.tsx` 3/3; `deploy/validate.sh static`.
+- 2026-11-03, after review fixes: full live suite (18 cases) on fresh `ocrypt_fault_test_20261103_46`, `S6` adding the attempt cap and the replayed link; `000063` down, up and grants; Go unit tests; admin `Notifications.test.tsx` 5/5; `deploy/validate.sh static`.

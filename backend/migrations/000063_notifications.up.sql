@@ -317,6 +317,8 @@ BEGIN
   INSERT INTO public.notification_account_settings(user_id,sign_in_email,sign_in_telegram,locale,updated_at)
   VALUES(actor,true,true,p_locale,p_at)
   ON CONFLICT (user_id) DO UPDATE SET locale=EXCLUDED.locale,updated_at=EXCLUDED.updated_at;
+  UPDATE public.notification_preferences SET locale=p_locale,updated_at=p_at,version=version+1
+   WHERE user_id=actor AND locale<>p_locale;
 END $$;
 
 CREATE FUNCTION set_current_admin_account_notifications(p_sign_in_email boolean,p_sign_in_telegram boolean,p_locale text,p_at timestamptz) RETURNS void
@@ -334,6 +336,9 @@ BEGIN
   VALUES(actor,p_sign_in_email,p_sign_in_telegram,p_locale,p_at)
   ON CONFLICT (user_id) DO UPDATE SET sign_in_email=EXCLUDED.sign_in_email,sign_in_telegram=EXCLUDED.sign_in_telegram,
     locale=EXCLUDED.locale,updated_at=EXCLUDED.updated_at;
+  -- One language for everything the user receives.
+  UPDATE public.notification_preferences SET locale=p_locale,updated_at=p_at,version=version+1
+   WHERE user_id=actor AND locale<>p_locale;
 END $$;
 
 -- A new one-time code replaces the user's unused ones.
@@ -365,7 +370,8 @@ END $$;
 
 -- Worker: consumes a one-time code sent to the bot and links the chat.
 -- Returns the user's saved locale ('' when none) for the reply, or NULL for
--- an unknown, used or expired code. Audited as the user's own action.
+-- an unknown, expired or someone else's used code. Audited as the user's own
+-- action.
 CREATE FUNCTION link_telegram_chat(p_code_hash bytea,p_chat_id bigint) RETURNS text
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path=pg_catalog,public SET row_security=off AS $$
@@ -376,7 +382,16 @@ BEGIN
     FROM public.admin_users u
    WHERE c.code_hash=p_code_hash AND c.used_at IS NULL AND c.expires_at>now_at AND u.id=c.user_id AND u.status='active'
   RETURNING c.user_id INTO owner;
-  IF owner IS NULL THEN RETURN NULL; END IF;
+  IF owner IS NULL THEN
+    -- A replayed update from the chat that already used this code is a
+    -- success, so a restart never answers "expired" to a linked user.
+    SELECT a.locale INTO chosen FROM public.telegram_link_codes c
+      JOIN public.telegram_chat_links l ON l.user_id=c.user_id AND l.chat_id=p_chat_id
+      LEFT JOIN public.notification_account_settings a ON a.user_id=c.user_id
+     WHERE c.code_hash=p_code_hash AND c.used_at>now_at-interval '1 day';
+    IF FOUND THEN RETURN coalesce(chosen,''); END IF;
+    RETURN NULL;
+  END IF;
   INSERT INTO public.telegram_chat_links(user_id,chat_id,linked_at) VALUES(owner,p_chat_id,now_at)
   ON CONFLICT (user_id) DO UPDATE SET chat_id=EXCLUDED.chat_id,linked_at=EXCLUDED.linked_at;
   PERFORM public.append_admin_audit(gen_random_uuid(),NULL,NULL,owner,NULL,'admin.notifications.telegram_linked','telegram_chat_link',owner::text,
@@ -419,6 +434,12 @@ BEGIN
      WHERE (j.status IN ('pending','retry') AND j.available_at<=now_at) OR (j.status='leased' AND j.lease_until<now_at)
      ORDER BY j.available_at,j.id FOR UPDATE SKIP LOCKED LIMIT 1;
     IF NOT FOUND THEN RETURN; END IF;
+    -- A job whose leases keep expiring (a send that never returns) ends
+    -- here instead of being leased forever.
+    IF job.attempt_count>=20 THEN
+      UPDATE public.notification_jobs SET status='dead',last_error_code='attempts_exhausted',lease_owner=NULL,lease_token=NULL,lease_until=NULL,updated_at=now_at WHERE notification_jobs.id=job.id;
+      CONTINUE;
+    END IF;
     recipient_email := NULL; recipient_chat := NULL;
     IF job.merchant_id IS NULL OR public.notification_recipient_allowed(job.user_id,job.tenant_id,job.merchant_id,
          CASE WHEN job.event='webhook_failed' THEN 'webhooks:read' ELSE 'payments:read' END) THEN

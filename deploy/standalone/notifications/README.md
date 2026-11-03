@@ -16,7 +16,8 @@ queued and again when it is sent; a user who lost access gets nothing more.
 
 The fan-out runs in the transaction that records the event, inside a guarded
 block: if queuing fails, PostgreSQL logs a warning and the payment write
-commits normally.
+commits normally. That notification is then lost, so alert on the server log
+line `notification fan-out skipped` (with the event id and SQLSTATE).
 
 ## Worker
 
@@ -58,19 +59,25 @@ queued. The text is plain; the relay sends it as `text/plain`.
    by the worker (Compose secret `notification_telegram_token`, or a Kubernetes
    Secret mounted at the path in `NOTIFICATION_TELEGRAM_BOT_TOKEN_FILE`).
 2. Set `ADMIN_TELEGRAM_BOT_USERNAME` on the admin BFF to the bot's username
-   (for example `ocrypt_alerts_bot`). Without it the cabinet does not offer
+   (for example `ocrypt_alerts_bot`; Compose passes it through, in Helm set
+   `workloads.admin-api.env.ADMIN_TELEGRAM_BOT_USERNAME`). Without it the cabinet does not offer
    Telegram.
 3. Do not set a webhook on the bot: the worker uses `getUpdates`. Only one
    replica polls at a time; the others wait on a database advisory lock.
 4. Admit egress to `api.telegram.org:443` (Helm `httpsEgressPeers`).
+
+Access: merchant events need a tenant-scoped binding with `payments:read`
+(and `webhooks:read` for webhook failures) or the self-service owner
+membership; global platform operators do not receive merchant notifications.
+Changing sign-in alerts and unlinking Telegram are audited.
 
 Linking: the cabinet issues a one-time `https://t.me/<bot>?start=<code>`
 link (256-bit code, 10 minutes, only its SHA-256 is stored). The user presses
 Start in a private chat; the worker links that chat and replies in the user's
 language. Group chats are ignored. Linking and unlinking are audited.
 
-Messages are plain text: merchant name, order id, amount, network and a
-cabinet link. They never contain payer addresses, customer emails or secrets.
+Messages are plain text: merchant name, order id, amount and a cabinet
+link. They never contain payer addresses, customer emails or secrets.
 For a webhook failure only the endpoint host is named.
 
 ## Checks

@@ -270,8 +270,8 @@ func (r *repositoryStub) SaveMerchantNotifications(_ context.Context, _ Principa
 	r.savedEmailEvents, r.savedLocale = email, locale
 	return nil
 }
-func (r *repositoryStub) SaveAccountNotifications(_ context.Context, _ Principal, email, _ bool, locale string, _ time.Time) error {
-	r.savedSignInEmail, r.savedLocale = &email, locale
+func (r *repositoryStub) SaveAccountNotifications(_ context.Context, _ Principal, email, _ bool, locale string, _ time.Time, audit AuditEntry) error {
+	r.savedSignInEmail, r.savedLocale, r.audit = &email, locale, audit
 	return nil
 }
 func (r *repositoryStub) CreateTelegramLinkCode(_ context.Context, _ Principal, hash [32]byte, _, _ time.Time) error {

@@ -103,11 +103,20 @@ func (s *Service) SaveMerchantNotifications(ctx context.Context, principal Princ
 	return s.NotificationSettings(ctx, principal, scope)
 }
 
-func (s *Service) SaveAccountNotifications(ctx context.Context, principal Principal, scope Scope, input AccountNotificationInput) (NotificationSettings, error) {
+// SaveAccountNotifications changes the sign-in alerts; audited with it, since
+// silencing them is what a session thief would do.
+func (s *Service) SaveAccountNotifications(ctx context.Context, authenticated AuthResult, scope Scope, input AccountNotificationInput) (NotificationSettings, error) {
 	if input.SignInEmail == nil || input.SignInTelegram == nil || !notificationLocales[input.Locale] {
 		return NotificationSettings{}, ErrInvalid
 	}
-	if err := s.repository.SaveAccountNotifications(ctx, principal, *input.SignInEmail, *input.SignInTelegram, input.Locale, s.now()); err != nil {
+	now := s.now()
+	details, err := json.Marshal(map[string]bool{"sign_in_email": *input.SignInEmail, "sign_in_telegram": *input.SignInTelegram})
+	if err != nil {
+		return NotificationSettings{}, err
+	}
+	principal := authenticated.Principal
+	audit := AuditEntry{ActorUserID: principal.UserID, SessionID: authenticated.Session.ID, Action: "admin.notifications.account_updated", ResourceType: "notification_account_settings", ResourceID: principal.UserID, RequestID: authenticated.Session.ID, Reason: "sign-in alert channels changed by their user", Details: details, OccurredAt: now}
+	if err := s.repository.SaveAccountNotifications(ctx, principal, *input.SignInEmail, *input.SignInTelegram, input.Locale, now, audit); err != nil {
 		return NotificationSettings{}, err
 	}
 	return s.NotificationSettings(ctx, principal, scope)

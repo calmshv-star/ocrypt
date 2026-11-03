@@ -29,3 +29,35 @@ Goal: Email and Telegram notifications for cabinet users: chosen payment and web
 
 - A Telegram bot (token) and its username for `ADMIN_TELEGRAM_BOT_USERNAME`.
 - The email relay endpoint, bearer and CA for notifications.
+
+## 2026-11-03 — independent review findings and fixes
+
+- **H1 (fixed).** A send could outlive its lease (Telegram client 45 s, lease
+  30 s), so its failure was never recorded and the job was re-leased without
+  limit until a CHECK broke every claim. Sends now run under half the lease,
+  Telegram sends have their own 10 s client, the lease must be at least twice
+  that, the claim ends a job after 20 attempts (`attempts_exhausted`), and
+  readiness moves with every job. Live `S6` covers the cap.
+- **M1 (fixed).** A returning identity signing in through the signup flow
+  now gets the sign-in alert like any login.
+- **M2 (fixed).** The cabinet drops events the user can no longer receive
+  (webhook access or the bot gone) when saving, so the form stays savable.
+- **L1 (fixed).** Compose and Helm pass `ADMIN_TELEGRAM_BOT_USERNAME`.
+- **L2 (fixed).** An expired Telegram link resets to "Connect Telegram".
+- **L3 (fixed).** The offset advances per handled update; a database error
+  leaves the update for the next poll; a replay from the chat that already
+  used the code answers "connected"; a bare `/start` explains where the link
+  comes from.
+- **L4 (decided).** Merchant notifications need a tenant-scoped binding or the
+  owner membership; global platform operators do not get them (the cabinet
+  hides the section since the database says no access). A webhooks-only role
+  cannot subscribe to webhook failures without payment access. Documented in
+  the runbook.
+- **L5 (fixed).** Changing sign-in alerts is audited in the same transaction.
+- **L6 (documented).** A swallowed fan-out error loses that notification; the
+  runbook says to alert on the `notification fan-out skipped` log line.
+- **L7 (fixed).** Saving any setting puts all of the user's preferences in
+  the same language.
+- **L8 (fixed).** The contract lists 403 on GET; the runbook no longer claims
+  the network is shown; CI checks the worker's offset grant and that it has
+  none of the cabinet functions. `runtime-contracts.json` keeps its layout.

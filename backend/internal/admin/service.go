@@ -418,7 +418,9 @@ func (s *Service) completeSignup(ctx context.Context, attempt LoginAttempt, clai
 	if registration.Held {
 		returnPath = "/"
 	}
-	return AuthResult{Principal: PrincipalFor(identity, session), Session: session, Tokens: &tokens, MFAAt: now}, returnPath, nil
+	// A returning identity that signs in through the signup flow is a sign-in
+	// like any other and gets the alert; a brand-new account does not.
+	return AuthResult{Principal: PrincipalFor(identity, session), Session: session, Tokens: &tokens, MFAAt: now, Login: !registration.Created}, returnPath, nil
 }
 
 func (s *Service) newSession(identity Identity, claims IDTokenClaims, now time.Time) (SessionTokens, Session, error) {

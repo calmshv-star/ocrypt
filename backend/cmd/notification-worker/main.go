@@ -91,7 +91,7 @@ func main() {
 		healthMu.RLock()
 		pollAt, pollErr := lastPoll, lastErr
 		healthMu.RUnlock()
-		if store.Ping(check) != nil || pollErr != nil || pollAt.IsZero() || time.Since(pollAt) > poll*3+5*time.Second {
+		if store.Ping(check) != nil || pollErr != nil || pollAt.IsZero() || time.Since(pollAt) > poll*3+lease+5*time.Second {
 			write(w, 503, "unavailable")
 			return
 		}
@@ -107,23 +107,25 @@ func main() {
 	if pollTelegram {
 		go pollTelegramLinks(ctx, store, notifications.Linker{Store: store, Telegram: telegram, Wait: 25 * time.Second})
 	}
-	run := func() {
-		var runErr error
-		for i := 0; i < batch; i++ {
-			processed, e := worker.RunOnce(ctx)
-			if e != nil {
-				runErr = e
-				slog.Error("notification delivery attempt failed")
-				break
-			}
-			if !processed {
-				break
-			}
-		}
+	// Readiness moves with every job, so a long backlog never reads as stale.
+	mark := func(err error) {
 		healthMu.Lock()
 		lastPoll = time.Now().UTC()
-		lastErr = runErr
+		lastErr = err
 		healthMu.Unlock()
+	}
+	run := func() {
+		for i := 0; i < batch; i++ {
+			processed, e := worker.RunOnce(ctx)
+			mark(e)
+			if e != nil {
+				slog.Error("notification delivery attempt failed")
+				return
+			}
+			if !processed {
+				return
+			}
+		}
 	}
 	run()
 	ticker := time.NewTicker(poll)

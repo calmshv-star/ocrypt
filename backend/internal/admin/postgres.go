@@ -705,10 +705,12 @@ func (r *PostgresRepository) SaveMerchantNotifications(ctx context.Context, prin
 	}))
 }
 
-func (r *PostgresRepository) SaveAccountNotifications(ctx context.Context, principal Principal, signInEmail, signInTelegram bool, locale string, at time.Time) error {
+func (r *PostgresRepository) SaveAccountNotifications(ctx context.Context, principal Principal, signInEmail, signInTelegram bool, locale string, at time.Time, audit AuditEntry) error {
 	return classifyAdminDB(r.asActor(ctx, principal, pgx.ReadWrite, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `SELECT set_current_admin_account_notifications($1,$2,$3,$4)`, signInEmail, signInTelegram, locale, at)
-		return err
+		if _, err := tx.Exec(ctx, `SELECT set_current_admin_account_notifications($1,$2,$3,$4)`, signInEmail, signInTelegram, locale, at); err != nil {
+			return err
+		}
+		return r.appendAuditTx(ctx, tx, audit)
 	}))
 }
 

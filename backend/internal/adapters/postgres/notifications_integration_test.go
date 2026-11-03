@@ -109,6 +109,9 @@ func (f *faultDatabase) notifications(t *testing.T) {
 	if _, linked, _ := worker.LinkTelegramChat(f.ctx, codeHash, 515151); linked {
 		t.Fatal("a code links once")
 	}
+	if _, linked, _ := worker.LinkTelegramChat(f.ctx, codeHash, 424242); !linked {
+		t.Fatal("a replayed update from the linked chat is still a success")
+	}
 	if n := f.count(t, `SELECT count(*) FROM admin_audit_log WHERE action='admin.notifications.telegram_linked' AND actor_user_id=$1`, viewer); n != 1 {
 		t.Fatalf("linking is audited: %d", n)
 	}
@@ -200,6 +203,8 @@ func (f *faultDatabase) notifications(t *testing.T) {
 	// The worker resolves recipients at claim time.
 	faultExec(t, f.ctx, f.admin, `UPDATE notification_jobs SET available_at=available_at-interval '1 minute'`)
 	faultExec(t, f.ctx, f.admin, `UPDATE admin_role_bindings SET revoked_at=$2 WHERE user_id=$1`, viewer, now)
+	// A job whose leases kept expiring ends instead of being leased forever.
+	faultExec(t, f.ctx, f.admin, `UPDATE notification_jobs SET attempt_count=20 WHERE user_id=$1 AND event='underpaid'`, owner)
 	claimed := map[string]notifications.Job{}
 	for {
 		job, found, err := worker.ClaimNotification(f.ctx, faultID(t), 30*time.Second)
@@ -216,6 +221,9 @@ func (f *faultDatabase) notifications(t *testing.T) {
 	}
 	if n := f.count(t, `SELECT count(*) FROM notification_jobs WHERE user_id=$1 AND merchant_id IS NOT NULL AND status='dead' AND last_error_code='no_recipient'`, viewer); n != 2 {
 		t.Fatalf("a user who lost access gets nothing more: %d", n)
+	}
+	if status := f.text(t, `SELECT status||':'||last_error_code FROM notification_jobs WHERE user_id=$1 AND event='underpaid'`, owner); status != "dead:attempts_exhausted" {
+		t.Fatalf("attempt cap: %s", status)
 	}
 	var ownerJob, telegramJob notifications.Job
 	for _, job := range claimed {

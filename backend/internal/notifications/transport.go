@@ -83,9 +83,10 @@ var telegramToken = regexp.MustCompile(`^[0-9]{5,16}:[A-Za-z0-9_-]{30,64}$`)
 
 // Telegram is a minimal Bot API client. The token is part of every request
 // path, so no error from it ever carries the URL or the transport error.
+// Sends use a short timeout; only the long poll waits longer.
 type Telegram struct {
 	base, token string
-	client      *http.Client
+	send, poll  *http.Client
 }
 
 // NewTelegram reads the bot token from a file. base is the Bot API origin,
@@ -100,14 +101,22 @@ func NewTelegram(base, tokenFile string) (*Telegram, error) {
 		return nil, ErrInvalid
 	}
 	transport := &http.Transport{Proxy: http.ProxyFromEnvironment, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}, ForceAttemptHTTP2: true, ResponseHeaderTimeout: 40 * time.Second}
-	return newTelegram(strings.TrimRight(base, "/"), strings.TrimSpace(string(token)), &http.Client{Transport: transport, Timeout: 45 * time.Second, CheckRedirect: noRedirect})
+	telegram, err := newTelegram(strings.TrimRight(base, "/"), strings.TrimSpace(string(token)), &http.Client{Transport: transport, Timeout: 45 * time.Second, CheckRedirect: noRedirect})
+	if err != nil {
+		return nil, err
+	}
+	telegram.send = &http.Client{Transport: transport, Timeout: TelegramSendTimeout, CheckRedirect: noRedirect}
+	return telegram, nil
 }
+
+// TelegramSendTimeout bounds one sendMessage; the worker lease must exceed it.
+const TelegramSendTimeout = 10 * time.Second
 
 func newTelegram(base, token string, client *http.Client) (*Telegram, error) {
 	if !telegramToken.MatchString(token) {
 		return nil, ErrInvalid
 	}
-	return &Telegram{base: base, token: token, client: client}, nil
+	return &Telegram{base: base, token: token, send: client, poll: client}, nil
 }
 
 // RetryAfterError is a 429 from Telegram with the wait it asked for.
@@ -125,7 +134,7 @@ type telegramResponse struct {
 	} `json:"parameters"`
 }
 
-func (t *Telegram) call(ctx context.Context, method string, input any, output any) error {
+func (t *Telegram) call(ctx context.Context, client *http.Client, method string, input any, output any) error {
 	body, err := json.Marshal(input)
 	if err != nil {
 		return err
@@ -135,7 +144,7 @@ func (t *Telegram) call(ctx context.Context, method string, input any, output an
 		return ErrDependency
 	}
 	request.Header.Set("Content-Type", "application/json")
-	response, err := t.client.Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		return ErrDependency
 	}
@@ -177,7 +186,7 @@ func (t *Telegram) SendMessage(ctx context.Context, chatID int64, text string) (
 	var sent struct {
 		MessageID int64 `json:"message_id"`
 	}
-	if err := t.call(ctx, "sendMessage", map[string]any{"chat_id": chatID, "text": text, "link_preview_options": map[string]bool{"is_disabled": true}}, &sent); err != nil {
+	if err := t.call(ctx, t.send, "sendMessage", map[string]any{"chat_id": chatID, "text": text, "link_preview_options": map[string]bool{"is_disabled": true}}, &sent); err != nil {
 		return "", err
 	}
 	if sent.MessageID <= 0 {
@@ -204,11 +213,11 @@ type Update struct {
 // GetUpdates long-polls for messages from offset.
 func (t *Telegram) GetUpdates(ctx context.Context, offset int64, wait time.Duration) ([]Update, error) {
 	var updates []Update
-	err := t.call(ctx, "getUpdates", map[string]any{"offset": offset, "timeout": int(wait / time.Second), "limit": 100, "allowed_updates": []string{"message"}}, &updates)
+	err := t.call(ctx, t.poll, "getUpdates", map[string]any{"offset": offset, "timeout": int(wait / time.Second), "limit": 100, "allowed_updates": []string{"message"}}, &updates)
 	return updates, err
 }
 
-func (t *Telegram) Close() { closeIdle(t.client) }
+func (t *Telegram) Close() { closeIdle(t.poll) }
 
 func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 

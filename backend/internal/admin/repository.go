@@ -34,7 +34,7 @@ type AuthRepository interface {
 	RevokeOtherSessions(ctx context.Context, userID, keepSessionID, reason string, now time.Time, audit AuditEntry) (int64, error)
 	NotificationSettings(ctx context.Context, principal Principal, scope Scope) (NotificationSettings, error)
 	SaveMerchantNotifications(ctx context.Context, principal Principal, scope Scope, email, telegram []string, locale string, at time.Time) error
-	SaveAccountNotifications(ctx context.Context, principal Principal, signInEmail, signInTelegram bool, locale string, at time.Time) error
+	SaveAccountNotifications(ctx context.Context, principal Principal, signInEmail, signInTelegram bool, locale string, at time.Time, audit AuditEntry) error
 	CreateTelegramLinkCode(ctx context.Context, principal Principal, codeHash [32]byte, at, expires time.Time) error
 	UnlinkTelegram(ctx context.Context, principal Principal, audit AuditEntry) error
 	EnqueueSignInNotification(ctx context.Context, principal Principal, sessionID, locale string) error

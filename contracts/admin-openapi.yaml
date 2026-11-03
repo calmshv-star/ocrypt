@@ -225,6 +225,7 @@ paths:
         '200': {description: Settings, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationSettings'}}}}
         '400': {$ref: '#/components/responses/Problem'}
         '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
   /admin/v1/notifications/merchant:
     put:
       tags: [Notifications]

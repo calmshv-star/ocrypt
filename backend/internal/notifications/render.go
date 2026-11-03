@@ -96,6 +96,15 @@ func TelegramReply(locale string, linked bool) string {
 	return words["telegram.invalid"]
 }
 
+// TelegramStart answers a bare /start: the link comes from the cabinet.
+func TelegramStart(locale string) string {
+	words, ok := catalog[locale]
+	if !ok {
+		words = catalog["en"]
+	}
+	return words["telegram.start"]
+}
+
 func fill(template string, values map[string]string) string {
 	pairs := make([]string, 0, len(values)*2)
 	for key, value := range values {
@@ -170,6 +179,7 @@ var catalog = map[string]map[string]string{
 		"open":                   "Open the cabinet: {url}",
 		"telegram.linked":        "Ocrypt notifications are now sent to this chat. You can turn them off in the cabinet under Notifications.",
 		"telegram.invalid":       "This link has expired or was already used. Create a new one in the cabinet under Notifications.",
+		"telegram.start":         "To get Ocrypt notifications here, open the cabinet, go to Notifications and press Connect Telegram.",
 	},
 	"ru": {
 		"paid.subject":           "Платёж получен: {amount} {currency}",
@@ -188,6 +198,7 @@ var catalog = map[string]map[string]string{
 		"open":                   "Открыть кабинет: {url}",
 		"telegram.linked":        "Уведомления Ocrypt теперь приходят в этот чат. Отключить их можно в кабинете, раздел «Уведомления».",
 		"telegram.invalid":       "Ссылка устарела или уже использована. Создайте новую в кабинете, раздел «Уведомления».",
+		"telegram.start":         "Чтобы получать сюда уведомления Ocrypt, откройте кабинет, раздел «Уведомления», и нажмите «Подключить Telegram».",
 	},
 	"zh": {
 		"paid.subject":           "已收到付款：{amount} {currency}",
@@ -206,6 +217,7 @@ var catalog = map[string]map[string]string{
 		"open":                   "打开后台：{url}",
 		"telegram.linked":        "Ocrypt 通知现在会发送到此聊天。您可以在后台“通知”中关闭它们。",
 		"telegram.invalid":       "此链接已过期或已被使用。请在后台“通知”中创建新链接。",
+		"telegram.start":         "要在此接收 Ocrypt 通知，请打开后台，进入“通知”，然后点击“连接 Telegram”。",
 	},
 	"es": {
 		"paid.subject":           "Pago recibido: {amount} {currency}",
@@ -224,6 +236,7 @@ var catalog = map[string]map[string]string{
 		"open":                   "Abrir el panel: {url}",
 		"telegram.linked":        "Las notificaciones de Ocrypt llegarán ahora a este chat. Puede desactivarlas en el panel, en Notificaciones.",
 		"telegram.invalid":       "Este enlace ha caducado o ya se usó. Cree uno nuevo en el panel, en Notificaciones.",
+		"telegram.start":         "Para recibir aquí las notificaciones de Ocrypt, abra el panel, vaya a Notificaciones y pulse Conectar Telegram.",
 	},
 	"fr": {
 		"paid.subject":           "Paiement reçu : {amount} {currency}",
@@ -242,6 +255,7 @@ var catalog = map[string]map[string]string{
 		"open":                   "Ouvrir l'espace marchand : {url}",
 		"telegram.linked":        "Les notifications Ocrypt arrivent désormais dans ce chat. Vous pouvez les désactiver dans l'espace marchand, rubrique Notifications.",
 		"telegram.invalid":       "Ce lien a expiré ou a déjà été utilisé. Créez-en un nouveau dans l'espace marchand, rubrique Notifications.",
+		"telegram.start":         "Pour recevoir ici les notifications Ocrypt, ouvrez l'espace marchand, rubrique Notifications, et appuyez sur Connecter Telegram.",
 	},
 	"de": {
 		"paid.subject":           "Zahlung erhalten: {amount} {currency}",
@@ -260,5 +274,6 @@ var catalog = map[string]map[string]string{
 		"open":                   "Händlerbereich öffnen: {url}",
 		"telegram.linked":        "Ocrypt-Benachrichtigungen kommen jetzt in diesen Chat. Sie können sie im Händlerbereich unter Benachrichtigungen abschalten.",
 		"telegram.invalid":       "Dieser Link ist abgelaufen oder wurde bereits verwendet. Erstellen Sie im Händlerbereich unter Benachrichtigungen einen neuen.",
+		"telegram.start":         "Um Ocrypt-Benachrichtigungen hier zu erhalten, öffnen Sie den Händlerbereich, gehen Sie zu Benachrichtigungen und tippen Sie auf Telegram verbinden.",
 	},
 }

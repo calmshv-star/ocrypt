@@ -157,6 +157,8 @@ workloads:
     env:
       ADMIN_HTTP_ADDRESS: ":8081"
       ADMIN_PUBLIC_ORIGIN: "https://admin.example.invalid"
+      # The notification worker's bot; empty keeps Telegram off in the cabinet.
+      ADMIN_TELEGRAM_BOT_USERNAME: ""
       ADMIN_OIDC_ISSUER: "https://identity.example.invalid"
       ADMIN_OIDC_CLIENT_ID: merchant-admin
       ADMIN_OIDC_REDIRECT_URI: "https://admin.example.invalid/admin/v1/auth/callback"

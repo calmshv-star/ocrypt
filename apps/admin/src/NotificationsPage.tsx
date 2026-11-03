@@ -30,6 +30,12 @@ export function NotificationsPage() {
   const [outcome, setOutcome] = useState<{ section: "events" | "account" | "telegram"; kind: Outcome }>({ section: "events", kind: null });
   const [link, setLink] = useState<{ url: string; expires_at: string } | null>(null);
   const current = settings.data;
+  // A one-time link lasts ten minutes; afterwards offer a new one.
+  useEffect(() => {
+    if (!link) return;
+    const timer = window.setTimeout(() => setLink(null), Math.max(Date.parse(link.expires_at) - Date.now(), 0));
+    return () => window.clearTimeout(timer);
+  }, [link]);
   useEffect(() => {
     if (!current) return;
     setEmail(new Set(current.merchant?.email_events ?? []));
@@ -51,7 +57,10 @@ export function NotificationsPage() {
       await cache.invalidateQueries({ queryKey: SETTINGS_KEY });
     }
   };
-  const saveEvents = () => run("events", () => admin.client!.saveMerchantNotifications(scope!, EVENTS.filter((event) => email.has(event)), EVENTS.filter((event) => telegram.has(event)), locale));
+  // Events the user can no longer receive (access or the bot gone) are
+  // dropped on save, so the form never becomes unsavable.
+  const allowed = (event: NotificationEvent) => event !== "webhook_failed" || Boolean(current?.merchant?.webhooks_allowed);
+  const saveEvents = () => run("events", () => admin.client!.saveMerchantNotifications(scope!, EVENTS.filter((event) => email.has(event) && allowed(event)), current?.telegram.available ? EVENTS.filter((event) => telegram.has(event) && allowed(event)) : [], locale));
   const saveAccount = () => run("account", () => admin.client!.saveAccountNotifications(scope, signIn.email, signIn.telegram, locale));
   const connect = () => run("telegram", async () => setLink(await admin.client!.createTelegramLink()), "linkFailed");
   const disconnect = () => run("telegram", async () => { await admin.client!.unlinkTelegram(); setLink(null); });

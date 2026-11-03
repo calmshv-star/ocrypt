@@ -61,6 +61,23 @@ describe("notification settings", () => {
     await waitFor(() => expect(live.saveAccountNotifications).toHaveBeenCalledWith({ tenantId, merchantId }, false, true, "en"));
   });
 
+  it("drops events the user can no longer receive when saving", async () => {
+    const saved: NotificationSettings = { ...defaults, telegram: { available: false, linked: false }, merchant: { configured: true, webhooks_allowed: false, email_events: ["paid", "webhook_failed"], telegram_events: ["review"] } };
+    const live = client({ notificationSettings: vi.fn().mockResolvedValue(saved) });
+    render(wrap(<MemoryRouter initialEntries={["/notifications"]}><App client={live} preview={false} /></MemoryRouter>));
+    fireEvent.click((await screen.findAllByRole("button", { name: "Save" }))[0]!);
+    await waitFor(() => expect(live.saveMerchantNotifications).toHaveBeenCalledWith({ tenantId, merchantId }, ["paid"], [], "en"));
+  });
+
+  it("offers a new Telegram link once the old one expired", async () => {
+    const live = client({ createTelegramLink: vi.fn().mockResolvedValue({ url: "https://t.me/ocrypt_bot?start=old", expires_at: new Date(Date.now() + 50).toISOString() }) });
+    render(wrap(<MemoryRouter initialEntries={["/notifications"]}><App client={live} preview={false} /></MemoryRouter>));
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Telegram" }));
+    expect(await screen.findByRole("link", { name: "Open Telegram" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Connect Telegram" }, { timeout: 2000 })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open Telegram" })).not.toBeInTheDocument();
+  });
+
   it("explains a missing bot and offers no merchant section without payment access", async () => {
     const live = client({ notificationSettings: vi.fn().mockResolvedValue({ ...defaults, telegram: { available: false, linked: false }, merchant: undefined }) });
     render(wrap(<MemoryRouter initialEntries={["/notifications"]}><App client={live} preview={false} /></MemoryRouter>));

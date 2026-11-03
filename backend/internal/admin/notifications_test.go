@@ -74,6 +74,9 @@ func TestNotificationSettingsRespectPaymentAndWebhookAccess(t *testing.T) {
 	if response := account(`{"sign_in_email":false,"sign_in_telegram":true,"locale":"de"}`); response.Code != http.StatusOK || repo.savedSignInEmail == nil || *repo.savedSignInEmail || repo.savedLocale != "de" {
 		t.Fatalf("account: %d %s", response.Code, response.Body.String())
 	}
+	if repo.audit.Action != "admin.notifications.account_updated" || !strings.Contains(string(repo.audit.Details), `"sign_in_email":false`) {
+		t.Fatalf("silencing sign-in alerts is audited: %+v", repo.audit)
+	}
 }
 
 func TestTelegramLinkStoresOnlyTheCodeHash(t *testing.T) {

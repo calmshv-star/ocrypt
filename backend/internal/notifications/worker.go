@@ -60,8 +60,10 @@ type Worker struct {
 }
 
 func (w Worker) Validate() error {
+	// A send gets half the lease, so it always ends before the lease does
+	// and its outcome can be recorded; the lease must cover a Telegram send.
 	if w.Store == nil || (w.Email == nil && w.Telegram == nil) || !strings.HasPrefix(w.CabinetURL, "https://") || !ids.Valid(w.WorkerID) ||
-		w.Lease < 10*time.Second || w.Lease > 5*time.Minute || w.MaxAttempts < 1 || w.MaxAttempts > 20 ||
+		w.Lease < 2*TelegramSendTimeout || w.Lease > 5*time.Minute || w.MaxAttempts < 1 || w.MaxAttempts > 20 ||
 		w.BaseBackoff < time.Second || w.MaxBackoff < w.BaseBackoff || w.MaxBackoff > 24*time.Hour {
 		return ErrInvalid
 	}
@@ -82,14 +84,17 @@ func (w Worker) RunOnce(ctx context.Context) (bool, error) {
 		return true, w.fail(ctx, job, "render_failed", true, 0)
 	}
 	var reference string
+	send, cancel := context.WithTimeout(ctx, w.Lease/2)
 	switch {
 	case job.Channel == "email" && w.Email != nil && job.Email != "":
-		reference, err = w.Email.SendEmail(ctx, job.ID, job.Email, job.Locale, job.Event, message)
+		reference, err = w.Email.SendEmail(send, job.ID, job.Email, job.Locale, job.Event, message)
 	case job.Channel == "telegram" && w.Telegram != nil && job.ChatID > 0:
-		reference, err = w.Telegram.SendMessage(ctx, job.ChatID, message.Telegram())
+		reference, err = w.Telegram.SendMessage(send, job.ChatID, message.Telegram())
 	default:
+		cancel()
 		return true, w.fail(ctx, job, "channel_unconfigured", true, 0)
 	}
+	cancel()
 	var wait RetryAfterError
 	switch {
 	case errors.Is(err, ErrRejected):
@@ -144,7 +149,9 @@ type Linker struct {
 	Wait     time.Duration
 }
 
-// PollOnce handles one batch of updates and moves the offset past it.
+// PollOnce handles one batch of updates, moving the offset past each update
+// as soon as it is handled; a database error stops before that update so it
+// is handled again.
 func (l Linker) PollOnce(ctx context.Context) error {
 	if l.Store == nil || l.Telegram == nil || l.Wait < 0 || l.Wait > 50*time.Second {
 		return ErrInvalid
@@ -157,44 +164,51 @@ func (l Linker) PollOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	next := offset
 	for _, update := range updates {
-		if update.UpdateID >= next {
-			next = update.UpdateID + 1
+		if update.UpdateID < offset {
+			continue
 		}
-		l.handle(ctx, update)
+		if err := l.handle(ctx, update); err != nil {
+			return err
+		}
+		if err := l.Store.AdvanceTelegramOffset(ctx, update.UpdateID+1); err != nil {
+			return err
+		}
 	}
-	if next == offset {
-		return nil
-	}
-	return l.Store.AdvanceTelegramOffset(ctx, next)
+	return nil
 }
 
-func (l Linker) handle(ctx context.Context, update Update) {
+func (l Linker) handle(ctx context.Context, update Update) error {
 	message := update.Message
 	if message == nil || message.Chat.Type != "private" || message.Chat.ID <= 0 {
-		return
+		return nil
 	}
 	match := startCommand.FindStringSubmatch(strings.TrimSpace(message.Text))
 	if match == nil {
-		return
+		return nil
 	}
 	locale := ""
 	if message.From != nil {
 		locale, _, _ = strings.Cut(strings.ToLower(message.From.LanguageCode), "-")
 	}
-	linked := false
-	if len(match[1]) == linkCodeLength {
+	reply := ""
+	switch {
+	case match[1] == "":
+		reply = TelegramStart(locale)
+	case len(match[1]) == linkCodeLength:
 		saved, ok, err := l.Store.LinkTelegramChat(ctx, LinkCodeHash(match[1]), message.Chat.ID)
 		if err != nil {
-			return
+			return err
 		}
-		linked = ok
 		if saved != "" {
 			locale = saved
 		}
+		reply = TelegramReply(locale, ok)
+	default:
+		reply = TelegramReply(locale, false)
 	}
-	_, _ = l.Telegram.SendMessage(ctx, message.Chat.ID, TelegramReply(locale, linked))
+	_, _ = l.Telegram.SendMessage(ctx, message.Chat.ID, reply)
+	return nil
 }
 
 // linkCodeLength is the base64url length of the 32 random bytes the cabinet

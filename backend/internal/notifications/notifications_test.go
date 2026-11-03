@@ -63,6 +63,7 @@ type fakeStore struct {
 	offset    int64
 	codes     map[[32]byte]string
 	links     map[int64]bool
+	linkErr   error
 }
 
 func (s *fakeStore) Ping(context.Context) error { return nil }
@@ -83,6 +84,9 @@ func (s *fakeStore) FailNotification(_ context.Context, id, _, code string, maxA
 	return true, nil
 }
 func (s *fakeStore) LinkTelegramChat(_ context.Context, hash [32]byte, chat int64) (string, bool, error) {
+	if s.linkErr != nil {
+		return "", false, s.linkErr
+	}
 	locale, ok := s.codes[hash]
 	if ok {
 		delete(s.codes, hash)
@@ -173,6 +177,7 @@ func TestLinkerLinksOnlyPrivateChatsWithAValidCode(t *testing.T) {
 		update(41, "private", 5, "/start "+code, "en"),
 		update(42, "private", 6, "/start "+code, "fr-FR"),
 		update(43, "private", 8, "hello", "en"),
+		update(44, "private", 9, "/start", "de"),
 	}}
 	if err := (Linker{Store: store, Telegram: telegram, Wait: 25 * time.Second}).PollOnce(context.Background()); err != nil {
 		t.Fatal(err)
@@ -180,11 +185,18 @@ func TestLinkerLinksOnlyPrivateChatsWithAValidCode(t *testing.T) {
 	if !store.links[5] || store.links[6] || store.links[-100] || len(store.links) != 1 {
 		t.Fatalf("one private chat, one use of the code: %+v", store.links)
 	}
-	if telegram.sent[5] != TelegramReply("ru", true) || telegram.sent[6] != TelegramReply("fr", false) || telegram.sent[-100] != "" || telegram.sent[8] != "" {
+	if telegram.sent[5] != TelegramReply("ru", true) || telegram.sent[6] != TelegramReply("fr", false) || telegram.sent[-100] != "" || telegram.sent[8] != "" || telegram.sent[9] != TelegramStart("de") {
 		t.Fatalf("replies: %+v", telegram.sent)
 	}
-	if store.offset != 44 {
+	if store.offset != 45 {
 		t.Fatalf("offset must move past the batch: %d", store.offset)
+	}
+	// A database error leaves the update for the next poll.
+	store.linkErr = errors.New("database unavailable")
+	store.codes[LinkCodeHash(strings.Repeat("B", 43))] = ""
+	telegram.updates = []Update{update(45, "private", 11, "/start "+strings.Repeat("B", 43), "en")}
+	if err := (Linker{Store: store, Telegram: telegram, Wait: time.Second}).PollOnce(context.Background()); err == nil || store.offset != 45 || telegram.sent[11] != "" {
+		t.Fatalf("a failed link is retried, not answered: %v %d %q", err, store.offset, telegram.sent[11])
 	}
 }
 
