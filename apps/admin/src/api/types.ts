@@ -5,7 +5,7 @@ export type Permission =
   | "payment_links:read" | "payment_links:write" | "checkout:write"
   | "webhook_settings:read" | "webhook_settings:write" | "webhook_settings:rotate" | "webhook_settings:disable"
   | "api_clients:read" | "api_clients:write" | "api_clients:rotate" | "api_clients:revoke"
-  | "management_audit:read" | "wallets:read" | "wallets:write" | "signup_reviews:read" | "signup_reviews:decide"
+  | "management_audit:read" | "wallets:read" | "wallets:write" | "signup_reviews:read" | "signup_reviews:decide" | "go_live:request" | "go_live_reviews:read" | "go_live_reviews:decide"
   | "matching_policy:read" | "matching_policy:write" | "matching_policy:approve" | "matching_policy:activate"
   | "platform_config:read" | "platform_config:write" | "platform_config:request" | "platform_config:approve"
   | "platform_config:schedule" | "platform_config:activate" | "platform_config:rollback" | "platform_config:emergency"
@@ -21,6 +21,11 @@ export type Permission =
 
 export type AdminScope = { tenantId: string; merchantId?: string };
 export type AdminPrincipal = { user_id: string; session_id: string; display_name: string; email?: string; roles: string[]; permissions: Permission[]; scopes: Array<{tenant_id?:string;merchant_id?:string}>; acr?:string; amr:string[]; step_up_until?:string; signup_review?:"pending"|"rejected" };
+export type AcceptancePreset = "strict" | "standard" | "fast";
+export type GoLiveState = { environment:"test"|"live"; request_id?:string; request_status?:"pending"|"approved"|"rejected"; preset?:AcceptancePreset; requested_at?:string; screening_ready:boolean };
+export type GoLiveProofKind = "evm_personal_sign" | "solana_sign_message" | "tron_sign_message_v2";
+export type GoLiveProofChallenge = { kind:GoLiveProofKind; chain_id:string; address:string; display_address:string; tenant_id:string; merchant_id:string; nonce:string; issued_at:string; expires_at:string; message:string; token:string };
+export type GoLiveReview = { request_id:string; tenant_id:string; merchant_id:string; company_name:string; owner_email:string; preset:AcceptancePreset; screening_status:string; addresses:Array<{chain_id:string;address:string;proof_kind:string;admitted:boolean}>; requested_at:string };
 export type DailyTotal = { day:string; currency:string; currency_scale:number; paid_count:number; paid_amount_minor:string };
 export type DailyTotalsReport = { from:string; to:string; time_zone:string; data:DailyTotal[] };
 export type SignupReviewReason = "domain_match" | "ip_region" | "ip_region_unknown" | "name_match" | "screening_list_stale";

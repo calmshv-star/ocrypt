@@ -63,21 +63,22 @@ link or API call and stays there):
 Confirmations are platform finality per chain and are not merchant-tunable.
 
 Non-goals: automatic wallet admission (it would bypass the platform
-four-eyes control), TRON and TON ownership proofs (operators verify those
-addresses out of band; the request marks them unproven), changing presets
-after going live (the existing matching-policy flow applies).
+four-eyes control), a TON ownership proof (TON Connect's ton_proof needs the
+wallet's state init; TON addresses are not accepted in a request yet),
+changing presets after going live (the existing matching-policy flow
+applies). TRON is proven with TronLink signMessageV2.
 
 ## Acceptance matrix
 
 | ID | Behavior/input/fault | Expected result | Test or manual check | Evidence |
 | --- | --- | --- | --- | --- |
-| L1 | Address proof: valid EVM and Solana signatures; wrong signer, wrong merchant, expired, replayed challenge | Accepted; refused | Go unit tests | |
-| L2 | Submit: not owner, live already, screening held/rejected, no proven address, second open request | Refused | live `S4_go_live_request` | |
-| L3 | Submit with fast/standard | Pending policy change requested by the owner with the preset values; strict files none | live `S4` | |
-| L4 | Decide: tenant-scoped or non-global operator, registrant, short reason, twice | Refused; one decision | live `S4`, BFF tests | |
-| L5 | Approve before wallets are admitted; after | Refused with conflict; merchant live, policy active with approver ≠ requester, audit | live `S4` | |
-| L6 | Reject | Request rejected with reason, merchant stays test, policy change rejected | live `S4` | |
-| L7 | Cabinet | Test/Live badge; wizard preset choice and request state; operator queue | vitest | |
+| L1 | Address proof: valid EVM, Solana and TRON signatures; another domain, merchant, network or signer, expired, malformed, wrong kind | Accepted; refused | `TestGoLiveProofsBindDomainMerchantNetworkAndAddress`, `TestGoLiveRequestNeedsOwnSignedAddressesAndAnMFASession` | passes |
+| L2 | Submit: not owner, live already, held signup (no rights at all), unknown preset, no or duplicate or inactive chain, second open request, proof for another merchant, tampered token, no MFA session | Refused | live `S4_go_live_request`, BFF tests | passes |
+| L3 | Submit with fast/standard | Pending policy change requested by the owner with the preset values; strict files none | live `S4`, BFF tests | passes |
+| L4 | Decide: tenant-scoped or non-global operator, auditor, registrant, short reason, twice | Refused; one decision | live `S4`, BFF tests | passes |
+| L5 | Approve before wallets are admitted; after | Refused with conflict; merchant live, policy active with approver ≠ requester, audit | live `S4` (SQL and Go repository) | passes |
+| L6 | Reject | Request rejected with reason, merchant stays test, policy change rejected | live `S4` | passes |
+| L7 | Cabinet | Test/Live badge; preset choice, message, wallet or pasted signature, request state; operator queue with approve only when admitted | `GoLive.test.tsx` | passes |
 
 ## Runtime prerequisites
 

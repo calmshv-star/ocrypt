@@ -5,6 +5,7 @@ import { ArrowRight, CircleDollarSign, KeyRound, Link2, Rocket, Sparkles, Wallet
 import type { ComponentType } from "react";
 import { useAdmin, useAdminQuery } from "./AdminProvider";
 import type { AdminScope } from "./api/types";
+import { useGoLiveState } from "./goLive";
 
 // Intent statuses that mean the customer's money arrived and is final
 // (overpaid is reached only from settled).
@@ -26,6 +27,7 @@ export function useOnboardingSteps() {
   const webhooks = useAdminQuery("onboarding-webhooks", "webhook_settings:read", (client, scope) => client.webhookEndpoints(scope, "", 1));
   const links = useAdminQuery("onboarding-payment-links", "payment_links:read", (client, scope) => client.paymentLinks(scope, "", 1));
   const intents = useAdminQuery("onboarding-intents", "payments:read", (client, scope) => client.intents(scope, "", 50));
+  const goLive = useGoLiveState();
   const walletReady = Boolean(wallets.data?.wallets.some((wallet) => wallet.status === "active"));
   const paid = Boolean(intents.data?.items.some((intent) => PAID_STATUSES.has(intent.status)));
   const steps = ([
@@ -34,7 +36,8 @@ export function useOnboardingSteps() {
     admin.can("webhook_settings:read") && { key: "webhooks", href: "#/webhooks", icon: Webhook, done: (webhooks.data?.data.length ?? 0) > 0, loading: webhooks.isLoading },
     admin.can("payment_links:read") && { key: "paymentLink", href: "#/payment-links", icon: Link2, done: (links.data?.data.length ?? 0) > 0, loading: links.isLoading },
     admin.can("payments:read") && { key: "testPayment", href: "#/intents", icon: CircleDollarSign, done: paid, loading: intents.isLoading },
-    canWallets && admin.can("payments:read") && { key: "goLive", href: "#/settings", icon: Rocket, done: walletReady && paid, loading: wallets.isLoading || intents.isLoading }
+    admin.can("go_live:request") ? { key: "goLive", href: "#/go-live", icon: Rocket, done: goLive.data?.environment === "live", loading: goLive.isLoading }
+      : canWallets && admin.can("payments:read") && { key: "goLive", href: "#/settings", icon: Rocket, done: walletReady && paid, loading: wallets.isLoading || intents.isLoading }
   ].filter(Boolean) as Step[]);
   return { steps, done: steps.filter((step) => step.done).length, loading: steps.some((step) => step.loading) };
 }

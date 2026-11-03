@@ -29,9 +29,9 @@ type repositoryStub struct {
 	goLiveRequestID, goLivePreset, goLivePolicyChange string
 	goLiveAddresses                                   []GoLiveProvenAddress
 	goLiveDecision                                    SignupDecision
-	signupReviews     []SignupReview
-	signupDecision    SignupDecision
-	signupDecisionErr error
+	signupReviews                                     []SignupReview
+	signupDecision                                    SignupDecision
+	signupDecisionErr                                 error
 	// signupDecisionMerchant is the merchant the last decision targeted.
 	signupDecisionMerchant string
 	registration           SelfServiceRegistration

@@ -1,12 +1,13 @@
 import { useI18n, type MessageKey } from "@merchant/i18n";
 import { AppShell, Badge, Button, PRODUCT_NAME, Select, ThemeToggle, WorkspaceSwitcher, type ShellNavGroup } from "@merchant/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, Archive, Blocks, CircleDollarSign, FileSpreadsheet, Fingerprint, GitCompareArrows, KeyRound, Landmark, LayoutDashboard, Link2, RadioTower, ReceiptText, RefreshCw, Settings2, ShieldCheck, Sparkles, UserCheck } from "lucide-react";
+import { Activity, Archive, Blocks, CircleDollarSign, FileSpreadsheet, Fingerprint, GitCompareArrows, Rocket, KeyRound, Landmark, LayoutDashboard, Link2, RadioTower, ReceiptText, RefreshCw, Settings2, ShieldCheck, Sparkles, UserCheck } from "lucide-react";
 import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AdminProvider, useAdmin } from "./AdminProvider";
 import type { AdminClient } from "./api/client";
 import type { Permission } from "./api/types";
+import { useGoLiveState } from "./goLive";
 import { SignupPage } from "./SignupPage";
 
 const SETTINGS_PATHS = new Set(["/settings", "/financial-settings", "/webhooks", "/audit", "/matching-policies", "/api-clients", "/team"]);
@@ -47,6 +48,8 @@ const ProviderOperationsPage = lazy(() => import("./ProviderOperationsPage").the
 const ProviderConfigurationPage = lazy(() => import("./ProviderConfigurationPage").then((module) => ({ default: module.ProviderConfigurationPage })));
 const RetentionControlPage = lazy(() => import("./RetentionControlPage").then((module) => ({ default: module.RetentionControlPage })));
 const OnboardingPage = lazy(() => import("./OnboardingPage").then((module) => ({ default: module.OnboardingPage })));
+const GoLivePage = lazy(() => import("./GoLivePage").then((module) => ({ default: module.GoLivePage })));
+const GoLiveReviewsPage = lazy(() => import("./GoLiveReviewsPage").then((module) => ({ default: module.GoLiveReviewsPage })));
 const ReportsPage = lazy(() => import("./ReportsPage").then((module) => ({ default: module.ReportsPage })));
 const SignupReviewsPage = lazy(() => import("./SignupReviewsPage").then((module) => ({ default: module.SignupReviewsPage })));
 const MigrationControlPage = lazy(() => import("./MigrationControlPage").then((module) => ({ default: module.MigrationControlPage })));
@@ -60,6 +63,16 @@ const SIGN_IN_FAILURES = new Set(["cancelled", "provider", "expired", "not_allow
 
 // Where a failed OIDC callback lands (/#/sign-in-failed?reason=...). The
 // reason is one generic word from the server; anything else reads as failed.
+// Test or Live for a merchant owner's current merchant, always visible; other
+// sessions keep the deployment badge.
+function EnvironmentBadge() {
+  const { t } = useI18n();
+  const admin = useAdmin();
+  const state = useGoLiveState();
+  if (!admin.preview && state.data) return <Badge tone={state.data.environment === "live" ? "positive" : "warning"}>{t(state.data.environment === "live" ? "goLive.live" : "goLive.test")}</Badge>;
+  return <Badge tone="neutral">{t(admin.preview ? "common.previewData" : "common.production")}</Badge>;
+}
+
 function SignInFailedScreen({ reason }: { reason: string | null }) {
   const { locale, locales, localeNames, setLocale, t } = useI18n();
   const { client, sessionState } = useAdmin();
@@ -139,6 +152,8 @@ function ProductionRoutes() {
     <Route element={<MigrationControlPage />} path="/migrations" />
     <Route element={<SignupReviewsPage />} path="/signup-reviews" />
     <Route element={<ReportsPage />} path="/reports" />
+    <Route element={<GoLivePage />} path="/go-live" />
+    <Route element={<GoLiveReviewsPage />} path="/go-live-reviews" />
     <Route element={<Navigate replace to="/overview" />} path="*" />
   </Routes>;
 }
@@ -162,6 +177,7 @@ function AdminApplication() {
       admin.can("payments:read") && { label: t("nav.intents"), href: "#/intents", icon: CircleDollarSign, active: active("/intents"), keywords: ["orders"] },
       admin.can("payments:read") && { label: t("nav.transfers"), href: "#/transfers", icon: Blocks, active: active("/transfers"), keywords: ["transactions"] },
       admin.can("payments:read") && { label: t("reports.nav"), href: "#/reports", icon: FileSpreadsheet, active: active("/reports"), keywords: ["accounting", "export", "xlsx"] },
+      admin.scope?.merchantId && admin.can("go_live:request") && { label: t("goLive.nav"), href: "#/go-live", icon: Rocket, active: active("/go-live"), keywords: ["live", "production", "wallet"] },
       admin.can("unmatched:read") && { label: t("nav.unmatched"), href: "#/unmatched", icon: Fingerprint, active: active("/unmatched"), keywords: ["review"] },
       admin.can("payment_links:read") && { label: t("nav.paymentLinks"), href: "#/payment-links", icon: Link2, active: active("/payment-links") }
   ].filter(Boolean) as ShellNavGroup["items"];
@@ -172,6 +188,7 @@ function AdminApplication() {
   const infrastructure = [
       admin.can("infrastructure:read") && { label: t("nav.assets"), href: "#/assets", icon: RadioTower, active: active("/assets") },
       admin.can("platform_config:read") && { label: t("nav.platformConfiguration"), href: "#/platform", icon: Settings2, active: active("/platform") },
+      admin.can("go_live_reviews:read") && !admin.scope?.merchantId && { label: t("goLiveReviews.nav"), href: "#/go-live-reviews", icon: Rocket, active: active("/go-live-reviews") },
       admin.can("signup_reviews:read") && !admin.scope?.merchantId && { label: t("signupReviews.nav"), href: "#/signup-reviews", icon: UserCheck, active: active("/signup-reviews") },
       admin.can("provider_ops:read") && !admin.scope?.merchantId && { label: t("providerOps.nav"), href: "#/providers", icon: Activity, active: active("/providers") },
       admin.can("provider_config:read") && !admin.scope?.merchantId && { label: t("providerConfig.nav"), href: "#/provider-configurations", icon: KeyRound, active: active("/provider-configurations") },
@@ -206,7 +223,7 @@ function AdminApplication() {
   const userEmail = admin.preview ? "demo@merchant.local" : admin.principal.email ?? admin.principal.user_id;
   const initials = userName.split(/\s+/).filter(Boolean).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "?";
   return <AppShell
-    environment={<Badge tone="neutral">{t(admin.preview ? "common.previewData" : "common.production")}</Badge>}
+    environment={<EnvironmentBadge />}
     headerEnd={<Select aria-label={t("common.locale")} onChange={(event) => setLocale(event.target.value as typeof locale)} value={locale}>{locales.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}</Select>}
     labels={{ skipContent: t("common.skipContent"), openNavigation: t("common.openNavigation"), closeNavigation: t("common.closeNavigation"), commandMenu: t("common.commandMenu"), searchPlaceholder: t("common.searchPlaceholder"), noResults: t("common.noResults"), theme: t("common.theme"), notifications: t("common.notifications"), account: t("common.account"), signOut: t("common.signOut"), signingOut: t("admin.signingOut"), primaryNavigation: t("common.primaryNavigation"), searchResults: t("common.searchResults") }}
     navGroups={navGroups}
