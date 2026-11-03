@@ -55,7 +55,7 @@ func VerifyWebhook(rawBody []byte, signatureHeader, contentDigest string, resolv
 		return VerifiedWebhook{}, errors.New("webhook content digest mismatch")
 	}
 	secret, found := resolve(parts["key"])
-	if !found {
+	if !found || len(secret) == 0 {
 		return VerifiedWebhook{}, errors.New("unknown webhook key")
 	}
 	mac := hmac.New(sha256.New, secret)

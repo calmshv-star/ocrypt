@@ -704,7 +704,7 @@
 .notifications__table tbody th { font-weight: 500; }
 .notifications__table tbody th small { display: block; color: var(--mp-muted); font-weight: 400; }
 .notifications__switch { display: flex; gap: 10px; align-items: center; padding: 6px 0; }
-.wizard__steps { display: grid; gap: 16px; margin: 0; padding: 0; list-style: none; }
+.wizard__steps { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; margin: 0; padding: 0; list-style: none; }
 .wizard__title { display: inline-flex; gap: 10px; align-items: center; }
 .wizard__number { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--mp-border); font-size: 13px; }
 .wizard__number[data-done] { border-color: var(--mp-primary); background: var(--mp-primary-soft); }

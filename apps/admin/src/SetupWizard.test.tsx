@@ -5,6 +5,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { SIGNATURE_SNIPPETS, WIZARD_WEBHOOK_EVENTS } from "./setupWizard";
 import { AdminAPIError, type AdminClient } from "./api/client";
 import type { AdminPrincipal, MerchantProjectSettings, WebhookEndpoint } from "./api/types";
 
@@ -28,7 +29,7 @@ function client(overrides: Record<string, unknown> = {}) {
     createAPIClient: vi.fn().mockResolvedValue({ client: {}, key_id: "key_wizard", secret: "sk_test_secret" }),
     webhookEndpoints: vi.fn().mockResolvedValue({ data: [] }),
     createWebhookEndpoint: vi.fn().mockResolvedValue({ endpoint, key_id: "whk_1", secret: "whsec_secret" }),
-    verifyWebhookEndpoint: vi.fn().mockRejectedValue(new AdminAPIError(502, "dependency_unavailable", "Unavailable")),
+    verifyWebhookEndpoint: vi.fn().mockRejectedValue(new AdminAPIError(503, "dependency_unavailable", "Unavailable")),
     webhookDeliveries: vi.fn().mockResolvedValue({ data: [{ id: "d1", event_id: "e1", event_type: "payment.settled", status: "retry", attempt_count: 1, last_http_status: 500, response_snippet: "boom", next_attempt_at: "2026-11-03T10:05:00Z", created_at: "2026-11-03T10:00:00Z" }] }),
     paymentLinks: vi.fn().mockResolvedValue({ data: [] }),
     intents: vi.fn().mockResolvedValue({ items: [] }),
@@ -60,7 +61,7 @@ describe("setup wizard", () => {
     expect(await screen.findByText("sk_test_secret")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Endpoint"), { target: { value: "https://shop.example/ocrypt" } });
     fireEvent.click(screen.getByRole("button", { name: "Add webhook" }));
-    await waitFor(() => expect(live.createWebhookEndpoint).toHaveBeenCalledWith({ tenantId, merchantId }, { url: "https://shop.example/ocrypt", event_types: ["payment.settled", "payment.partially_paid", "payment.needs_review"], timeout_ms: 5000, max_concurrency: 4 }, expect.any(String)));
+    await waitFor(() => expect(live.createWebhookEndpoint).toHaveBeenCalledWith({ tenantId, merchantId }, { url: "https://shop.example/ocrypt", event_types: ["payment.settled", "payment.overpaid", "payment.partially_paid", "payment.needs_review"], timeout_ms: 5000, max_concurrency: 4 }, expect.any(String)));
     expect(await screen.findByText("whsec_secret")).toBeInTheDocument();
     expect(window.localStorage.getItem(`ocrypt.setup.method.${merchantId}`)).toBe("api");
   });
@@ -82,6 +83,66 @@ describe("setup wizard", () => {
     fireEvent.click(await screen.findByRole("radio", { name: /^Payment link/ }));
     expect(screen.queryByText("Check the signature of every delivery with our SDK:")).not.toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Create a payment link" })[0]).toHaveAttribute("href", "#/payment-links");
-    expect(screen.getByRole("link", { name: "Switch to live mode" })).toHaveAttribute("href", "#/go-live");
+    expect(screen.getByRole("link", { name: "Request live mode" })).toHaveAttribute("href", "#/go-live");
+    // Without the webhook step the steps stay numbered 1 to 4.
+    expect(document.querySelector(".wizard__steps > li:last-child .wizard__number")).toHaveTextContent("4");
+  });
+
+  it("starts the profile of a new merchant, which has no settings yet", async () => {
+    const live = client({ projectSettings: vi.fn().mockRejectedValue(new AdminAPIError(404, "not_found", "Not found")) });
+    render(wrap(<MemoryRouter initialEntries={["/setup"]}><App client={live} preview={false} /></MemoryRouter>));
+    fireEvent.change(await screen.findByLabelText("Shop name"), { target: { value: "New Shop" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Save" })[0]!);
+    await waitFor(() => expect(live.updateProjectSettings).toHaveBeenCalledWith({ tenantId, merchantId }, expect.objectContaining({ version: 1, display_name: "New Shop", locale: "en", allowed_embed_origins: [], notifications: { payment_succeeded: true, payment_failed: true, weekly_summary: false } }), expect.any(String)));
+  });
+
+  it("refuses a shop name over the server's byte limit before sending it", async () => {
+    const live = client();
+    render(wrap(<MemoryRouter initialEntries={["/setup"]}><App client={live} preview={false} /></MemoryRouter>));
+    fireEvent.change(await screen.findByLabelText("Shop name"), { target: { value: "Ж".repeat(61) } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Save" })[0]!);
+    expect(await screen.findByText(/The name is too long/)).toBeInTheDocument();
+    expect(live.updateProjectSettings).not.toHaveBeenCalled();
+  });
+
+  it("offers a fresh sign-in when the management API refuses, instead of blaming the server", async () => {
+    const refused = new AdminAPIError(403, "permission_denied", "Denied");
+    const live = client({ createAPIClient: vi.fn().mockRejectedValue(refused), webhookEndpoints: vi.fn().mockResolvedValue({ data: [endpoint] }), verifyWebhookEndpoint: vi.fn().mockRejectedValue(refused) });
+    window.localStorage.setItem(`ocrypt.setup.method.${merchantId}`, "api");
+    render(wrap(<MemoryRouter initialEntries={["/setup"]}><App client={live} preview={false} /></MemoryRouter>));
+    fireEvent.click(await screen.findByRole("button", { name: "Create API key" }));
+    expect(await screen.findAllByRole("link", { name: "Confirm with MFA" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Send test request" }));
+    await waitFor(() => expect(screen.getAllByRole("link", { name: "Confirm with MFA" })).toHaveLength(2));
+    expect(screen.queryByText(/The test request failed/)).not.toBeInTheDocument();
+  });
+
+  it("counts an API payment as the start of the chain and marks done steps for screen readers", async () => {
+    const live = client({ intents: vi.fn().mockResolvedValue({ items: [{ id: "i1", status: "pending" }] }) });
+    render(wrap(<MemoryRouter initialEntries={["/setup"]}><App client={live} preview={false} /></MemoryRouter>));
+    const first = await screen.findByText("A payment link or payment exists");
+    await waitFor(() => expect(first.closest("li")).toHaveTextContent("Done"));
+    expect(screen.getByText("A payment is confirmed").closest("li")).toHaveTextContent("Not done yet");
+  });
+
+  it("explains what a member without the rights cannot do here", async () => {
+    const member = { ...owner, permissions: ["dashboard:read", "settings:read", "webhook_settings:read"] as AdminPrincipal["permissions"] };
+    window.localStorage.setItem(`ocrypt.setup.method.${merchantId}`, "api");
+    render(wrap(<MemoryRouter initialEntries={["/setup"]}><App client={client({ me: vi.fn().mockResolvedValue(member) })} preview={false} /></MemoryRouter>));
+    expect(await screen.findByText(/cannot create API keys/)).toBeInTheDocument();
+    expect(await screen.findByLabelText("Shop name")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Create API key" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Request live mode" })).not.toBeInTheDocument();
+  });
+});
+
+describe("setup wizard examples", () => {
+  it("answer the verification challenge and fulfil overpaid orders too", () => {
+    expect(WIZARD_WEBHOOK_EVENTS).toContain("payment.overpaid");
+    for (const snippet of Object.values(SIGNATURE_SNIPPETS)) {
+      expect(snippet).toContain("merchant.webhook.challenge");
+      expect(snippet).toContain("payment.overpaid");
+    }
+    expect(SIGNATURE_SNIPPETS.go).toContain('secret != ""');
   });
 });

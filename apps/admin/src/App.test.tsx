@@ -176,8 +176,9 @@ describe("admin application", () => {
     renderApp("/transfers", { client: liveClient, preview: false });
     fireEvent.change(await screen.findByRole("combobox", { name: "Language" }), { target: { value: "ru" } });
     expect(await screen.findByText("6.028692 USDT")).toBeInTheDocument();
-    // The amount can render before the Russian catalog has loaded (a lazy
-    // chunk that grows with the copy); a loaded test run needs more than 1 s.
+    // The amount can render before the Russian labels do; wait for the label.
+    // Under the parallel workers of the full web check this has taken more
+    // than the default 1 s.
     expect(await screen.findByText("Финализирован", {}, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.queryByText("6028692")).not.toBeInTheDocument();
   });
