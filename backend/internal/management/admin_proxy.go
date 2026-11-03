@@ -90,7 +90,11 @@ func (p *AdminProxy) ServeManagement(w http.ResponseWriter, incoming *http.Reque
 		return
 	}
 	digest := sha256.Sum256(body)
-	claims := adminClaims{Audience: "merchant-management-api", Method: incoming.Method, Target: targetPath, BodySHA256: hex.EncodeToString(digest[:]), JTI: jti, TenantID: scope.TenantID, MerchantID: scope.MerchantID, ActorID: authenticated.Principal.UserID, SessionID: authenticated.Principal.SessionID, Scopes: []string{scopeValue}, IssuedAt: now.Unix(), ExpiresAt: now.Add(45 * time.Second).Unix()}
+	scopes := []string{scopeValue}
+	if permission == admin.PermissionAPIClientsWrite {
+		scopes = append(scopes, delegatedClientScopes(authenticated.Principal, scope, scopeValue)...)
+	}
+	claims := adminClaims{Audience: "merchant-management-api", Method: incoming.Method, Target: targetPath, BodySHA256: hex.EncodeToString(digest[:]), JTI: jti, TenantID: scope.TenantID, MerchantID: scope.MerchantID, ActorID: authenticated.Principal.UserID, SessionID: authenticated.Principal.SessionID, Scopes: scopes, IssuedAt: now.Unix(), ExpiresAt: now.Add(45 * time.Second).Unix()}
 	if targetURL.RawQuery != "" {
 		claims.Target += "?" + targetURL.Query().Encode()
 	}
@@ -167,6 +171,43 @@ func managementScope(permission admin.Permission) (string, bool) {
 	}
 	value, ok := values[permission]
 	return value, ok
+}
+
+// clientScopeSources lists the cabinet permission behind each API scope a new
+// key may carry. The management service lets a creator delegate only scopes
+// it holds itself, so a key created from the cabinet gets exactly what its
+// creator may do in this merchant. Creating payments through the API is the
+// cabinet's checkout permission; reading the event feed is reading webhooks.
+var clientScopeSources = []struct {
+	permission admin.Permission
+	scope      string
+}{
+	{admin.PermissionPaymentsRead, "payments:read"},
+	{admin.PermissionCheckoutWrite, "payments:write"},
+	{admin.PermissionWebhookRead, "events:read"},
+	{admin.PermissionReconcileRead, "reconciliation:read"},
+	{admin.PermissionCheckoutWrite, "checkout:write"},
+	{admin.PermissionPaymentLinksRead, "payment-links:read"},
+	{admin.PermissionPaymentLinksWrite, "payment-links:write"},
+	{admin.PermissionWebhookSettingsRead, "webhooks:read"},
+	{admin.PermissionWebhookSettingsWrite, "webhooks:write"},
+	{admin.PermissionWebhookSettingsRotate, "webhooks:rotate"},
+	{admin.PermissionAPIClientsRead, "credentials:read"},
+	{admin.PermissionAPIClientsRotate, "credentials:rotate"},
+	{admin.PermissionManagementAuditRead, "audit:read"},
+}
+
+func delegatedClientScopes(principal admin.Principal, scope admin.Scope, primary string) []string {
+	var scopes []string
+	for _, source := range clientScopeSources {
+		if source.scope == primary {
+			continue
+		}
+		if _, err := principal.Authorize(source.permission, scope); err == nil {
+			scopes = append(scopes, source.scope)
+		}
+	}
+	return scopes
 }
 
 func copyUniqueHeader(source *http.Request, target *http.Request, name string) {
