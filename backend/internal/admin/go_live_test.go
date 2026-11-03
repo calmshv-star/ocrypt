@@ -85,20 +85,29 @@ func TestGoLiveRequestNeedsOwnSignedAddressesAndAnMFASession(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"request_status":"pending"`) {
 		t.Fatalf("submit: %d %s", response.Code, response.Body.String())
 	}
-	if repo.goLivePreset != "fast" || repo.goLivePolicyChange == "" || len(repo.goLiveAddresses) != 1 || repo.goLiveAddresses[0].Canonical != strings.ToLower(address) || repo.goLiveAddresses[0].ProofKind != walletProofEVM || repo.goLiveAddresses[0].Message != challenge.Message {
+	if repo.goLivePreset != "fast" || len(repo.goLiveAddresses) != 1 || repo.goLiveAddresses[0].Canonical != strings.ToLower(address) || repo.goLiveAddresses[0].ProofKind != walletProofEVM || repo.goLiveAddresses[0].Message != challenge.Message {
 		t.Fatalf("stored submission %+v", repo.goLiveAddresses)
 	}
-	repo.goLivePreset, repo.goLivePolicyChange = "", ""
+	repo.goLivePreset = ""
 	strict := challengeFor("eip155:56", address)
-	if response := submit("strict", strict.Token, testEVMSignature(t, strict.Message)); response.Code != http.StatusOK || repo.goLivePolicyChange != "" {
-		t.Fatalf("strict must file no policy change: %d %q", response.Code, repo.goLivePolicyChange)
+	if response := submit("strict", strict.Token, testEVMSignature(t, strict.Message)); response.Code != http.StatusOK || repo.goLivePreset != "strict" {
+		t.Fatalf("strict submit: %d %q", response.Code, repo.goLivePreset)
 	}
 	if response := call(http.MethodGet, "/admin/v1/go-live", "", merchant); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"environment":"test"`) {
 		t.Fatalf("state: %d %s", response.Code, response.Body.String())
 	}
+	// Any member with a dashboard reads the state (the Test/Live badge).
 	delete(repo.identity.Bindings[0].Permissions, PermissionGoLiveRequest)
+	repo.identity.Bindings[0].Permissions[PermissionDashboardRead] = true
+	if response := call(http.MethodGet, "/admin/v1/go-live", "", merchant); response.Code != http.StatusOK {
+		t.Fatalf("a member reads the environment: %d", response.Code)
+	}
+	if response := call(http.MethodPost, "/admin/v1/go-live/address-challenges", `{"chain_id":"eip155:56","address":"`+address+`"}`, merchant); response.Code != http.StatusForbidden {
+		t.Fatalf("only the owner may start a request: %d", response.Code)
+	}
+	delete(repo.identity.Bindings[0].Permissions, PermissionDashboardRead)
 	if response := call(http.MethodGet, "/admin/v1/go-live", "", merchant); response.Code != http.StatusForbidden {
-		t.Fatalf("the state needs go_live:request: %d", response.Code)
+		t.Fatalf("the state needs a dashboard or go_live:request: %d", response.Code)
 	}
 }
 
@@ -133,5 +142,10 @@ func TestGoLiveReviewsNeedAGlobalReviewer(t *testing.T) {
 	}
 	if repo.goLiveDecision.Reason != "too short" {
 		t.Fatalf("decision %+v", repo.goLiveDecision)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, mutationRequest(http.MethodPost, "/admin/v1/platform/go-live-requests/44444444-4444-4444-8444-444444444444/wallets", `{}`, raw, csrf))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"wallet_id":"018f22b0-4db4-7c58-8f18-4d2f9d7b6a77"`) || repo.goLivePrepared != "44444444-4444-4444-8444-444444444444" {
+		t.Fatalf("prepare wallets: %d %s", response.Code, response.Body.String())
 	}
 }

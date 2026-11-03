@@ -694,3 +694,6 @@
 .go-live-review__addresses { display: grid; gap: 6px; margin: 0 0 12px; padding: 0; list-style: none; }
 .go-live-review__addresses code { overflow-wrap: anywhere; }
 @media (max-width: 640px) { .go-live__address input, .go-live__proof input { min-width: 0; width: 100%; } }
+.go-live-review__addresses li { display: grid; gap: 4px; }
+.go-live-review__states { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.go-live__proof [role="alert"] { color: var(--mp-negative); }

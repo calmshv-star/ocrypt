@@ -28,7 +28,8 @@ type AuthRepository interface {
 	ListSignupReviews(context.Context, Principal, int) ([]SignupReview, error)
 	DecideSignupReview(context.Context, Principal, string, SignupDecision, time.Time) (string, error)
 	GoLiveState(context.Context, Principal, Scope) (GoLiveState, error)
-	SubmitGoLive(ctx context.Context, principal Principal, scope Scope, requestID, preset string, addresses []GoLiveProvenAddress, policyChangeID string, at time.Time) error
+	SubmitGoLive(ctx context.Context, principal Principal, scope Scope, requestID, preset string, addresses []GoLiveProvenAddress, at time.Time) error
+	PrepareGoLiveWallets(context.Context, Principal, string, time.Time) ([]GoLivePreparedWallet, error)
 	ListGoLiveReviews(context.Context, Principal, int) ([]GoLiveReview, error)
 	DecideGoLiveReview(context.Context, Principal, string, SignupDecision, time.Time) (string, error)
 	// SignupOptions lists the business types open for registration and the

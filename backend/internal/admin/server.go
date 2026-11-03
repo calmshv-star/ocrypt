@@ -199,6 +199,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /admin/v1/go-live/address-challenges", s.authenticated(s.mutating(http.HandlerFunc(s.goLiveChallenge))))
 	s.mux.Handle("POST /admin/v1/go-live/requests", s.authenticated(s.mutating(http.HandlerFunc(s.submitGoLive))))
 	s.mux.Handle("GET /admin/v1/platform/go-live-requests", s.authenticated(http.HandlerFunc(s.goLiveReviews)))
+	s.mux.Handle("POST /admin/v1/platform/go-live-requests/{id}/wallets", s.authenticated(s.mutating(http.HandlerFunc(s.prepareGoLiveWallets))))
 	s.mux.Handle("POST /admin/v1/platform/go-live-requests/{id}/decision", s.authenticated(s.mutating(http.HandlerFunc(s.decideGoLiveReview))))
 	s.mux.Handle("GET /admin/v1/platform/signup-reviews", s.authenticated(http.HandlerFunc(s.signupReviews)))
 	s.mux.Handle("POST /admin/v1/platform/signup-reviews/{id}/decision", s.authenticated(s.mutating(http.HandlerFunc(s.decideSignupReview))))
@@ -840,6 +841,17 @@ func (s *Server) goLiveReviews(w http.ResponseWriter, request *http.Request) {
 		items = []GoLiveReview{}
 	}
 	respond(w, map[string][]GoLiveReview{"data": items}, err)
+}
+
+func (s *Server) prepareGoLiveWallets(w http.ResponseWriter, request *http.Request) {
+	if !unscopedRequest(w, request) {
+		return
+	}
+	wallets, err := s.service.PrepareGoLiveWallets(request.Context(), authenticatedFrom(request.Context()).Principal, request.PathValue("id"))
+	if wallets == nil {
+		wallets = []GoLivePreparedWallet{}
+	}
+	respond(w, map[string][]GoLivePreparedWallet{"data": wallets}, err)
 }
 
 func (s *Server) decideGoLiveReview(w http.ResponseWriter, request *http.Request) {

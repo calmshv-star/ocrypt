@@ -63,6 +63,7 @@ export class AdminClient {
   goLiveChallenge(scope:AdminScope,chainID:string,address:string){return this.request<GoLiveProofChallenge>("/admin/v1/go-live/address-challenges",{method:"POST",scope,body:{chain_id:chainID,address}})}
   submitGoLive(scope:AdminScope,preset:AcceptancePreset,proofs:Array<{token:string;signature:string}>){return this.request<GoLiveState>("/admin/v1/go-live/requests",{method:"POST",scope,body:{preset,proofs}})}
   goLiveReviews(signal?:AbortSignal){return this.request<{data:GoLiveReview[]}>("/admin/v1/platform/go-live-requests",{signal})}
+  prepareGoLiveWallets(requestID:string){return this.request<{data:Array<{chain_id:string;wallet_id:string;address:string}>}>(`/admin/v1/platform/go-live-requests/${pathID(requestID)}/wallets`,{method:"POST"})}
   decideGoLiveReview(requestID:string,decision:"approve"|"reject",reason:string){return this.request<{request_id:string;status:"approved"|"rejected"}>(`/admin/v1/platform/go-live-requests/${pathID(requestID)}/decision`,{method:"POST",body:{decision,reason}})}
   signupReviews(signal?:AbortSignal){return this.request<{data:SignupReview[]}>("/admin/v1/platform/signup-reviews",{signal})}
   decideSignupReview(merchantID:string,decision:"approve"|"reject",reason:string){return this.request<{merchant_id:string;status:"approved"|"rejected"}>(`/admin/v1/platform/signup-reviews/${pathID(merchantID)}/decision`,{method:"POST",body:{decision,reason}})}

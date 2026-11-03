@@ -38,7 +38,19 @@ function ReviewCard({ review, onDecided }: { review: GoLiveReview; onDecided: ()
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<"decided" | "conflict" | "failed" | "stepUp" | null>(null);
   const trimmed = reason.trim();
-  const admitted = review.addresses.length > 0 && review.addresses.every((address) => address.admitted);
+  const admitted = review.addresses.length > 0 && review.addresses.every((address) => address.admitted && address.routes_admitted);
+  const [preparing, setPreparing] = useState<"busy" | "done" | "failed" | null>(null);
+  const prepare = async () => {
+    if (!admin.client || preparing === "busy") return;
+    setPreparing("busy");
+    try {
+      await admin.client.prepareGoLiveWallets(review.request_id);
+      setPreparing("done");
+      onDecided();
+    } catch {
+      setPreparing("failed");
+    }
+  };
   const canDecide = admin.can("go_live_reviews:decide") && 8 <= trimmed.length && !busy && outcome !== "decided";
   const decide = async (decision: "approve" | "reject") => {
     if (!canDecide || !admin.client) return;
@@ -55,17 +67,28 @@ function ReviewCard({ review, onDecided }: { review: GoLiveReview; onDecided: ()
       setBusy(false);
     }
   };
+  const missingWallets = review.addresses.some((address) => !address.wallet_id);
   const network = (chainId: string) => GO_LIVE_NETWORKS.find((item) => item.chainId === chainId)?.name ?? chainId;
   const field = `go-live-review-${review.request_id}`;
   return <SectionCard description={`${review.owner_email} · ${new Date(review.requested_at).toLocaleString(locale)}`} title={review.company_name}>
     <dl className="signup-review__facts">
       <dt>{t("goLiveReviews.preset")}</dt><dd>{t(`goLive.preset.${review.preset}.title` as MessageKey)}</dd>
       <dt>{t("goLiveReviews.screening")}</dt><dd>{review.screening_status}</dd>
-      <dt>{t("goLiveReviews.merchant")}</dt><dd>{review.merchant_id}</dd>
+      <dt>{t("goLiveReviews.tenant")}</dt><dd><code>{review.tenant_id}</code></dd>
+      <dt>{t("goLiveReviews.merchant")}</dt><dd><code>{review.merchant_id}</code></dd>
     </dl>
     <ul className="go-live-review__addresses">{review.addresses.map((address) => <li key={address.chain_id}>
-      <strong>{network(address.chain_id)}</strong> <code>{address.address}</code> <StatusBadge status={address.admitted ? "settled" : "pending"}>{t(address.admitted ? "goLiveReviews.admitted" : "goLiveReviews.notAdmitted")}</StatusBadge>
+      <strong>{network(address.chain_id)}</strong> <code>{address.canonical_address}</code>
+      <span className="go-live-review__states">
+        <StatusBadge status={address.admitted ? "settled" : "pending"}>{t(address.admitted ? "goLiveReviews.admitted" : "goLiveReviews.notAdmitted")}</StatusBadge>
+        <StatusBadge status={address.routes_admitted ? "settled" : "pending"}>{t(address.routes_admitted ? "goLiveReviews.routesAdmitted" : "goLiveReviews.routesNotAdmitted")}</StatusBadge>
+      </span>
+      {address.wallet_id ? <small>{t("goLiveReviews.walletKey")} <code>{address.wallet_id}</code></small> : <small>{t("goLiveReviews.noWalletYet")}</small>}
     </li>)}</ul>
+    {admin.can("go_live_reviews:decide") && missingWallets && <div className="signup-review__actions">
+      <Button disabled={preparing === "busy"} onClick={() => void prepare()} variant="secondary">{t("goLiveReviews.prepareWallets")}</Button>
+      {preparing === "failed" && <small role="alert">{t("goLiveReviews.prepareFailed")}</small>}
+    </div>}
     {!admitted && <p className="go-live__note">{t("goLiveReviews.admitFirst")}</p>}
     {admin.can("go_live_reviews:decide") && <div className="signup-review__decision">
       <label htmlFor={field}>{t("signupReviews.decisionReason")}</label>

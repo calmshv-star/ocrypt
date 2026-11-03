@@ -559,8 +559,20 @@ type GoLiveReview struct {
 type GoLiveReviewAddress struct {
 	ChainID   string `json:"chain_id"`
 	Address   string `json:"address"`
+	Canonical string `json:"canonical_address"`
 	ProofKind string `json:"proof_kind"`
-	Admitted  bool   `json:"admitted"`
+	// WalletID is the merchant's watch-only wallet on the chain, once prepared:
+	// the logical key of its wallet_pool platform change.
+	WalletID       string `json:"wallet_id,omitempty"`
+	Admitted       bool   `json:"admitted"`
+	RoutesAdmitted bool   `json:"routes_admitted"`
+}
+
+// GoLivePreparedWallet is a wallet record created (or found) for a request.
+type GoLivePreparedWallet struct {
+	ChainID  string `json:"chain_id"`
+	WalletID string `json:"wallet_id"`
+	Address  string `json:"address"`
 }
 
 // SignupDecision admits ("approve") or rejects ("reject") a held signup.

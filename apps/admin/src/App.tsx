@@ -61,18 +61,19 @@ function safeReturnPath() {
 
 const SIGN_IN_FAILURES = new Set(["cancelled", "provider", "expired", "not_allowed", "mfa", "failed"]);
 
-// Where a failed OIDC callback lands (/#/sign-in-failed?reason=...). The
-// reason is one generic word from the server; anything else reads as failed.
-// Test or Live for a merchant owner's current merchant, always visible; other
-// sessions keep the deployment badge.
+// Test or Live for the current merchant scope, for every member with a
+// dashboard; tenant and platform sessions keep the deployment badge.
 function EnvironmentBadge() {
   const { t } = useI18n();
   const admin = useAdmin();
   const state = useGoLiveState();
+  if (!admin.preview && admin.scope?.merchantId && state.isLoading) return null;
   if (!admin.preview && state.data) return <Badge tone={state.data.environment === "live" ? "positive" : "warning"}>{t(state.data.environment === "live" ? "goLive.live" : "goLive.test")}</Badge>;
   return <Badge tone="neutral">{t(admin.preview ? "common.previewData" : "common.production")}</Badge>;
 }
 
+// Where a failed OIDC callback lands (/#/sign-in-failed?reason=...). The
+// reason is one generic word from the server; anything else reads as failed.
 function SignInFailedScreen({ reason }: { reason: string | null }) {
   const { locale, locales, localeNames, setLocale, t } = useI18n();
   const { client, sessionState } = useAdmin();

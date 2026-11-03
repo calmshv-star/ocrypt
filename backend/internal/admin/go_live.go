@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 	"unicode"
@@ -79,9 +80,9 @@ func (s *Service) openGoLiveChallenge(token string) (GoLiveProofChallenge, error
 }
 
 // SubmitGoLive verifies every proof against the challenge it was issued for,
-// for this merchant only, and files one go-live request with the preset. It
-// needs an MFA session; the database refuses a second open request, a live
-// merchant and a held signup.
+// for this merchant only, and files one go-live request with the preset (the
+// policy is filed only by approval). It needs an MFA session; the database
+// refuses a second open request, a live merchant and a held signup.
 func (s *Service) SubmitGoLive(ctx context.Context, principal Principal, scope Scope, domain string, input GoLiveSubmission) (GoLiveState, error) {
 	if err := s.authorizeGoLive(principal, scope); err != nil {
 		return GoLiveState{}, err
@@ -102,6 +103,11 @@ func (s *Service) SubmitGoLive(ctx context.Context, principal Principal, scope S
 		}
 		seen[challenge.ChainID] = true
 		message, err := verifyGoLiveProof(domain, challenge, proof.Signature, now)
+		// An expired proof is a bad input (400), so a conflict (409) always
+		// means a request is already open or the merchant is already live.
+		if errors.Is(err, ErrExpired) {
+			return GoLiveState{}, ErrInvalid
+		}
 		if err != nil {
 			return GoLiveState{}, err
 		}
@@ -111,23 +117,39 @@ func (s *Service) SubmitGoLive(ctx context.Context, principal Principal, scope S
 	if err != nil {
 		return GoLiveState{}, err
 	}
-	changeID := ""
-	if input.Preset != "strict" {
-		if changeID, err = ids.New(); err != nil {
-			return GoLiveState{}, err
-		}
-	}
-	if err := s.repository.SubmitGoLive(ctx, principal, scope, requestID, input.Preset, addresses, changeID, now); err != nil {
+	if err := s.repository.SubmitGoLive(ctx, principal, scope, requestID, input.Preset, addresses, now); err != nil {
 		return GoLiveState{}, err
 	}
 	return s.repository.GoLiveState(ctx, principal, scope)
 }
 
+// GoLiveState is readable by any merchant member with a dashboard (the
+// Test/Live badge) as well as by the owner; the database checks membership.
 func (s *Service) GoLiveState(ctx context.Context, principal Principal, scope Scope) (GoLiveState, error) {
-	if err := s.authorizeGoLive(principal, scope); err != nil {
-		return GoLiveState{}, err
+	if scope.MerchantID == "" {
+		return GoLiveState{}, ErrInvalid
+	}
+	if _, err := principal.Authorize(PermissionGoLiveRequest, scope); err != nil {
+		if _, err := principal.Authorize(PermissionDashboardRead, scope); err != nil {
+			return GoLiveState{}, err
+		}
 	}
 	return s.repository.GoLiveState(ctx, principal, scope)
+}
+
+// PrepareGoLiveWallets creates the inert wallet records of a pending request
+// for a global reviewer with an MFA session.
+func (s *Service) PrepareGoLiveWallets(ctx context.Context, principal Principal, requestID string) ([]GoLivePreparedWallet, error) {
+	if _, err := principal.AuthorizePlatform(PermissionGoLiveReviewsDecide, ""); err != nil {
+		return nil, err
+	}
+	if err := principal.RequireStepUp(s.now(), s.config.RequiredACR, s.config.AcceptedAMR); err != nil {
+		return nil, err
+	}
+	if !ids.Valid(requestID) {
+		return nil, ErrInvalid
+	}
+	return s.repository.PrepareGoLiveWallets(ctx, principal, requestID, s.now())
 }
 
 // ListGoLiveReviews returns pending go-live requests to a global reviewer.

@@ -15,22 +15,30 @@ export const GO_LIVE_NETWORKS = [
   { chainId: "eip155:1", name: "Ethereum" }
 ];
 
-// The merchant's environment and go-live request, for owners with
-// go_live:request in a merchant scope.
+// The merchant's environment and go-live request for a merchant scope; any
+// member with a dashboard reads it for the Test/Live badge.
 export function useGoLiveState() {
   const admin = useAdmin();
   return useQuery<GoLiveState, Error>({
     queryKey: ["admin", "go-live", admin.scope?.tenantId, admin.scope?.merchantId],
-    enabled: !admin.preview && admin.sessionState === "ready" && Boolean(admin.scope?.merchantId) && admin.can("go_live:request"),
+    enabled: !admin.preview && admin.sessionState === "ready" && Boolean(admin.scope?.merchantId) && (admin.can("go_live:request") || admin.can("dashboard:read")),
     queryFn: ({ signal }) => admin.clientFor(signal).goLiveState(admin.scope as AdminScope, signal)
   });
 }
 
-type BrowserWallets = {
-  ethereum?: { request: (input: { method: string; params: unknown[] }) => Promise<unknown> };
-  tronWeb?: { trx?: { signMessageV2?: (message: string) => Promise<string> } };
-  solana?: { signMessage?: (message: Uint8Array, encoding: string) => Promise<{ signature: Uint8Array }> };
+export type BrowserWallets = {
+  ethereum?: { request: (input: { method: string; params?: unknown[] }) => Promise<unknown> };
+  tronLink?: { request: (input: { method: string }) => Promise<unknown> };
+  tronWeb?: { defaultAddress?: { base58?: string }; trx?: { signMessageV2?: (message: string) => Promise<string> } };
+  solana?: { connect?: () => Promise<{ publicKey: { toString(): string } }>; signMessage?: (message: Uint8Array, encoding: string) => Promise<{ signature: Uint8Array }> };
 };
+
+// Why browser signing did not produce a signature.
+export class WalletSigningError extends Error {
+  constructor(public readonly reason: "noWallet" | "mismatch") {
+    super(reason);
+  }
+}
 
 function toHex(text: string) {
   return "0x" + Array.from(new TextEncoder().encode(text), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -42,16 +50,25 @@ function toBase64(bytes: Uint8Array) {
   return btoa(binary);
 }
 
-// Asks an injected browser wallet to sign; the cabinet never sees a key.
-export async function signWithBrowserWallet(challenge: GoLiveProofChallenge, wallets: BrowserWallets = window as unknown as BrowserWallets): Promise<string | null> {
+// Connects the injected browser wallet, checks that it controls the address
+// being proven, and asks it to sign. The cabinet never sees a key.
+export async function signWithBrowserWallet(challenge: GoLiveProofChallenge, wallets: BrowserWallets = window as unknown as BrowserWallets): Promise<string> {
   if (challenge.kind === "evm_personal_sign" && wallets.ethereum) {
+    const accounts = await wallets.ethereum.request({ method: "eth_requestAccounts" });
+    if (!Array.isArray(accounts) || !accounts.some((account) => typeof account === "string" && account.toLowerCase() === challenge.address.toLowerCase())) throw new WalletSigningError("mismatch");
     const signature = await wallets.ethereum.request({ method: "personal_sign", params: [toHex(challenge.message), challenge.display_address] });
-    return typeof signature === "string" ? signature : null;
+    if (typeof signature === "string") return signature;
   }
-  if (challenge.kind === "tron_sign_message_v2" && wallets.tronWeb?.trx?.signMessageV2) return wallets.tronWeb.trx.signMessageV2(challenge.message);
-  if (challenge.kind === "solana_sign_message" && wallets.solana?.signMessage) {
+  if (challenge.kind === "tron_sign_message_v2" && wallets.tronWeb?.trx?.signMessageV2) {
+    await wallets.tronLink?.request({ method: "tron_requestAccounts" });
+    if (wallets.tronWeb.defaultAddress?.base58 !== challenge.address) throw new WalletSigningError("mismatch");
+    return wallets.tronWeb.trx.signMessageV2(challenge.message);
+  }
+  if (challenge.kind === "solana_sign_message" && wallets.solana?.signMessage && wallets.solana.connect) {
+    const connected = await wallets.solana.connect();
+    if (connected.publicKey.toString() !== challenge.address) throw new WalletSigningError("mismatch");
     const signed = await wallets.solana.signMessage(new TextEncoder().encode(challenge.message), "utf8");
     return toBase64(signed.signature);
   }
-  return null;
+  throw new WalletSigningError("noWallet");
 }

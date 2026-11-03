@@ -1362,7 +1362,7 @@ export const en = {
   "goLive.live": "Live",
   "goLive.test": "Test mode",
   "goLive.liveTitle": "Live payments are on",
-  "goLive.liveBody": "Customers pay to your admitted addresses. Change acceptance rules under Matching policies.",
+  "goLive.liveBody": "Customers pay to your admitted addresses. To change the acceptance rules or add a network, contact the platform team.",
   "goLive.pendingTitle": "Request under review",
   "goLive.pendingBody": "We are checking your addresses and admitting your wallets. Chosen rules: {preset}. You can keep testing meanwhile.",
   "goLive.screeningPending": "Your registration is still being reviewed. You can request live mode once it is approved.",
@@ -1393,7 +1393,7 @@ export const en = {
   "goLive.failed": "The request could not be sent. Try again.",
   "goLiveReviews.nav": "Go-live requests",
   "goLiveReviews.title": "Go-live requests",
-  "goLiveReviews.body": "Admit each requested address with the platform wallet tools first, then approve. Approval activates the chosen acceptance rules and switches the merchant to live.",
+  "goLiveReviews.body": "Create the wallet records, admit each wallet (wallet_pool), the merchant environment (merchant_environment) and new routes (feature_flag new_routes) with the four-eyes platform changes, then approve. Approval activates the chosen acceptance rules and switches the merchant to live.",
   "goLiveReviews.forbidden": "Reviewing go-live requests needs a global reviewer role.",
   "goLiveReviews.empty": "No go-live requests are waiting.",
   "goLiveReviews.preset": "Acceptance rules",
@@ -1401,9 +1401,21 @@ export const en = {
   "goLiveReviews.merchant": "Merchant",
   "goLiveReviews.admitted": "admitted",
   "goLiveReviews.notAdmitted": "not admitted yet",
-  "goLiveReviews.admitFirst": "Approve becomes available once every address is admitted.",
+  "goLiveReviews.admitFirst": "Approve becomes available once every address is admitted and new routes are admitted.",
   "goLiveReviews.approve": "Approve and go live",
-  "goLiveReviews.conflict": "This request changed or an address is not admitted. Refresh and check again."
+  "goLiveReviews.conflict": "This request changed or an address is not admitted. Refresh and check again.",
+  "goLive.wallet.noWallet": "No browser wallet for this network was found. Sign the message in your wallet app and paste the signature.",
+  "goLive.wallet.mismatch": "The connected wallet account is not this address. Switch to the account that owns it.",
+  "goLive.wallet.failed": "The wallet did not sign. Try again or paste a signature made in the wallet app.",
+  "goLive.conflict": "A request is already open, or the merchant is already live. Refresh the page.",
+  "goLive.liveWarning": "After going live, test API keys and the sandbox stop working for this merchant. Create live API keys and update your integration.",
+  "goLiveReviews.tenant": "Tenant",
+  "goLiveReviews.routesAdmitted": "new routes admitted",
+  "goLiveReviews.routesNotAdmitted": "merchant environment or new routes not admitted",
+  "goLiveReviews.walletKey": "wallet_pool key:",
+  "goLiveReviews.noWalletYet": "No wallet record yet.",
+  "goLiveReviews.prepareWallets": "Create wallet records",
+  "goLiveReviews.prepareFailed": "Wallet records could not be created. An address may already belong to another wallet."
 } as const;
 
 export type MessageKey = keyof typeof en;

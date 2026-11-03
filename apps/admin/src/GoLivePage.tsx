@@ -6,11 +6,11 @@ import { useState } from "react";
 import { useAdmin } from "./AdminProvider";
 import { AdminAPIError } from "./api/client";
 import type { AcceptancePreset, GoLiveProofChallenge } from "./api/types";
-import { GO_LIVE_NETWORKS, signWithBrowserWallet, useGoLiveState } from "./goLive";
+import { GO_LIVE_NETWORKS, signWithBrowserWallet, useGoLiveState, WalletSigningError } from "./goLive";
 
 const PRESETS: AcceptancePreset[] = ["fast", "standard", "strict"];
 
-type Row = { key: number; chainId: string; address: string; challenge?: GoLiveProofChallenge; signature: string; failed?: boolean };
+type Row = { key: number; chainId: string; address: string; challenge?: GoLiveProofChallenge; signature: string; failed?: boolean; walletProblem?: "noWallet" | "mismatch" | "failed" };
 
 // REG-4: prove the receiving addresses, choose acceptance rules and ask to
 // go live. Platform operators admit the wallets and approve the request.
@@ -22,7 +22,7 @@ export function GoLivePage() {
   const [preset, setPreset] = useState<AcceptancePreset>("standard");
   const [rows, setRows] = useState<Row[]>([{ key: 1, chainId: GO_LIVE_NETWORKS[0]!.chainId, address: "", signature: "" }]);
   const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<"stepUp" | "failed" | "signature" | null>(null);
+  const [outcome, setOutcome] = useState<"stepUp" | "failed" | "signature" | "conflict" | null>(null);
   const update = (key: number, change: Partial<Row>) => setRows((current) => current.map((row) => row.key === key ? { ...row, ...change } : row));
   const usedChains = new Set(rows.map((row) => row.chainId));
   const ready = rows.length > 0 && rows.every((row) => row.challenge && row.signature.trim()) && new Set(rows.map((row) => row.chainId)).size === rows.length;
@@ -38,11 +38,11 @@ export function GoLivePage() {
   };
   const sign = async (row: Row) => {
     if (!row.challenge) return;
+    update(row.key, { walletProblem: undefined });
     try {
-      const signature = await signWithBrowserWallet(row.challenge);
-      if (signature) update(row.key, { signature });
-    } catch {
-      update(row.key, { failed: true });
+      update(row.key, { signature: await signWithBrowserWallet(row.challenge) });
+    } catch (error) {
+      update(row.key, { walletProblem: error instanceof WalletSigningError ? error.reason : "failed" });
     }
   };
   const submit = async () => {
@@ -53,8 +53,9 @@ export function GoLivePage() {
       await admin.client.submitGoLive(admin.scope, preset, rows.map((row) => ({ token: row.challenge!.token, signature: row.signature.trim() })));
       await cache.invalidateQueries({ queryKey: ["admin", "go-live"] });
     } catch (error) {
+      const status = error instanceof AdminAPIError ? error.status : 0;
       const code = error instanceof AdminAPIError ? error.code : "";
-      setOutcome(code === "step_up_required" ? "stepUp" : error instanceof AdminAPIError && (error.status === 403 || error.status === 409 || error.code === "expired") ? "signature" : "failed");
+      setOutcome(code === "step_up_required" ? "stepUp" : status === 409 ? "conflict" : status === 400 || status === 403 ? "signature" : "failed");
     } finally {
       setBusy(false);
     }
@@ -88,16 +89,19 @@ export function GoLivePage() {
           {row.challenge && <div className="go-live__proof">
             <label>{t("goLive.messageToSign")}<textarea readOnly rows={6} value={row.challenge.message} /></label>
             <Button onClick={() => void sign(row)} variant="secondary">{t("goLive.signWithWallet")}</Button>
+            {row.walletProblem && <small role="alert">{t(`goLive.wallet.${row.walletProblem}` as MessageKey)}</small>}
             <label>{t("goLive.signature", { index: index + 1 })}<input autoComplete="off" onChange={(event) => update(row.key, { signature: event.target.value })} spellCheck={false} value={row.signature} /></label>
           </div>}
         </div>)}
         {rows.length < GO_LIVE_NETWORKS.length && <Button onClick={() => setRows((current) => [...current, { key: Math.max(...current.map((row) => row.key)) + 1, chainId: GO_LIVE_NETWORKS.find((network) => !usedChains.has(network.chainId))!.chainId, address: "", signature: "" }])} variant="secondary"><Plus size={15} />{t("goLive.addAddress")}</Button>}
         <p className="go-live__note">{t("goLive.noSecrets")}</p>
       </SectionCard>
+      <p className="go-live__note">{t("goLive.liveWarning")}</p>
       <div className="go-live__submit">
         <Button disabled={!ready || busy} onClick={() => void submit()}>{t(busy ? "goLive.submitting" : "goLive.submit")}</Button>
         {outcome === "stepUp" && admin.client && <p role="alert">{t("signupReviews.stepUpBody")} <a href={admin.client.stepUpURL("/#/go-live")}>{t("signupReviews.stepUp")}</a></p>}
         {outcome === "signature" && <p role="alert">{t("goLive.signatureRejected")}</p>}
+        {outcome === "conflict" && <p role="alert">{t("goLive.conflict")}</p>}
         {outcome === "failed" && <p role="alert">{t("goLive.failed")}</p>}
       </div>
     </>}

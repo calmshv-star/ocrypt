@@ -26,12 +26,12 @@ type repositoryStub struct {
 	signupRegions     []SignupRegion
 	dailyTotalsArgs   []string
 	// go-live submission and decision as the repository received them
-	goLiveRequestID, goLivePreset, goLivePolicyChange string
-	goLiveAddresses                                   []GoLiveProvenAddress
-	goLiveDecision                                    SignupDecision
-	signupReviews                                     []SignupReview
-	signupDecision                                    SignupDecision
-	signupDecisionErr                                 error
+	goLiveRequestID, goLivePreset, goLivePrepared string
+	goLiveAddresses                               []GoLiveProvenAddress
+	goLiveDecision                                SignupDecision
+	signupReviews                                 []SignupReview
+	signupDecision                                SignupDecision
+	signupDecisionErr                             error
 	// signupDecisionMerchant is the merchant the last decision targeted.
 	signupDecisionMerchant string
 	registration           SelfServiceRegistration
@@ -50,9 +50,13 @@ func (r *repositoryStub) GoLiveState(context.Context, Principal, Scope) (GoLiveS
 	}
 	return GoLiveState{Environment: "test", ScreeningReady: true}, nil
 }
-func (r *repositoryStub) SubmitGoLive(_ context.Context, _ Principal, _ Scope, requestID, preset string, addresses []GoLiveProvenAddress, policyChangeID string, _ time.Time) error {
-	r.goLiveRequestID, r.goLivePreset, r.goLiveAddresses, r.goLivePolicyChange = requestID, preset, addresses, policyChangeID
+func (r *repositoryStub) SubmitGoLive(_ context.Context, _ Principal, _ Scope, requestID, preset string, addresses []GoLiveProvenAddress, _ time.Time) error {
+	r.goLiveRequestID, r.goLivePreset, r.goLiveAddresses = requestID, preset, addresses
 	return nil
+}
+func (r *repositoryStub) PrepareGoLiveWallets(_ context.Context, _ Principal, requestID string, _ time.Time) ([]GoLivePreparedWallet, error) {
+	r.goLivePrepared = requestID
+	return []GoLivePreparedWallet{{ChainID: "eip155:56", WalletID: "018f22b0-4db4-7c58-8f18-4d2f9d7b6a77", Address: "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf"}}, nil
 }
 func (r *repositoryStub) ListGoLiveReviews(context.Context, Principal, int) ([]GoLiveReview, error) {
 	return []GoLiveReview{{RequestID: "44444444-4444-4444-8444-444444444444", Preset: "fast", Addresses: []GoLiveReviewAddress{{ChainID: "eip155:56", Address: "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf", ProofKind: "evm_personal_sign"}}}}, nil

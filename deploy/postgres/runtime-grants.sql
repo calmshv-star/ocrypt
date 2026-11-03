@@ -125,9 +125,10 @@ GRANT EXECUTE ON FUNCTION
   list_signup_screening_reviews(integer),
   decide_signup_screening(uuid,text,text,timestamptz),
   current_admin_signup_review_status(),
-  submit_merchant_go_live_request(uuid,uuid,uuid,text,jsonb,uuid,timestamptz),
+  submit_merchant_go_live_request(uuid,uuid,uuid,text,jsonb,timestamptz),
   merchant_go_live_state(uuid,uuid),
   list_go_live_requests(integer),
+  prepare_go_live_wallets(uuid,timestamptz),
   decide_go_live_request(uuid,text,text,timestamptz)
 TO merchant_admin_runtime;
 GRANT SELECT ON signup_business_types,signup_blocked_countries TO merchant_admin_runtime;

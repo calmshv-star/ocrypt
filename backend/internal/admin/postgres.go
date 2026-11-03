@@ -55,6 +55,12 @@ func (r *PostgresRepository) Ping(ctx context.Context) error {
   has_function_privilege(current_user,to_regprocedure('public.decide_signup_screening(uuid,text,text,timestamp with time zone)'),'EXECUTE') AND
   to_regprocedure('public.merchant_go_live_state(uuid,uuid)') IS NOT NULL AND
   has_function_privilege(current_user,to_regprocedure('public.merchant_go_live_state(uuid,uuid)'),'EXECUTE') AND
+  to_regprocedure('public.submit_merchant_go_live_request(uuid,uuid,uuid,text,jsonb,timestamp with time zone)') IS NOT NULL AND
+  has_function_privilege(current_user,to_regprocedure('public.submit_merchant_go_live_request(uuid,uuid,uuid,text,jsonb,timestamp with time zone)'),'EXECUTE') AND
+  to_regprocedure('public.list_go_live_requests(integer)') IS NOT NULL AND
+  has_function_privilege(current_user,to_regprocedure('public.list_go_live_requests(integer)'),'EXECUTE') AND
+  to_regprocedure('public.prepare_go_live_wallets(uuid,timestamp with time zone)') IS NOT NULL AND
+  has_function_privilege(current_user,to_regprocedure('public.prepare_go_live_wallets(uuid,timestamp with time zone)'),'EXECUTE') AND
   to_regprocedure('public.decide_go_live_request(uuid,text,text,timestamp with time zone)') IS NOT NULL AND
   has_function_privilege(current_user,to_regprocedure('public.decide_go_live_request(uuid,text,text,timestamp with time zone)'),'EXECUTE')`).Scan(&ready)
 	if err != nil || !ready {
@@ -270,13 +276,13 @@ func (r *PostgresRepository) GoLiveState(ctx context.Context, principal Principa
 	return state, classifyAdminDB(err)
 }
 
-func (r *PostgresRepository) SubmitGoLive(ctx context.Context, principal Principal, scope Scope, requestID, preset string, addresses []GoLiveProvenAddress, policyChangeID string, at time.Time) error {
+func (r *PostgresRepository) SubmitGoLive(ctx context.Context, principal Principal, scope Scope, requestID, preset string, addresses []GoLiveProvenAddress, at time.Time) error {
 	payload, err := json.Marshal(addresses)
 	if err != nil {
 		return err
 	}
 	err = r.asActor(ctx, principal, pgx.ReadWrite, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `SELECT submit_merchant_go_live_request($1,$2,$3,$4,$5::jsonb,NULLIF($6,'')::uuid,$7)`, requestID, scope.TenantID, scope.MerchantID, preset, string(payload), policyChangeID, at)
+		_, err := tx.Exec(ctx, `SELECT submit_merchant_go_live_request($1,$2,$3,$4,$5::jsonb,$6)`, requestID, scope.TenantID, scope.MerchantID, preset, string(payload), at)
 		return err
 	})
 	return classifyAdminDB(err)
@@ -304,6 +310,28 @@ func (r *PostgresRepository) ListGoLiveReviews(ctx context.Context, principal Pr
 		return rows.Err()
 	})
 	return reviews, classifyAdminDB(err)
+}
+
+// PrepareGoLiveWallets creates the inert wallet and deposit address records
+// for a pending request; admission stays a four-eyes platform change.
+func (r *PostgresRepository) PrepareGoLiveWallets(ctx context.Context, principal Principal, requestID string, at time.Time) ([]GoLivePreparedWallet, error) {
+	var wallets []GoLivePreparedWallet
+	err := r.asActor(ctx, principal, pgx.ReadWrite, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT chain_id,wallet_id::text,address FROM prepare_go_live_wallets($1,$2)`, requestID, at)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var wallet GoLivePreparedWallet
+			if err := rows.Scan(&wallet.ChainID, &wallet.WalletID, &wallet.Address); err != nil {
+				return err
+			}
+			wallets = append(wallets, wallet)
+		}
+		return rows.Err()
+	})
+	return wallets, classifyAdminDB(err)
 }
 
 func (r *PostgresRepository) DecideGoLiveReview(ctx context.Context, principal Principal, requestID string, decision SignupDecision, at time.Time) (string, error) {

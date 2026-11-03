@@ -14,11 +14,14 @@ for no questions; agent decisions are in DECISIONS.md.
 Facts found in the code that shape the design:
 
 - A self-service merchant starts in `environment='test'`; the test
-  environment is the separate sandbox. Real payments need `live`.
+  environment is the separate sandbox (`livemode=false`). New payment routes
+  are admitted only by platform configuration: a tenant
+  `merchant_environment` head for the merchant, a tenant `feature_flag`
+  `new_routes` at 10000 bps, and the global chain, asset and finality heads
+  (`platform_route_runtime_admission`).
 - Receiving wallets are platform objects: a watch-only wallet must exist and
-  be admitted through a `wallet_pool` platform-configuration snapshot, which
-  is a four-eyes change. A self-service owner has no wallet and cannot create
-  one.
+  be admitted through a `wallet_pool` platform change. All platform changes
+  are four-eyes. A self-service owner has no wallet and cannot create one.
 - Matching-policy versions require `approved_by <> requested_by` and
   `activated_by <> requested_by` at the database level. Without a policy, an
   exact payment still settles; partial, under- and overpayments and late
@@ -27,29 +30,37 @@ Facts found in the code that shape the design:
 Flow:
 
 1. The owner proves each receiving address with a signed challenge
-   (EVM `personal_sign`, Solana `signMessage`; the existing proof code). The
-   message names the merchant, chain and address, a nonce and a 5-minute
-   window.
+   (EVM `personal_sign`, Solana `signMessage`, TRON `signMessageV2`). The
+   message names the cabinet domain, the merchant, the network, the address,
+   a nonce and a 5-minute window. The cabinet connects the browser wallet and
+   checks its account before signing, or accepts a pasted signature.
 2. The owner picks a preset and submits a go-live request (one open request
-   per merchant). Preconditions: merchant active and in test mode, screening
-   `clear` or `approved`, at least one proven address. Choosing **Быстро** or
-   **Стандарт** also files a matching-policy change request
-   (`pending_approval`, requested by the owner). **Надёжно** files nothing.
-3. A platform operator with a global `go_live_reviews:decide` binding and an
-   MFA session sees the queue (merchant, screening state, preset, proven
-   addresses). The operator creates and admits the wallets with the existing
-   four-eyes platform tools, then approves. Approval requires every requested
-   address to be the current deposit address of an admitted watch-only wallet
-   of that merchant on that chain. In one transaction it then:
-   - approves and activates the preset's policy change, with the operator as
-     approver and activator, so the owner and the operator are two people;
+   per merchant, self-service merchants only). Preconditions: an MFA session,
+   an active owner of an active test-mode merchant (a held signup has no
+   rights), at least one proven address. The request stores the preset; **no
+   matching-policy change exists before approval**, so nothing outside the
+   review can approve it or strand the request.
+3. A global reviewer (`go_live_reviews:decide`, MFA) sees the queue with the
+   tenant, merchant, canonical addresses, wallet ids and admission states;
+   creates the inert wallet and deposit address records with one action; and
+   the operators admit each `wallet_pool`, the `merchant_environment` and
+   `new_routes` with the usual four-eyes platform changes. Approval requires
+   every address admitted and routable, and — when a policy is filed — global
+   `matching_policy:approve` and `matching_policy:activate` too. In one
+   transaction it:
+   - files the preset's policy change already activated, requested by the
+     owner and approved and activated by the reviewer, with a neutral reason
+     (the merchant can read its policies), under the matching-policy version
+     lock, plus a neutral entry in the merchant's management audit;
    - switches the merchant to `live`;
-   - writes an audit entry.
+   - writes the decision and its reason to the global audit log only.
 
-   Rejection needs a reason. The registrant can never decide, and a decision
-   is final.
-4. The cabinet always shows Test/Live for the current merchant; onboarding's
-   last step shows the request state.
+   Strict files nothing for a merchant without a policy and a strict policy
+   for one that already has one. Rejection files nothing. The registrant or
+   any member can never decide, and a decision is final.
+4. Every member of the merchant sees Test or Live in the header; onboarding's
+   last step links to the go-live page, which warns that test keys and the
+   sandbox stop working after going live.
 
 Presets (matching-policy fields only; invoice lifetime is set per payment
 link or API call and stays there):
@@ -62,8 +73,8 @@ link or API call and stays there):
 
 Confirmations are platform finality per chain and are not merchant-tunable.
 
-Non-goals: automatic wallet admission (it would bypass the platform
-four-eyes control), a TON ownership proof (TON Connect's ton_proof needs the
+Non-goals: automatic platform admission (it would bypass the four-eyes
+control; the queue only prepares inert wallet records), a TON ownership proof (TON Connect's ton_proof needs the
 wallet's state init; TON addresses are not accepted in a request yet),
 changing presets after going live (the existing matching-policy flow
 applies). TRON is proven with TronLink signMessageV2.
