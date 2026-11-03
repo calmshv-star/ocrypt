@@ -13,5 +13,5 @@
     "test": "tsc -p tsconfig.json && node --test test/golden.test.mjs"
   },
   "engines": { "node": ">=20" },
-  "devDependencies": { "typescript": "^5.9.2" }
+  "devDependencies": { "typescript": "^7.0.2" }
 }
