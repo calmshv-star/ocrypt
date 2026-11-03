@@ -1476,5 +1476,17 @@ export const fr = {
   "notifications.save": "Enregistrer",
   "notifications.saved": "Enregistré.",
   "notifications.failed": "Enregistrement impossible. Actualisez la page et réessayez.",
-  "notifications.linkFailed": "Impossible de créer le lien Telegram. Réessayez."
+  "notifications.linkFailed": "Impossible de créer le lien Telegram. Réessayez.",
+  "sanctions.nav": "Alertes sanctions",
+  "sanctions.eyebrow": "Conformité",
+  "sanctions.body": "Paiements vers vos adresses provenant d'une adresse figurant sur une liste officielle de sanctions (OFAC, ONU ou liste de l'opérateur).",
+  "sanctions.empty": "Aucun paiement depuis une adresse sanctionnée.",
+  "sanctions.listTitle": "Alertes : {count}",
+  "sanctions.guidance": "Ocrypt ne détient ni ne déplace de fonds et ne modifie pas ces paiements. Avant d'exécuter la commande ou de restituer des fonds, consultez votre conseiller conformité ou juridique.",
+  "sanctions.from": "De",
+  "sanctions.to": "vers",
+  "sanctions.transaction": "Transaction",
+  "notifications.sanctionedAlways": "Les paiements depuis une adresse sanctionnée sont toujours signalés à tous ceux qui reçoivent les notifications de ce marchand.",
+  "goLive.addressNotAccepted": "L'une des adresses ne peut pas servir aux paiements réels. Utilisez une autre adresse ou contactez le support.",
+  "sanctions.operatorList": "Liste de l'opérateur"
 } satisfies Messages;

@@ -1476,5 +1476,17 @@ export const ru = {
   "notifications.save": "Сохранить",
   "notifications.saved": "Сохранено.",
   "notifications.failed": "Не удалось сохранить. Обновите страницу и попробуйте снова.",
-  "notifications.linkFailed": "Не удалось создать ссылку для Telegram. Попробуйте снова."
+  "notifications.linkFailed": "Не удалось создать ссылку для Telegram. Попробуйте снова.",
+  "sanctions.nav": "Санкционные предупреждения",
+  "sanctions.eyebrow": "Комплаенс",
+  "sanctions.body": "Платежи на ваши адреса, пришедшие с адреса из официального санкционного списка (OFAC, ООН или список оператора).",
+  "sanctions.empty": "Платежей с санкционных адресов нет.",
+  "sanctions.listTitle": "Предупреждений: {count}",
+  "sanctions.guidance": "Ocrypt не хранит и не переводит средства и не меняет эти платежи. Прежде чем выполнять заказ или возвращать средства, проконсультируйтесь со специалистом по комплаенсу или юристом.",
+  "sanctions.from": "От",
+  "sanctions.to": "на",
+  "sanctions.transaction": "Транзакция",
+  "notifications.sanctionedAlways": "О платежах с санкционных адресов всегда сообщается всем, кто получает уведомления этого магазина.",
+  "goLive.addressNotAccepted": "Один из адресов нельзя использовать для боевых платежей. Укажите другой адрес или обратитесь в поддержку.",
+  "sanctions.operatorList": "Список оператора"
 } satisfies Messages;

@@ -132,13 +132,62 @@ def test_un_refuses_entity_declarations(tmp_path):
         module.un_entries(write(tmp_path, "evil.xml", hostile))
 
 
+def base58(raw):
+    number, out = int.from_bytes(raw, "big"), ""
+    while number:
+        number, rest = divmod(number, 58)
+        out = module.BASE58[rest] + out
+    return "1" * (len(raw) - len(raw.lstrip(b"\x00"))) + out
+
+
+def base58check(payload):
+    """Test helper: a valid TRON address for 20 synthetic bytes."""
+    import hashlib
+    return base58(payload + hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4])
+
+
+TRON = base58check(b"\x41" + bytes(range(1, 21)))
+SOLANA = base58(bytes(range(7, 39)))
+
+
+def test_addresses_of_watched_families_only(tmp_path):
+    remarks = f"Digital Currency Address - ETH 0xAbC0000000000000000000000000000000000001; Digital Currency Address - USDT {TRON}; alt. Digital Currency Address - XBT 1BoatSLRHtKNngkdXEeobR76b53LETtpyT; Digital Currency Address - SOL {SOLANA}; Digital Currency Address - TRX T{'1' * 33}."
+    sdn = write(tmp_path, "SDN.CSV", f'301,"CRYPTO MIXER",-0- ,"CYBER2",-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,"{remarks}"\r\n')
+    found = module.ofac_addresses(sdn)
+    assert found == [
+        {"family": "evm", "address": "0xabc0000000000000000000000000000000000001", "currency": "ETH", "reference": "SDN-301"},
+        {"family": "tron", "address": TRON, "hex": bytes(range(1, 21)).hex(), "currency": "USDT", "reference": "SDN-301"},
+        {"family": "solana", "address": SOLANA, "currency": "SOL", "reference": "SDN-301"},
+    ], "Bitcoin is not watched and a TRON address with a bad checksum is dropped"
+
+
+def test_long_remarks_continue_in_sdn_comments(tmp_path):
+    evm = [f"0x{index:040x}" for index in range(1, 16)]
+    remarks = "; ".join(f"Digital Currency Address - ETH {value}" for value in evm)
+    cut = 1000 - 37  # the cut falls inside an address
+    sdn = write(tmp_path, "SDN.CSV", f'302,"MANY ADDRESSES LLC",-0- ,"CYBER2",-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,"{remarks[:cut]}"\r\n')
+    comments = write(tmp_path, "SDN_COMMENTS.CSV", f'302,"{remarks[cut:]}"\r\n')
+    assert len(module.ofac_addresses(sdn)) < len(evm), "without the overflow file the tail is lost"
+    assert [item["address"] for item in module.ofac_addresses(sdn, comments)] == evm
+
+
+def test_one_account_under_several_tags_and_solana_by_format(tmp_path):
+    remarks = f"Digital Currency Address - ETH 0x{'2' * 40}; Digital Currency Address - USDT 0x{'2' * 40}; Digital Currency Address - USDC {SOLANA}"
+    sdn = write(tmp_path, "SDN.CSV", f'303,"EXCHANGE",-0- ,"CYBER2",-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,"{remarks}"\r\n')
+    assert [(item["family"], item["currency"]) for item in module.ofac_addresses(sdn)] == [("evm", "ETH"), ("evm", "USDT"), ("solana", "USDC")]
+    with pytest.raises(ValueError):
+        module.operator_entries(write(tmp_path, "op.csv", f"kind,value,reference\r\naddress,USDT-TRC20 {TRON},x\r\n"))
+
+
 def test_operator_csv(tmp_path):
-    path = write(tmp_path, "operator.csv", "kind,value,reference\r\ndomain,blocked.example,case-7\r\nname,Bad Actor Ltd,case-8\r\n")
-    assert module.operator_entries(path) == [
+    path = write(tmp_path, "operator.csv", f"kind,value,reference\r\ndomain,blocked.example,case-7\r\nname,Bad Actor Ltd,case-8\r\naddress,TRX {TRON},case-9\r\n")
+    entries, addresses = module.operator_entries(path)
+    assert entries == [
         {"kind": "domain", "value": "blocked.example", "reference": "case-7"},
         {"kind": "name", "value": "Bad Actor Ltd", "reference": "case-8"},
     ]
-    for bad in ("kind,value\r\nname,X\r\n", "kind,value,reference\r\nip,10.0.0.1,x\r\n", "kind,value,reference\r\nname,,x\r\n"):
+    assert addresses == [{"family": "tron", "address": TRON, "hex": bytes(range(1, 21)).hex(), "currency": "TRX", "reference": "case-9"}]
+    for bad in ("kind,value\r\nname,X\r\n", "kind,value,reference\r\nip,10.0.0.1,x\r\n", "kind,value,reference\r\nname,,x\r\n", "kind,value,reference\r\naddress,XBT 1BoatSLRHtKNngkdXEeobR76b53LETtpyT,x\r\n"):
         with pytest.raises(ValueError):
             module.operator_entries(write(tmp_path, "bad.csv", bad))
 
@@ -147,7 +196,8 @@ def test_sql_is_one_transaction_and_quotes_any_text(tmp_path):
     hostile = [{"kind": "name", "value": "x$$'); DROP TABLE tenants; --", "reference": "r'1"}, {"kind": "name", "value": "$ocrypt_0000000000000000$", "reference": "r2"}]
     sql = module.render_sql("ofac_sdn", "OFAC SDN", "2026-11-02T23:00:04.371Z", "8 days", hostile)
     assert sql.startswith("\\set ON_ERROR_STOP on\nBEGIN;\n") and sql.rstrip().endswith("COMMIT;")
-    assert sql.count("replace_signup_screening_source(") == 1
+    assert sql.count("replace_signup_screening_source(") == 1 and sql.count("replace_sanctioned_addresses('ofac_sdn',") == 1
+    assert sql.index("replace_signup_screening_source(") < sql.index("replace_sanctioned_addresses(") < sql.index("COMMIT;")
     assert entries_of(sql) == {(e["kind"], e["value"], e["reference"]) for e in hostile}
     assert "'2026-11-02T23:00:04.371Z'::timestamptz" in sql and "'8 days'::interval" in sql
     operator = module.render_sql("operator", "Operator list", None, None, hostile[:1])
@@ -158,7 +208,7 @@ def test_sql_is_one_transaction_and_quotes_any_text(tmp_path):
 
 
 def test_cli_prints_sql_for_psql(tmp_path, capsys):
-    assert module.main(["ofac", "--sdn", str(write(tmp_path, "SDN.CSV", SDN)), "--alt", str(write(tmp_path, "ALT.CSV", ALT))]) == 0
+    assert module.main(["ofac", "--sdn", str(write(tmp_path, "SDN.CSV", SDN)), "--alt", str(write(tmp_path, "ALT.CSV", ALT)), "--comments", str(write(tmp_path, "SDN_COMMENTS.CSV", '101,"Digital Currency Address - ETH 0x' + '9' * 40 + '"\r\n'))]) == 0
     sql = capsys.readouterr().out
     assert ("name", "ROGUE COMMERCE", "SDN-101") in entries_of(sql) and "'ofac_sdn'" in sql
     assert module.main(["un", "--xml", str(write(tmp_path, "un.xml", UN))]) == 0

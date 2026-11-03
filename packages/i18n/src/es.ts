@@ -1476,5 +1476,17 @@ export const es = {
   "notifications.save": "Guardar",
   "notifications.saved": "Guardado.",
   "notifications.failed": "No se pudo guardar. Actualice la página e inténtelo de nuevo.",
-  "notifications.linkFailed": "No se pudo crear el enlace de Telegram. Inténtelo de nuevo."
+  "notifications.linkFailed": "No se pudo crear el enlace de Telegram. Inténtelo de nuevo.",
+  "sanctions.nav": "Alertas de sanciones",
+  "sanctions.eyebrow": "Cumplimiento",
+  "sanctions.body": "Pagos a sus direcciones que llegaron desde una dirección de una lista oficial de sanciones (OFAC, ONU o la lista del operador).",
+  "sanctions.empty": "No hay pagos desde direcciones sancionadas.",
+  "sanctions.listTitle": "Alertas: {count}",
+  "sanctions.guidance": "Ocrypt no custodia ni mueve fondos y no modifica estos pagos. Antes de cumplir el pedido o devolver fondos, consulte a su asesor de cumplimiento o legal.",
+  "sanctions.from": "Desde",
+  "sanctions.to": "a",
+  "sanctions.transaction": "Transacción",
+  "notifications.sanctionedAlways": "Los pagos desde una dirección sancionada siempre se notifican a todos los que reciben las notificaciones de este comercio.",
+  "goLive.addressNotAccepted": "Una de las direcciones no se puede usar para pagos reales. Use otra dirección o contacte con soporte.",
+  "sanctions.operatorList": "Lista del operador"
 } satisfies Messages;

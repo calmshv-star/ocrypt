@@ -282,6 +282,12 @@ func (r *repositoryStub) UnlinkTelegram(_ context.Context, _ Principal, audit Au
 	r.audit = audit
 	return nil
 }
+func (r *repositoryStub) SanctionsAlerts(_ context.Context, _ Principal, scope Scope, _ int) ([]SanctionsAlert, error) {
+	if scope.MerchantID == "" {
+		return nil, ErrInvalid
+	}
+	return []SanctionsAlert{{ID: "018f22b0-4db4-7c58-8f18-4d2f9d7b6a41", ChainID: "tron:mainnet", FromAddress: "TXYZ", AmountAtomic: "2500000", AssetDecimals: 6, Matches: json.RawMessage(`[{"source":"ofac_sdn","reference":"SDN-301"}]`)}}, nil
+}
 func (r *repositoryStub) EnqueueSignInNotification(_ context.Context, _ Principal, sessionID, locale string) error {
 	r.signInSession, r.savedLocale = sessionID, locale
 	return nil

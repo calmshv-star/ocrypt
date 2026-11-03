@@ -22,7 +22,7 @@ export function GoLivePage() {
   const [preset, setPreset] = useState<AcceptancePreset>("standard");
   const [rows, setRows] = useState<Row[]>([{ key: 1, chainId: GO_LIVE_NETWORKS[0]!.chainId, address: "", signature: "" }]);
   const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<"stepUp" | "failed" | "signature" | "conflict" | null>(null);
+  const [outcome, setOutcome] = useState<"stepUp" | "failed" | "signature" | "conflict" | "addressNotAccepted" | null>(null);
   const update = (key: number, change: Partial<Row>) => setRows((current) => current.map((row) => row.key === key ? { ...row, ...change } : row));
   const usedChains = new Set(rows.map((row) => row.chainId));
   const ready = rows.length > 0 && rows.every((row) => row.challenge && row.signature.trim()) && new Set(rows.map((row) => row.chainId)).size === rows.length;
@@ -55,7 +55,7 @@ export function GoLivePage() {
     } catch (error) {
       const status = error instanceof AdminAPIError ? error.status : 0;
       const code = error instanceof AdminAPIError ? error.code : "";
-      setOutcome(code === "step_up_required" ? "stepUp" : status === 409 ? "conflict" : status === 400 || status === 403 ? "signature" : "failed");
+      setOutcome(code === "step_up_required" ? "stepUp" : code === "address_not_accepted" ? "addressNotAccepted" : status === 409 ? "conflict" : status === 400 || status === 403 ? "signature" : "failed");
     } finally {
       setBusy(false);
     }
@@ -102,6 +102,7 @@ export function GoLivePage() {
         {outcome === "stepUp" && admin.client && <p role="alert">{t("signupReviews.stepUpBody")} <a href={admin.client.stepUpURL("/#/go-live")}>{t("signupReviews.stepUp")}</a></p>}
         {outcome === "signature" && <p role="alert">{t("goLive.signatureRejected")}</p>}
         {outcome === "conflict" && <p role="alert">{t("goLive.conflict")}</p>}
+        {outcome === "addressNotAccepted" && <p role="alert">{t("goLive.addressNotAccepted")}</p>}
         {outcome === "failed" && <p role="alert">{t("goLive.failed")}</p>}
       </div>
     </>}

@@ -3,11 +3,12 @@
 
 Reads files the operator downloaded from the official source and prints SQL
 that replaces one screening source atomically through
-replace_signup_screening_source (migration 000059). Apply it with the
+replace_signup_screening_source (migration 000059) and its crypto addresses
+through replace_sanctioned_addresses (migration 000064). Apply it with the
 database owner role, for example:
 
   python3 scripts/signup_screening_import.py ofac --sdn SDN.CSV --alt ALT.CSV \
-    | psql "$OWNER_DATABASE_URL"
+    --comments SDN_COMMENTS.CSV | psql "$OWNER_DATABASE_URL"
 
 The script never connects to the network or the database. Names are sent as
 published; the database computes every match key, so the importer and the
@@ -15,6 +16,7 @@ registration check cannot disagree.
 """
 import argparse
 import csv
+import hashlib
 import io
 import json
 import re
@@ -33,6 +35,8 @@ SHARED_HOSTS = {
     "youtube.com", "youtu.be", "vk.com", "ok.ru", "tiktok.com", "github.com", "medium.com", "wordpress.com",
     "blogspot.com", "sites.google.com", "google.com", "linktr.ee", "wa.me", "whatsapp.com", "pinterest.com",
 }
+DIGITAL_CURRENCY = re.compile(r"\bDigital Currency Address - ([A-Za-z0-9]{2,10})\s+([A-Za-z0-9]{20,128})")
+BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 OFFICIAL_STALE_AFTER = "8 days"
 OFAC_NULL = "-0-"
 
@@ -98,6 +102,63 @@ def ofac_entries(sdn_path, alt_path):
     return entries
 
 
+def base58_decode(value):
+    number = 0
+    for char in value:
+        index = BASE58.find(char)
+        if index < 0:
+            return None
+        number = number * 58 + index
+    body = number.to_bytes((number.bit_length() + 7) // 8, "big") if number else b""
+    return b"\x00" * (len(value) - len(value.lstrip("1"))) + body
+
+
+def address(currency, value, reference):
+    """One sanctioned address on a chain family the platform watches: EVM
+    (any 0x account, the same on every EVM chain), TRON (base58check, with
+    its 20 bytes in hex for senders reported in hex) and Solana. Others
+    (Bitcoin, Monero, ...) are skipped: no such payments arrive here."""
+    currency = currency.upper()
+    if not re.fullmatch(r"[A-Z0-9]{2,10}", currency):
+        return None
+    if re.fullmatch(r"0x[0-9a-fA-F]{40}", value):
+        return {"family": "evm", "address": value.lower(), "currency": currency, "reference": reference}
+    if re.fullmatch(r"T[1-9A-HJ-NP-Za-km-z]{33}", value):
+        raw = base58_decode(value)
+        if raw and len(raw) == 25 and raw[0] == 0x41 and hashlib.sha256(hashlib.sha256(raw[:21]).digest()).digest()[:4] == raw[21:]:
+            return {"family": "tron", "address": value, "hex": raw[1:21].hex(), "currency": currency, "reference": reference}
+        return None
+    # Solana by format, whatever the tag (USDC and USDT live there too): a
+    # base58 string of exactly 32 bytes. Bitcoin's base58check is 25 bytes.
+    if re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{32,44}", value):
+        raw = base58_decode(value)
+        if raw and len(raw) == 32:
+            return {"family": "solana", "address": value, "currency": currency, "reference": reference}
+    return None
+
+
+def ofac_addresses(sdn_path, comments_path=None):
+    """The "Digital Currency Address - XBT …" remarks of SDN.CSV. OFAC cuts
+    Remarks at 1000 characters and continues them in SDN_COMMENTS.CSV
+    (ent_num, remarks_extended); the parts are joined as published, so an
+    address split at the cut is whole again."""
+    overflow = {}
+    if comments_path:
+        for ent_num, extended in ofac_rows(comments_path, 2):
+            if extended != OFAC_NULL:
+                overflow[ent_num] = overflow.get(ent_num, "") + extended
+    found = []
+    for ent_num, _name, sdn_type, *_, remarks in ofac_rows(sdn_path, 12):
+        remarks = ("" if remarks == OFAC_NULL else remarks) + overflow.get(ent_num, "")
+        if not remarks:
+            continue
+        for currency, value in DIGITAL_CURRENCY.findall(remarks):
+            item = address(currency, value, f"SDN-{ent_num}")
+            if item and item not in found:
+                found.append(item)
+    return found
+
+
 def text_of(element, tag):
     child = element.find(tag)
     return (child.text or "").strip() if child is not None else ""
@@ -131,24 +192,32 @@ def un_record(record, alias_tag, good_only, whole_word, names):
 
 
 def operator_entries(path):
-    """An operator-curated CSV with the header kind,value,reference."""
+    """An operator-curated CSV with the header kind,value,reference. An
+    address row's value is "CURRENCY ADDRESS", for example "TRX T…"."""
     reader = csv.DictReader(io.StringIO(read_text(path), newline=""))
     if reader.fieldnames != ["kind", "value", "reference"]:
         raise ValueError(f"{path}: header must be kind,value,reference")
-    entries = []
+    entries, addresses = [], []
     for row in reader:
         kind, value, reference = (row["kind"] or "").strip(), (row["value"] or "").strip(), (row["reference"] or "").strip()
-        if kind not in ("name", "domain") or not value or not 1 <= len(reference) <= 128:
-            raise ValueError(f"{path}: line {reader.line_num} needs kind name or domain, a value and a reference")
-        entries.append(entry(kind, value, reference))
-    return entries
+        if kind not in ("name", "domain", "address") or not value or not 1 <= len(reference) <= 128:
+            raise ValueError(f"{path}: line {reader.line_num} needs kind name, domain or address, a value and a reference")
+        if kind == "address":
+            currency, _, value = value.partition(" ")
+            item = address(currency, value.strip(), reference)
+            if item is None:
+                raise ValueError(f"{path}: line {reader.line_num} needs a currency tag (2-10 letters or digits) and an EVM, TRON or Solana address")
+            addresses.append(item)
+        else:
+            entries.append(entry(kind, value, reference))
+    return entries, addresses
 
 
 def sql_literal(value):
     return "'" + value.replace("'", "''") + "'"
 
 
-def render_sql(source, description, published, stale_after, entries):
+def render_sql(source, description, published, stale_after, entries, addresses=()):
     if not SOURCE.match(source):
         raise ValueError("source must be a lowercase identifier such as ofac_sdn")
     if published is not None:
@@ -159,9 +228,10 @@ def render_sql(source, description, published, stale_after, entries):
     if not 1 <= len(description) <= 200 or not description.isprintable():
         raise ValueError("description must be 1..200 printable characters")
     payload = json.dumps(entries, ensure_ascii=False, separators=(",", ":"))
-    tag = f"ocrypt_{secrets.token_hex(8)}"
-    while f"${tag}$" in payload:
-        tag = f"ocrypt_{secrets.token_hex(8)}"
+    address_payload = json.dumps(list(addresses), ensure_ascii=False, separators=(",", ":"))
+    tag, address_tag = dollar_tag(payload), dollar_tag(address_payload)
+    # The addresses are replaced with the names, so a list never stays half
+    # updated; an empty array clears the addresses a source no longer has.
     return (
         "\\set ON_ERROR_STOP on\n"
         "BEGIN;\n"
@@ -169,8 +239,16 @@ def render_sql(source, description, published, stale_after, entries):
         f"{sql_literal(published) if published else 'NULL'}::timestamptz,"
         f"{sql_literal(stale_after) if stale_after else 'NULL'}::interval,"
         f"${tag}${payload}${tag}$::jsonb) AS loaded_entries;\n"
+        f"SELECT replace_sanctioned_addresses({sql_literal(source)},${address_tag}${address_payload}${address_tag}$::jsonb) AS loaded_addresses;\n"
         "COMMIT;\n"
     )
+
+
+def dollar_tag(payload):
+    tag = f"ocrypt_{secrets.token_hex(8)}"
+    while f"${tag}$" in payload:
+        tag = f"ocrypt_{secrets.token_hex(8)}"
+    return tag
 
 
 def main(argv=None):
@@ -179,6 +257,7 @@ def main(argv=None):
     ofac = commands.add_parser("ofac", help="OFAC SDN.CSV and ALT.CSV (legacy flat files)")
     ofac.add_argument("--sdn", required=True)
     ofac.add_argument("--alt")
+    ofac.add_argument("--comments", help="SDN_COMMENTS.CSV, the continuation of long remarks")
     ofac.add_argument("--published", help="publication time, ISO 8601")
     un = commands.add_parser("un", help="UN Security Council consolidated list XML")
     un.add_argument("--xml", required=True)
@@ -187,12 +266,13 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.command == "ofac":
-            sql = render_sql("ofac_sdn", "OFAC Specially Designated Nationals (SDN.CSV, ALT.CSV)", args.published, OFFICIAL_STALE_AFTER, ofac_entries(args.sdn, args.alt))
+            sql = render_sql("ofac_sdn", "OFAC Specially Designated Nationals (SDN.CSV, ALT.CSV)", args.published, OFFICIAL_STALE_AFTER, ofac_entries(args.sdn, args.alt), ofac_addresses(args.sdn, args.comments))
         elif args.command == "un":
             published, entries = un_entries(args.xml)
             sql = render_sql("un_consolidated", "UN Security Council Consolidated List", published, OFFICIAL_STALE_AFTER, entries)
         else:
-            sql = render_sql("operator", "Operator-curated screening list", None, None, operator_entries(args.csv))
+            entries, addresses = operator_entries(args.csv)
+            sql = render_sql("operator", "Operator-curated screening list", None, None, entries, addresses)
     except (OSError, ValueError, ElementTree.ParseError) as error:
         print(f"signup_screening_import: {error}", file=sys.stderr)
         return 2

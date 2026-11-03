@@ -1476,5 +1476,17 @@ export const de = {
   "notifications.save": "Speichern",
   "notifications.saved": "Gespeichert.",
   "notifications.failed": "Speichern fehlgeschlagen. Laden Sie die Seite neu und versuchen Sie es erneut.",
-  "notifications.linkFailed": "Telegram-Link konnte nicht erstellt werden. Versuchen Sie es erneut."
+  "notifications.linkFailed": "Telegram-Link konnte nicht erstellt werden. Versuchen Sie es erneut.",
+  "sanctions.nav": "Sanktionswarnungen",
+  "sanctions.eyebrow": "Compliance",
+  "sanctions.body": "Zahlungen an Ihre Adressen, die von einer Adresse auf einer offiziellen Sanktionsliste kamen (OFAC, UN oder Liste des Betreibers).",
+  "sanctions.empty": "Keine Zahlungen von sanktionierten Adressen.",
+  "sanctions.listTitle": "Warnungen: {count}",
+  "sanctions.guidance": "Ocrypt verwahrt und bewegt keine Gelder und ändert diese Zahlungen nicht. Bevor Sie die Bestellung ausführen oder Geld zurückgeben, wenden Sie sich an Ihre Compliance- oder Rechtsberatung.",
+  "sanctions.from": "Von",
+  "sanctions.to": "an",
+  "sanctions.transaction": "Transaktion",
+  "notifications.sanctionedAlways": "Zahlungen von sanktionierten Adressen werden immer allen gemeldet, die Benachrichtigungen dieses Händlers erhalten.",
+  "goLive.addressNotAccepted": "Eine der Adressen kann nicht für Live-Zahlungen verwendet werden. Verwenden Sie eine andere Adresse oder wenden Sie sich an den Support.",
+  "sanctions.operatorList": "Liste des Betreibers"
 } satisfies Messages;

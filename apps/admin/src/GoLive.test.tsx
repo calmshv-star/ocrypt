@@ -5,7 +5,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import type { AdminClient } from "./api/client";
+import { AdminAPIError, type AdminClient } from "./api/client";
 import type { AdminPrincipal, GoLiveProofChallenge } from "./api/types";
 import { signWithBrowserWallet, WalletSigningError } from "./goLive";
 
@@ -48,6 +48,17 @@ describe("go-live request", () => {
     fireEvent.click(send);
     await waitFor(() => expect(live.submitGoLive).toHaveBeenCalledWith({ tenantId, merchantId }, "fast", [{ token: "sealed-token", signature: "0xsigned" }]));
     expect(screen.getByText(/never asks for a seed phrase/)).toBeInTheDocument();
+  });
+
+  it("says plainly when an address is not accepted, without blaming the signature", async () => {
+    const live = client({ submitGoLive: vi.fn().mockRejectedValue(new AdminAPIError(400, "address_not_accepted", "A receiving address is not accepted.")) });
+    render(wrap(<MemoryRouter initialEntries={["/go-live"]}><App client={live} preview={false} /></MemoryRouter>));
+    fireEvent.change(await screen.findByLabelText("Address"), { target: { value: "TWb4A6kVtQJ4z9Yp2mR7sX8cN1hL5uD3eF" } });
+    fireEvent.click(screen.getByRole("button", { name: "Get message to sign" }));
+    fireEvent.change(await screen.findByLabelText("Signature 1"), { target: { value: "0xsigned" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send go-live request" }));
+    expect(await screen.findByText(/cannot be used for live payments/)).toBeInTheDocument();
+    expect(screen.queryByText(/signature did not match/i)).not.toBeInTheDocument();
   });
 
   it("shows a pending request and the live state", async () => {

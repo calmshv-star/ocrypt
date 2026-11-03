@@ -3,12 +3,15 @@ package admin
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func notificationFixture(t *testing.T) (http.Handler, *repositoryStub, *Service, string, string, string, string) {
@@ -124,5 +127,33 @@ func TestSignInAlertOnlyForAFreshLogin(t *testing.T) {
 	}
 	if preferredLocale("pt-BR, xx") != "en" || preferredLocale("") != "en" || preferredLocale("zh-Hans-CN") != "zh" {
 		t.Fatal("preferred locale")
+	}
+}
+
+func TestSanctionsAlertsNeedPaymentAccessOnTheMerchant(t *testing.T) {
+	handler, _, _, raw, csrf, tenant, merchant := notificationFixture(t)
+	get := func(merchantID string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, "https://admin.example/admin/v1/sanctions-alerts", nil)
+		addAuth(request, raw, csrf)
+		request.Header.Set("X-Admin-Tenant-ID", tenant)
+		if merchantID != "" {
+			request.Header.Set("X-Admin-Merchant-ID", merchantID)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	if response := get(merchant); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"reference":"SDN-301"`) {
+		t.Fatalf("alerts: %d %s", response.Code, response.Body.String())
+	}
+	if response := get("018f22b0-4db4-7c58-8f18-4d2f9d7b6a99"); response.Code != http.StatusForbidden {
+		t.Fatalf("another merchant: %d", response.Code)
+	}
+}
+
+func TestRefusedAddressHasItsOwnProblemCode(t *testing.T) {
+	err := classifyAdminDB(&pgconn.PgError{Code: "OCP04"})
+	if !errors.Is(err, ErrAddressNotAccepted) || statusFor(err) != http.StatusBadRequest || problemCode(err) != "address_not_accepted" {
+		t.Fatalf("%v %d %s", err, statusFor(err), problemCode(err))
 	}
 }

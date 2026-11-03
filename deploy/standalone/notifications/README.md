@@ -9,6 +9,7 @@ Cabinet users choose which events reach them (`#/notifications`):
 | `review` | `payment.needs_review` | same |
 | `webhook_failed` | a delivery reaching `dead_letter` (one notice per endpoint and UTC hour) | users with `webhooks:read` |
 | `sign_in` | a fresh cabinet login (not step-up) | the user themself |
+| `sanctioned` | a transfer to the merchant's address from a sender on a sanctions list | everyone who gets the merchant's notifications, whatever events they chose |
 
 A self-service owner who saved nothing gets every merchant event by email.
 Everybody else subscribes on the page. Access is checked when the job is
@@ -66,9 +67,10 @@ queued. The text is plain; the relay sends it as `text/plain`.
    replica polls at a time; the others wait on a database advisory lock.
 4. Admit egress to `api.telegram.org:443` (Helm `httpsEgressPeers`).
 
-Access: merchant events need a tenant-scoped binding with `payments:read`
-(and `webhooks:read` for webhook failures) or the self-service owner
-membership; global platform operators do not receive merchant notifications.
+Access: merchant events need a binding with `payments:read` (and
+`webhooks:read` for webhook failures) for the merchant, its tenant or the
+whole platform, or the self-service owner membership. Global operators get a
+merchant's notifications only after saving preferences for it.
 Changing sign-in alerts and unlinking Telegram are audited.
 
 Linking: the cabinet issues a one-time `https://t.me/<bot>?start=<code>`

@@ -25,6 +25,7 @@ tags:
   - name: Signup screening
   - name: Go-live
   - name: Notifications
+  - name: Sanctions screening
 paths:
   /admin/v1/auth/login:
     get:
@@ -212,6 +213,18 @@ paths:
       security: [{sessionCookie: []}]
       responses:
         '204': {description: Action token replaced and returned only as a Strict secure cookie}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/v1/sanctions-alerts:
+    get:
+      tags: [Sanctions screening]
+      operationId: sanctionsAlerts
+      summary: Transfers to the merchant's payment addresses from senders on a sanctions list
+      description: Newest first, at most 100. Needs payments:read on the merchant. The payments themselves are not changed; the merchant decides what to do.
+      parameters: [{$ref: '#/components/parameters/Tenant'}, {$ref: '#/components/parameters/RequiredMerchant'}]
+      responses:
+        '200': {description: Alerts, content: {application/json: {schema: {type: object, additionalProperties: false, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/SanctionsAlert'}}}}}}}
+        '400': {$ref: '#/components/responses/Problem'}
         '401': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
   /admin/v1/notifications:
@@ -1525,6 +1538,21 @@ components:
     GoLiveProofChallenge: {type: object, additionalProperties: false, required: [kind,chain_id,address,display_address,tenant_id,merchant_id,nonce,issued_at,expires_at,message,token], properties: {kind: {type: string, enum: [evm_personal_sign, solana_sign_message, tron_sign_message_v2]}, chain_id: {type: string}, address: {type: string}, display_address: {type: string}, tenant_id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, nonce: {$ref: '#/components/schemas/UUID'}, issued_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time}, message: {type: string}, token: {type: string}}}
     GoLiveSubmission: {type: object, additionalProperties: false, required: [preset,proofs], properties: {preset: {type: string, enum: [strict, standard, fast]}, proofs: {type: array, minItems: 1, maxItems: 16, items: {type: object, additionalProperties: false, required: [token,signature], properties: {token: {type: string}, signature: {type: string}}}}}}
     GoLiveReview: {type: object, additionalProperties: false, required: [request_id,tenant_id,merchant_id,company_name,owner_email,preset,screening_status,addresses,requested_at], properties: {request_id: {$ref: '#/components/schemas/UUID'}, tenant_id: {$ref: '#/components/schemas/UUID'}, merchant_id: {$ref: '#/components/schemas/UUID'}, company_name: {type: string}, owner_email: {type: string}, preset: {type: string, enum: [strict, standard, fast]}, screening_status: {type: string}, addresses: {type: array, items: {type: object, additionalProperties: false, required: [chain_id,address,canonical_address,proof_kind,admitted,routes_admitted], properties: {chain_id: {type: string}, address: {type: string}, canonical_address: {type: string}, proof_kind: {type: string}, wallet_id: {$ref: '#/components/schemas/UUID'}, admitted: {type: boolean}, routes_admitted: {type: boolean}}}}, requested_at: {type: string, format: date-time}}}
+    SanctionsAlert:
+      type: object
+      additionalProperties: false
+      required: [id, chain_id, transaction_id, asset_id, from_address, to_address, amount_atomic, asset_decimals, matches, detected_at]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        chain_id: {type: string}
+        transaction_id: {type: string}
+        asset_id: {type: string}
+        from_address: {type: string, description: The listed sender.}
+        to_address: {type: string, description: The merchant's payment address.}
+        amount_atomic: {type: string, pattern: '^[0-9]+$'}
+        asset_decimals: {type: integer, minimum: 0, maximum: 77}
+        matches: {type: array, minItems: 1, maxItems: 20, items: {type: object, additionalProperties: false, required: [source, reference], properties: {source: {type: string}, reference: {type: string}}}}
+        detected_at: {type: string, format: date-time}
     NotificationEvents: {type: array, maxItems: 4, uniqueItems: true, items: {type: string, enum: [paid, underpaid, review, webhook_failed]}}
     NotificationLocale: {type: string, enum: [en, ru, zh, es, fr, de]}
     NotificationSettings:

@@ -1474,7 +1474,19 @@ export const en = {
   "notifications.save": "Save",
   "notifications.saved": "Saved.",
   "notifications.failed": "Could not save. Refresh the page and try again.",
-  "notifications.linkFailed": "Could not create a Telegram link. Try again."
+  "notifications.linkFailed": "Could not create a Telegram link. Try again.",
+  "sanctions.nav": "Sanctions alerts",
+  "sanctions.eyebrow": "Compliance",
+  "sanctions.body": "Payments to your addresses that came from an address on an official sanctions list (OFAC, UN or the operator's list).",
+  "sanctions.empty": "No payments from sanctioned addresses.",
+  "sanctions.listTitle": "Alerts: {count}",
+  "sanctions.guidance": "Ocrypt does not hold or move funds and does not change these payments. Before you fulfil the order or return funds, check with your compliance or legal adviser.",
+  "sanctions.from": "From",
+  "sanctions.to": "to",
+  "sanctions.transaction": "Transaction",
+  "notifications.sanctionedAlways": "Payments from a sanctioned address are always reported to everyone who gets this merchant's notifications.",
+  "goLive.addressNotAccepted": "One of the addresses cannot be used for live payments. Use a different address or contact support.",
+  "sanctions.operatorList": "Operator list"
 } as const;
 
 export type MessageKey = keyof typeof en;
