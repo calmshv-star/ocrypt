@@ -697,6 +697,13 @@
 .security__sessions li > div > strong { display: inline-flex; gap: 8px; align-items: center; }
 .security__sessions small { color: var(--mp-muted); overflow-wrap: anywhere; }
 .security__outcome { margin: 0 0 10px; color: var(--mp-muted); }
+.notifications__table { width: 100%; border-collapse: collapse; }
+.notifications__table th, .notifications__table td { padding: 10px 8px; border-bottom: 1px solid var(--mp-border); text-align: left; }
+.notifications__table td { width: 96px; text-align: center; }
+.notifications__table thead th:not(:first-child) { text-align: center; }
+.notifications__table tbody th { font-weight: 500; }
+.notifications__table tbody th small { display: block; color: var(--mp-muted); font-weight: 400; }
+.notifications__switch { display: flex; gap: 10px; align-items: center; padding: 6px 0; }
 .go-live__submit { display: grid; gap: 8px; justify-items: start; margin-top: 16px; }
 .go-live-review__addresses { display: grid; gap: 6px; margin: 0 0 12px; padding: 0; list-style: none; }
 .go-live-review__addresses code { overflow-wrap: anywhere; }

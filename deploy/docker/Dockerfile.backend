@@ -32,7 +32,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     fi && \
     case "${BINARY}" in \
       ton-payment-recovery) ;; \
-      api|worker|scanner|provider-health-worker|admin-api|management-api|platform-admin-api|platform-outbox-publisher|financial-api|financial-worker|rate-worker|reconciliation-worker|retention-worker|retention-control-scheduler|legacy-gateway|merchant-settings-api|merchant-session-revocation-worker|merchant-invitation-delivery-worker|migration-control|migration-control-worker|migration-traffic-actuator) ;; \
+      api|worker|scanner|provider-health-worker|admin-api|management-api|platform-admin-api|platform-outbox-publisher|financial-api|financial-worker|rate-worker|reconciliation-worker|retention-worker|retention-control-scheduler|legacy-gateway|merchant-settings-api|merchant-session-revocation-worker|merchant-invitation-delivery-worker|notification-worker|migration-control|migration-control-worker|migration-traffic-actuator) ;; \
       *) echo "unsupported BINARY=${BINARY}" >&2; exit 2 ;; \
     esac && \
     test -d "./cmd/${BINARY}" && \

@@ -1,7 +1,7 @@
 import { useI18n, type MessageKey } from "@merchant/i18n";
 import { AppShell, Badge, Button, PRODUCT_NAME, Select, ThemeToggle, WorkspaceSwitcher, type ShellNavGroup } from "@merchant/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, Archive, Blocks, CircleDollarSign, FileSpreadsheet, Fingerprint, GitCompareArrows, Rocket, KeyRound, Landmark, LayoutDashboard, Link2, LockKeyhole, RadioTower, ReceiptText, RefreshCw, Settings2, ShieldCheck, Sparkles, UserCheck } from "lucide-react";
+import { Activity, Archive, BellRing, Blocks, CircleDollarSign, FileSpreadsheet, Fingerprint, GitCompareArrows, Rocket, KeyRound, Landmark, LayoutDashboard, Link2, LockKeyhole, RadioTower, ReceiptText, RefreshCw, Settings2, ShieldCheck, Sparkles, UserCheck } from "lucide-react";
 import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AdminProvider, useAdmin } from "./AdminProvider";
@@ -49,6 +49,7 @@ const ProviderConfigurationPage = lazy(() => import("./ProviderConfigurationPage
 const RetentionControlPage = lazy(() => import("./RetentionControlPage").then((module) => ({ default: module.RetentionControlPage })));
 const OnboardingPage = lazy(() => import("./OnboardingPage").then((module) => ({ default: module.OnboardingPage })));
 const GoLivePage = lazy(() => import("./GoLivePage").then((module) => ({ default: module.GoLivePage })));
+const NotificationsPage = lazy(() => import("./NotificationsPage").then((module) => ({ default: module.NotificationsPage })));
 const SecurityPage = lazy(() => import("./SecurityPage").then((module) => ({ default: module.SecurityPage })));
 const GoLiveReviewsPage = lazy(() => import("./GoLiveReviewsPage").then((module) => ({ default: module.GoLiveReviewsPage })));
 const ReportsPage = lazy(() => import("./ReportsPage").then((module) => ({ default: module.ReportsPage })));
@@ -157,6 +158,7 @@ function ProductionRoutes() {
     <Route element={<GoLivePage />} path="/go-live" />
     <Route element={<GoLiveReviewsPage />} path="/go-live-reviews" />
     <Route element={<SecurityPage />} path="/security" />
+    <Route element={<NotificationsPage />} path="/notifications" />
     <Route element={<Navigate replace to="/overview" />} path="*" />
   </Routes>;
 }
@@ -187,6 +189,7 @@ function AdminApplication() {
   const canOpenSettings = Boolean(admin.scope?.merchantId) && SETTINGS_PERMISSIONS.some((permission) => admin.can(permission));
   const settings = [
     canOpenSettings && { label: t("nav.settings"), href: "#/settings", icon: Settings2, active: SETTINGS_PATHS.has(location.pathname), keywords: ["integration", "access", "configuration"] },
+    !admin.preview && { label: t("notifications.nav"), href: "#/notifications", icon: BellRing, active: active("/notifications"), keywords: ["email", "telegram", "alerts"] },
     !admin.preview && { label: t("security.nav"), href: "#/security", icon: LockKeyhole, active: active("/security"), keywords: ["sessions", "devices", "passkey", "mfa", "sign out"] }
   ].filter(Boolean) as ShellNavGroup["items"];
   const infrastructure = [

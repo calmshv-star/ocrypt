@@ -21,6 +21,8 @@ export type Permission =
 
 export type AdminScope = { tenantId: string; merchantId?: string };
 export type AdminPrincipal = { user_id: string; session_id: string; display_name: string; email?: string; roles: string[]; permissions: Permission[]; scopes: Array<{tenant_id?:string;merchant_id?:string}>; acr?:string; amr:string[]; step_up_until?:string; signup_review?:"pending"|"rejected" };
+export type NotificationEvent = "paid" | "underpaid" | "review" | "webhook_failed";
+export type NotificationSettings = { email:string; locale?:string; telegram:{ available:boolean; linked:boolean }; account:{ sign_in_email:boolean; sign_in_telegram:boolean }; merchant?:{ configured:boolean; webhooks_allowed:boolean; email_events:NotificationEvent[]; telegram_events:NotificationEvent[] } };
 export type SessionSummary = { id:string; created_at:string; last_seen_at:string; expires_at:string; device:string; amr:string[]; current:boolean };
 export type AcceptancePreset = "strict" | "standard" | "fast";
 export type GoLiveState = { environment:"test"|"live"; request_id?:string; request_status?:"pending"|"approved"|"rejected"; preset?:AcceptancePreset; requested_at?:string; screening_ready:boolean };

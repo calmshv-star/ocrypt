@@ -46,6 +46,9 @@ type ServiceConfig struct {
 	// unless SignupUnscreenedIP explicitly opts out of IP screening.
 	SignupRegionHeader string
 	SignupUnscreenedIP bool
+	// TelegramBotUsername is the operator's notification bot; empty turns
+	// Telegram notifications off.
+	TelegramBotUsername string
 }
 
 var (
@@ -60,6 +63,8 @@ type AuthResult struct {
 	Session   Session
 	Tokens    *SessionTokens
 	MFAAt     time.Time
+	// Login is true for a session a fresh login just created.
+	Login bool
 }
 
 type Service struct {
@@ -114,6 +119,9 @@ func NewService(repository Repository, provider *OIDCProvider, stateBox SecretBo
 	}
 	if config.SelfServiceSignup && (config.SignupRegionHeader == "") == !config.SignupUnscreenedIP {
 		return nil, errors.New("self-service signup needs either a trusted region header or an explicit opt-out of IP screening, not both")
+	}
+	if config.TelegramBotUsername != "" && !telegramBotUsername.MatchString(config.TelegramBotUsername) {
+		return nil, errors.New("admin Telegram bot username must be a bot username such as ocrypt_alerts_bot")
 	}
 	if config.SignupRegionHeader != "" && !headerNamePattern.MatchString(config.SignupRegionHeader) {
 		return nil, errors.New("signup region header must be a plain HTTP header name")
@@ -373,7 +381,7 @@ func (s *Service) CompleteCallback(ctx context.Context, state, code string) (Aut
 		return AuthResult{}, "", err
 	}
 	principal := PrincipalFor(identity, session)
-	return AuthResult{Principal: principal, Session: session, Tokens: &tokens, MFAAt: now}, attempt.ReturnPath, nil
+	return AuthResult{Principal: principal, Session: session, Tokens: &tokens, MFAAt: now, Login: attempt.Purpose == "login"}, attempt.ReturnPath, nil
 }
 
 // completeSignup consumes the screened signup request after OIDC with a

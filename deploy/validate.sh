@@ -240,6 +240,7 @@ abort("reconciliation example login does not name its exact capability") unless 
 abort("retention example login does not name its exact capability") unless env_example.include?("RETENTION_DATABASE_URL=postgres://retention_archive_worker_login:")
 abort("merchant settings examples do not name exact capabilities") unless env_example.include?("MERCHANT_SETTINGS_DATABASE_URL=postgres://merchant_settings_api_runtime_login:") && env_example.include?("MERCHANT_SESSION_REVOCATION_DATABASE_URL=postgres://merchant_session_revocation_worker_login:")
 abort("invitation delivery example does not name its exact capability") unless env_example.include?("MERCHANT_INVITATION_DELIVERY_DATABASE_URL=postgres://merchant_invitation_delivery_worker_login:")
+abort("notification worker example does not name its exact capability") unless env_example.include?("NOTIFICATION_DATABASE_URL=postgres://merchant_notification_worker_login:")
 abort("provider health example does not name its exact capability") unless env_example.include?("PROVIDER_HEALTH_DATABASE_URL=postgres://merchant_provider_health_worker_login:")
 abort("legacy example login does not name its exact runtime capability") unless env_example.include?("LEGACY_DATABASE_URL=postgres://legacy_compat_runtime_login:")
 abort("legacy admission examples do not use distinct requester/approver logins") unless env_example.include?("LEGACY_REQUESTER_DATABASE_URL=postgres://legacy_compat_requester_login:") && env_example.include?("LEGACY_APPROVER_DATABASE_URL=postgres://legacy_compat_approver_login:")
@@ -408,7 +409,7 @@ if rg -n 'GRANT .* ON ALL (TABLES|SEQUENCES)|ALTER ROLE merchant_(api|management
   echo "runtime database grants are broader than admitted" >&2
   exit 1
 fi
-for contract in platform_outbox_publisher rate_runtime_worker merchant_matching_worker merchant_financial_worker merchant_reconciliation_worker merchant_settings_api_runtime merchant_session_revocation_worker merchant_invitation_delivery_worker retention_archive_worker retention_control_scheduler merchant_provider_health_worker legacy_compat_runtime legacy_compat_admission_requester legacy_compat_admission_approver migration_control_worker migration_traffic_actuator; do
+for contract in platform_outbox_publisher rate_runtime_worker merchant_matching_worker merchant_financial_worker merchant_reconciliation_worker merchant_settings_api_runtime merchant_session_revocation_worker merchant_invitation_delivery_worker merchant_notification_worker retention_archive_worker retention_control_scheduler merchant_provider_health_worker legacy_compat_runtime legacy_compat_admission_requester legacy_compat_admission_approver migration_control_worker migration_traffic_actuator; do
   rg -q "$contract" deploy/postgres/bootstrap-roles.sql deploy/postgres/runtime-grants.sql || { echo "database role is not converged: $contract" >&2; exit 1; }
 done
 

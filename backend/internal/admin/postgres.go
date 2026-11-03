@@ -680,6 +680,64 @@ func (r *PostgresRepository) RevokeOtherSessions(ctx context.Context, userID, ke
 	return count, nil
 }
 
+func (r *PostgresRepository) NotificationSettings(ctx context.Context, principal Principal, scope Scope) (NotificationSettings, error) {
+	var settings NotificationSettings
+	var merchantAllowed bool
+	var merchant MerchantNotifications
+	err := r.asActor(ctx, principal, pgx.ReadOnly, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT email,telegram_linked,sign_in_email,sign_in_telegram,locale,merchant_allowed,webhooks_allowed,configured,email_events,telegram_events
+FROM current_admin_notification_settings(NULLIF($1,'')::uuid,NULLIF($2,'')::uuid)`, scope.TenantID, scope.MerchantID).
+			Scan(&settings.Email, &settings.Telegram.Linked, &settings.Account.SignInEmail, &settings.Account.SignInTelegram, &settings.Locale, &merchantAllowed, &merchant.WebhooksAllowed, &merchant.Configured, &merchant.EmailEvents, &merchant.TelegramEvents)
+	})
+	if err != nil {
+		return NotificationSettings{}, classifyAdminDB(err)
+	}
+	if merchantAllowed {
+		settings.Merchant = &merchant
+	}
+	return settings, nil
+}
+
+func (r *PostgresRepository) SaveMerchantNotifications(ctx context.Context, principal Principal, scope Scope, email, telegram []string, locale string, at time.Time) error {
+	return classifyAdminDB(r.asActor(ctx, principal, pgx.ReadWrite, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `SELECT set_current_admin_notification_preferences($1,$2,$3,$4,$5,$6)`, scope.TenantID, scope.MerchantID, email, telegram, locale, at)
+		return err
+	}))
+}
+
+func (r *PostgresRepository) SaveAccountNotifications(ctx context.Context, principal Principal, signInEmail, signInTelegram bool, locale string, at time.Time) error {
+	return classifyAdminDB(r.asActor(ctx, principal, pgx.ReadWrite, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `SELECT set_current_admin_account_notifications($1,$2,$3,$4)`, signInEmail, signInTelegram, locale, at)
+		return err
+	}))
+}
+
+func (r *PostgresRepository) CreateTelegramLinkCode(ctx context.Context, principal Principal, codeHash [32]byte, at, expires time.Time) error {
+	return classifyAdminDB(r.asActor(ctx, principal, pgx.ReadWrite, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `SELECT create_current_admin_telegram_link_code($1,$2,$3)`, codeHash[:], at, expires)
+		return err
+	}))
+}
+
+// UnlinkTelegram removes the user's chat and audits it in one transaction;
+// nothing linked is not an error.
+func (r *PostgresRepository) UnlinkTelegram(ctx context.Context, principal Principal, audit AuditEntry) error {
+	return classifyAdminDB(r.asActor(ctx, principal, pgx.ReadWrite, func(tx pgx.Tx) error {
+		var removed bool
+		if err := tx.QueryRow(ctx, `SELECT unlink_current_admin_telegram()`).Scan(&removed); err != nil || !removed {
+			return err
+		}
+		return r.appendAuditTx(ctx, tx, audit)
+	}))
+}
+
+func (r *PostgresRepository) EnqueueSignInNotification(ctx context.Context, principal Principal, sessionID, locale string) error {
+	return classifyAdminDB(r.asActor(ctx, principal, pgx.ReadWrite, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `SELECT enqueue_current_admin_sign_in_notification($1,$2)`, sessionID, locale)
+		return err
+	}))
+}
+
 func (r *PostgresRepository) RevokeSession(ctx context.Context, hash [32]byte, reason string, now time.Time) error {
 	tag, err := r.pool.Exec(ctx, `UPDATE admin_sessions SET revoked_at=$2,revocation_reason=$3 WHERE session_hash=$1 AND revoked_at IS NULL`, hash[:], now, reason)
 	if err == nil && tag.RowsAffected() != 1 {

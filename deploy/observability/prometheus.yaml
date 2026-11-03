@@ -45,6 +45,8 @@ scrape_configs:
           - http://merchant-session-revocation-worker:9096/readyz
           - http://merchant-invitation-delivery-worker:9097/healthz
           - http://merchant-invitation-delivery-worker:9097/readyz
+          - http://notification-worker:9103/healthz
+          - http://notification-worker:9103/readyz
           - http://financial-worker:9093/healthz
           - http://financial-worker:9093/readyz
     relabel_configs:

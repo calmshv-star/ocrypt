@@ -32,6 +32,12 @@ type AuthRepository interface {
 	ListUserSessions(ctx context.Context, userID string, now time.Time) ([]SessionSummary, error)
 	RevokeUserSession(ctx context.Context, userID, sessionID, reason string, now time.Time, audit AuditEntry) error
 	RevokeOtherSessions(ctx context.Context, userID, keepSessionID, reason string, now time.Time, audit AuditEntry) (int64, error)
+	NotificationSettings(ctx context.Context, principal Principal, scope Scope) (NotificationSettings, error)
+	SaveMerchantNotifications(ctx context.Context, principal Principal, scope Scope, email, telegram []string, locale string, at time.Time) error
+	SaveAccountNotifications(ctx context.Context, principal Principal, signInEmail, signInTelegram bool, locale string, at time.Time) error
+	CreateTelegramLinkCode(ctx context.Context, principal Principal, codeHash [32]byte, at, expires time.Time) error
+	UnlinkTelegram(ctx context.Context, principal Principal, audit AuditEntry) error
+	EnqueueSignInNotification(ctx context.Context, principal Principal, sessionID, locale string) error
 	SubmitGoLive(ctx context.Context, principal Principal, scope Scope, requestID, preset string, addresses []GoLiveProvenAddress, at time.Time) error
 	PrepareGoLiveWallets(context.Context, Principal, string, time.Time) ([]GoLivePreparedWallet, error)
 	ListGoLiveReviews(context.Context, Principal, int) ([]GoLiveReview, error)

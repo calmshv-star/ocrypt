@@ -267,6 +267,34 @@ services:
       - ${MERCHANT_INVITE_TOKEN_KEY_RING_DIR_HOST:-./invitation-token-keys-placeholder}:/run/secrets/invitation-token-keys:ro
     networks: [data, edge]
 
+  notification-worker:
+    <<: *app-security
+    image: ${NOTIFICATION_WORKER_IMAGE:-merchant-platform-notification-worker:local}
+    build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: notification-worker}}
+    profiles: [notifications]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      DATABASE_URL: ${NOTIFICATION_DATABASE_URL:-}
+      NOTIFICATION_WORKER_ID: ${NOTIFICATION_WORKER_ID:-}
+      NOTIFICATION_CABINET_URL: ${NOTIFICATION_CABINET_URL:-}
+      NOTIFICATION_EMAIL_RELAY_URL: ${NOTIFICATION_EMAIL_RELAY_URL:-}
+      NOTIFICATION_EMAIL_RELAY_BEARER_FILE: /run/secrets/notification-relay-bearer
+      NOTIFICATION_EMAIL_RELAY_CA_FILE: /run/secrets/notification-relay-ca.pem
+      NOTIFICATION_TELEGRAM_BOT_TOKEN_FILE: ${NOTIFICATION_TELEGRAM_BOT_TOKEN_FILE:+/run/secrets/notification-telegram-token}
+      NOTIFICATION_HEALTH_ADDRESS: ":9103"
+      NOTIFICATION_POLL_INTERVAL: 1s
+      NOTIFICATION_LEASE: 30s
+      NOTIFICATION_BASE_BACKOFF: 10s
+      NOTIFICATION_MAX_BACKOFF: 1h
+      NOTIFICATION_MAX_ATTEMPTS: "8"
+      NOTIFICATION_BATCH_SIZE: "50"
+    secrets:
+      - {source: notification_relay_bearer, target: notification-relay-bearer}
+      - {source: notification_relay_ca, target: notification-relay-ca.pem}
+      - {source: notification_telegram_token, target: notification-telegram-token}
+    networks: [data, edge]
+
   settlement-worker:
     <<: *worker
     build: {context: .., dockerfile: deploy/docker/Dockerfile.backend, args: {BINARY: worker}}
@@ -771,6 +799,9 @@ secrets:
   merchant_settings_client_key: {file: "${MERCHANT_SETTINGS_INTERNAL_CLIENT_KEY_FILE:-/dev/null}"}
   merchant_invitation_notifier_bearer: {file: "${MERCHANT_SETTINGS_INVITE_NOTIFIER_BEARER_FILE:-/dev/null}"}
   merchant_invitation_notifier_ca: {file: "${MERCHANT_SETTINGS_INVITE_NOTIFIER_CA_FILE:-/dev/null}"}
+  notification_relay_bearer: {file: "${NOTIFICATION_EMAIL_RELAY_BEARER_FILE:-/dev/null}"}
+  notification_relay_ca: {file: "${NOTIFICATION_EMAIL_RELAY_CA_FILE:-/dev/null}"}
+  notification_telegram_token: {file: "${NOTIFICATION_TELEGRAM_BOT_TOKEN_FILE:-/dev/null}"}
   financial_assertion_key: {file: "${FINANCIAL_ASSERTION_KEY_FILE:-/dev/null}"}
   financial_ca: {file: "${FINANCIAL_CA_FILE:-/dev/null}"}
   financial_tls_cert: {file: "${FINANCIAL_TLS_CERT_FILE:-/dev/null}"}

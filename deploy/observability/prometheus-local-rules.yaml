@@ -45,7 +45,7 @@ groups:
           summary: Reconciliation reports are stale, queued too long, or unavailable
           runbook: docs/runbooks/en/service-unavailable.md
       - alert: MerchantSettingsRevocationNotReady
-        expr: probe_success{job="blackbox-health",instance=~".*merchant-(settings-api:9095|session-revocation-worker:9096|invitation-delivery-worker:9097)/readyz"} == 0
+        expr: probe_success{job="blackbox-health",instance=~".*(merchant-(settings-api:9095|session-revocation-worker:9096|invitation-delivery-worker:9097)|notification-worker:9103)/readyz"} == 0
         for: 2m
         labels: {severity: critical}
         annotations:

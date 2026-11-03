@@ -96,6 +96,7 @@ CREATE TABLE fault_receiver_effects(event_id text PRIMARY KEY REFERENCES fault_r
 	t.Run("S3_daily_totals_report", f.dailyTotals)
 	t.Run("S4_go_live_request", f.goLiveRequest)
 	t.Run("S5_user_sessions", f.userSessions)
+	t.Run("S6_notifications", f.notifications)
 }
 
 func TestPaymentFaultDatabaseNamesFailClosed(t *testing.T) {

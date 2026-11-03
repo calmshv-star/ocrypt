@@ -31,6 +31,7 @@ type adminConfig struct {
 	SignupTermsVersion             string
 	SignupRegionHeader             string
 	SignupUnscreenedIP             bool
+	TelegramBotUsername            string
 	IdleTTL                        time.Duration
 	AbsoluteTTL                    time.Duration
 	RotationInterval               time.Duration
@@ -173,6 +174,9 @@ func loadAdminConfig() (adminConfig, error) {
 	if config.SignupUnscreenedIP, err = strconv.ParseBool(envOr("ADMIN_SIGNUP_UNSCREENED_IP", "false")); err != nil {
 		return adminConfig{}, errors.New("ADMIN_SIGNUP_UNSCREENED_IP must be true or false")
 	}
+	// Notifications: the bot the notification worker runs; empty keeps
+	// Telegram off. Validated as a bot username by the service.
+	config.TelegramBotUsername = strings.TrimPrefix(strings.TrimSpace(os.Getenv("ADMIN_TELEGRAM_BOT_USERNAME")), "@")
 	if config.SignupRegionHeader != "" && !signupRegionHeaderPattern.MatchString(config.SignupRegionHeader) {
 		return adminConfig{}, errors.New("ADMIN_SIGNUP_REGION_HEADER must be a plain HTTP header name")
 	}
