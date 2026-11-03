@@ -740,7 +740,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 11.16.0
       - uses: actions/setup-node@v7.0.0
@@ -759,7 +759,7 @@ jobs:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 11.16.0
       - uses: actions/setup-node@v7.0.0
@@ -863,7 +863,7 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 11.16.0
       - uses: actions/setup-node@v7.0.0
@@ -903,7 +903,7 @@ jobs:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 11.16.0
       - uses: actions/setup-node@v7.0.0
@@ -933,7 +933,7 @@ jobs:
       PLAYWRIGHT_VIDEO: "off"
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 11.16.0
       - uses: actions/setup-node@v7.0.0
