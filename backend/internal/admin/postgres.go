@@ -796,6 +796,57 @@ func (r *PostgresRepository) ListIntents(ctx context.Context, p Principal, s Sco
 	return page, classifyAdminDB(err)
 }
 
+// DailyTotals sums paid intents per payment day in the given IANA time zone.
+// The payment day is when the last finalized transfer of the intent reached
+// the chain; an intent settled without one (a migrated or manually resolved
+// order) counts on its settlement day. Days are calendar days of the zone;
+// from and to are inclusive dates.
+func (r *PostgresRepository) DailyTotals(ctx context.Context, p Principal, s Scope, from, to, zone string) (rows []DailyTotal, err error) {
+	err = r.withinScope(ctx, p, s, pgx.ReadOnly, func(tx pgx.Tx) error {
+		var known bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_timezone_names WHERE name=$1)`, zone).Scan(&known); err != nil {
+			return err
+		}
+		if !known {
+			return ErrInvalid
+		}
+		args := []any{from, to, zone}
+		filter := ""
+		if s.MerchantID != "" {
+			args = append(args, s.MerchantID)
+			filter = " AND i.merchant_id=$4"
+		}
+		// A transfer reaches the chain before the intent settles, so settled_at
+		// bounds the scan from below (with a day of slack for chain clocks) and
+		// the partial index payment_intents_paid_day_idx keeps it short.
+		result, err := tx.Query(ctx, `WITH paid AS (
+  SELECT i.currency,i.currency_scale,i.amount_minor,
+         coalesce((SELECT max(te.on_chain_time) FROM payment_matches pm JOIN transfer_events te ON te.id=pm.event_id
+                    WHERE pm.tenant_id=i.tenant_id AND pm.intent_id=i.id AND pm.state='finalized'),i.settled_at) AS paid_at
+    FROM payment_intents i
+   WHERE i.status IN ('settled','overpaid')
+     AND i.settled_at>=(($1::date)::timestamp AT TIME ZONE $3)-interval '1 day'`+filter+`
+)
+SELECT to_char((paid_at AT TIME ZONE $3)::date,'YYYY-MM-DD'),currency::text,currency_scale,count(*),sum(amount_minor)::text
+  FROM paid
+ WHERE paid_at>=($1::date)::timestamp AT TIME ZONE $3 AND paid_at<(($2::date)+1)::timestamp AT TIME ZONE $3
+ GROUP BY 1,2,3 ORDER BY 1,2,3`, args...)
+		if err != nil {
+			return err
+		}
+		defer result.Close()
+		for result.Next() {
+			var row DailyTotal
+			if err := result.Scan(&row.Day, &row.Currency, &row.CurrencyScale, &row.PaidCount, &row.PaidAmountMinor); err != nil {
+				return err
+			}
+			rows = append(rows, row)
+		}
+		return result.Err()
+	})
+	return rows, classifyAdminDB(err)
+}
+
 func (r *PostgresRepository) ListTransfers(ctx context.Context, p Principal, s Scope, cursor string, limit int) (page Page[TransferRow], err error) {
 	err = r.withinScope(ctx, p, s, pgx.ReadOnly, func(tx pgx.Tx) error {
 		args := []any{}

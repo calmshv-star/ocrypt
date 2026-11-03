@@ -137,6 +137,10 @@ type CheckoutRoute struct {
 	PaymentURI      string `json:"payment_uri,omitempty"`
 	TransactionHash string `json:"transaction_hash,omitempty"`
 	ExplorerURL     string `json:"explorer_url,omitempty"`
+	// ExpiresAt is the last moment an on-chain route accepts a transfer for
+	// its fixed amount (the grace end when the frozen policy accepts late
+	// payments). The checkout counts down to it, not to the intent expiry.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 type CheckoutSession struct {

@@ -1,7 +1,7 @@
-import { useI18n } from "@merchant/i18n";
+import { useI18n, type MessageKey } from "@merchant/i18n";
 import { AppShell, Badge, Button, PRODUCT_NAME, Select, ThemeToggle, WorkspaceSwitcher, type ShellNavGroup } from "@merchant/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, Archive, Blocks, CircleDollarSign, Fingerprint, GitCompareArrows, KeyRound, Landmark, LayoutDashboard, Link2, RadioTower, ReceiptText, RefreshCw, Settings2, ShieldCheck, Sparkles, UserCheck } from "lucide-react";
+import { Activity, Archive, Blocks, CircleDollarSign, FileSpreadsheet, Fingerprint, GitCompareArrows, KeyRound, Landmark, LayoutDashboard, Link2, RadioTower, ReceiptText, RefreshCw, Settings2, ShieldCheck, Sparkles, UserCheck } from "lucide-react";
 import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AdminProvider, useAdmin } from "./AdminProvider";
@@ -47,12 +47,24 @@ const ProviderOperationsPage = lazy(() => import("./ProviderOperationsPage").the
 const ProviderConfigurationPage = lazy(() => import("./ProviderConfigurationPage").then((module) => ({ default: module.ProviderConfigurationPage })));
 const RetentionControlPage = lazy(() => import("./RetentionControlPage").then((module) => ({ default: module.RetentionControlPage })));
 const OnboardingPage = lazy(() => import("./OnboardingPage").then((module) => ({ default: module.OnboardingPage })));
+const ReportsPage = lazy(() => import("./ReportsPage").then((module) => ({ default: module.ReportsPage })));
 const SignupReviewsPage = lazy(() => import("./SignupReviewsPage").then((module) => ({ default: module.SignupReviewsPage })));
 const MigrationControlPage = lazy(() => import("./MigrationControlPage").then((module) => ({ default: module.MigrationControlPage })));
 
 function safeReturnPath() {
   const value=`${window.location.pathname}${window.location.search}${window.location.hash}`;
   return /(?:[?#&])token=/.test(value)?"/":value;
+}
+
+const SIGN_IN_FAILURES = new Set(["cancelled", "provider", "expired", "not_allowed", "mfa", "failed"]);
+
+// Where a failed OIDC callback lands (/#/sign-in-failed?reason=...). The
+// reason is one generic word from the server; anything else reads as failed.
+function SignInFailedScreen({ reason }: { reason: string | null }) {
+  const { locale, locales, localeNames, setLocale, t } = useI18n();
+  const { client, sessionState } = useAdmin();
+  const known = reason && SIGN_IN_FAILURES.has(reason) ? reason : "failed";
+  return <main className="admin-access"><div className="admin-access__controls"><Select aria-label={t("common.locale")} onChange={(event) => setLocale(event.target.value as typeof locale)} value={locale}>{locales.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}</Select><ThemeToggle label={t("common.theme")} /></div><section role="alert"><div className="admin-access__brand"><span aria-hidden="true" className="mp-brand__mark"><span/><span/></span><strong>{PRODUCT_NAME}</strong></div><div className="admin-access__content"><span aria-hidden="true" className="admin-access__shield"><ShieldCheck size={24}/></span><div><h1>{t("admin.signInFailedTitle")}</h1><p>{t(`admin.signInFailed.${known}` as MessageKey)}</p></div></div>{client && <a className="mp-button mp-button--primary mp-button--md" href={client.loginURL("/")}>{t("common.signIn")}</a>}{sessionState === "ready" && <a className="admin-signup__signin" href="#/overview">{t("admin.signInFailed.back")}</a>}</section></main>;
 }
 
 function AccessScreen({ state }: { state: "loading" | "unauthenticated" | "error" | "scope" | "review" | "rejected" }) {
@@ -126,6 +138,7 @@ function ProductionRoutes() {
     <Route element={<RetentionControlPage />} path="/retention" />
     <Route element={<MigrationControlPage />} path="/migrations" />
     <Route element={<SignupReviewsPage />} path="/signup-reviews" />
+    <Route element={<ReportsPage />} path="/reports" />
     <Route element={<Navigate replace to="/overview" />} path="*" />
   </Routes>;
 }
@@ -148,6 +161,7 @@ function AdminApplication() {
       admin.can("dashboard:read") && { label: t("nav.overview"), href: "#/overview", icon: LayoutDashboard, active: active("/overview"), keywords: ["dashboard"] },
       admin.can("payments:read") && { label: t("nav.intents"), href: "#/intents", icon: CircleDollarSign, active: active("/intents"), keywords: ["orders"] },
       admin.can("payments:read") && { label: t("nav.transfers"), href: "#/transfers", icon: Blocks, active: active("/transfers"), keywords: ["transactions"] },
+      admin.can("payments:read") && { label: t("reports.nav"), href: "#/reports", icon: FileSpreadsheet, active: active("/reports"), keywords: ["accounting", "export", "xlsx"] },
       admin.can("unmatched:read") && { label: t("nav.unmatched"), href: "#/unmatched", icon: Fingerprint, active: active("/unmatched"), keywords: ["review"] },
       admin.can("payment_links:read") && { label: t("nav.paymentLinks"), href: "#/payment-links", icon: Link2, active: active("/payment-links") }
   ].filter(Boolean) as ShellNavGroup["items"];
@@ -172,6 +186,7 @@ function AdminApplication() {
   const navGroups = [operations.length && { label: t("nav.operations"), items: operations }, financial.length && { label: t("financial.cabinet"), items: financial }, settings.length && { label: t("nav.settings"), items: settings }, infrastructure.length && !admin.scope?.merchantId && { label: t("common.platform"), items: infrastructure, collapsible: true }].filter(Boolean) as ShellNavGroup[];
 
   if (!admin.preview && location.pathname === "/signup" && admin.client) return <SignupPage client={admin.client} locale={locale} />;
+  if (!admin.preview && location.pathname === "/sign-in-failed") return <SignInFailedScreen reason={new URLSearchParams(location.search).get("reason")} />;
   if (!admin.preview && location.pathname === "/invite") return <Suspense fallback={<div aria-busy="true" className="admin-route-loading"><span /><span /><span /></div>}><InvitationAcceptPage /></Suspense>;
   if (admin.sessionState === "loading") return <AccessScreen state="loading" />;
   if (admin.sessionState === "unauthenticated") return <AccessScreen state="unauthenticated" />;

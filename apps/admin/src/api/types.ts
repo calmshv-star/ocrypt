@@ -21,6 +21,8 @@ export type Permission =
 
 export type AdminScope = { tenantId: string; merchantId?: string };
 export type AdminPrincipal = { user_id: string; session_id: string; display_name: string; email?: string; roles: string[]; permissions: Permission[]; scopes: Array<{tenant_id?:string;merchant_id?:string}>; acr?:string; amr:string[]; step_up_until?:string; signup_review?:"pending"|"rejected" };
+export type DailyTotal = { day:string; currency:string; currency_scale:number; paid_count:number; paid_amount_minor:string };
+export type DailyTotalsReport = { from:string; to:string; time_zone:string; data:DailyTotal[] };
 export type SignupReviewReason = "domain_match" | "ip_region" | "ip_region_unknown" | "name_match" | "screening_list_stale";
 export type SignupReview = { merchant_id:string; tenant_id:string; company_name:string; country:string; business_type:string; website?:string; email:string; display_name:string; ip_region?:string; reasons:SignupReviewReason[]; matches:Array<{source:string;kind:"name"|"domain";reference:string}>; screened_at:string };
 export type Page<T> = { items: T[]; next_cursor?: string };

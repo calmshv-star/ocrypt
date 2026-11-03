@@ -154,6 +154,38 @@ describe("hosted checkout", () => {
     }
   });
 
+  it("tells the payer how expensive each network usually is before choosing (CHK-1)", async () => {
+    vi.stubEnv("VITE_CHECKOUT_FIXTURE_MODE", "false"); vi.stubEnv("VITE_CHECKOUT_API_URL", "https://merchant-api.example");
+    const base = session("pending", "");
+    const named = { ...base, routes: [{ ...base.routes[0]!, network_name: "TRON", asset_symbol: "USDT" }, { ...base.routes[1]!, network_name: "Ethereum", asset_symbol: "USDC" }, { ...base.routes[1]!, id: "10000000-0000-4000-8000-0000000000b3", network: "eip155:56", network_name: "BNB Smart Chain", asset: "usdt-bsc", asset_symbol: "USDT" }] };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(named)));
+    window.history.replaceState({}, "", `/checkout?token=${csToken}`);
+    renderCheckout();
+    const select = await screen.findByRole("combobox", { name: "Select a payment route" });
+    expect(Array.from((select as HTMLSelectElement).options).map((option) => option.textContent)).toEqual([
+      "TRON · USDT · medium network fee",
+      "Ethereum · USDC · high network fee",
+      "BNB Smart Chain · USDT · low network fee"
+    ]);
+    expect(screen.getByTestId("network-fee-tier")).toHaveTextContent(/noticeable fee/);
+  });
+
+  it("counts down to the selected route's own deadline and stops when final (CHK-3)", async () => {
+    vi.stubEnv("VITE_CHECKOUT_FIXTURE_MODE", "false"); vi.stubEnv("VITE_CHECKOUT_API_URL", "https://merchant-api.example");
+    const base = session("pending", routeTwo);
+    const routeEnds = new Date(Date.now() + 10 * 60_000).toISOString();
+    const long = { ...base, expires_at: new Date(Date.now() + 2 * 3600_000).toISOString(), routes: [base.routes[0]!, { ...base.routes[1]!, expires_at: routeEnds }] };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(long)));
+    window.history.replaceState({}, "", `/checkout?token=${csToken}`);
+    const view = renderCheckout();
+    expect(await screen.findByTestId("payment-timer")).toHaveTextContent(/Amount locked for (09|10):[0-5][0-9]/);
+    view.unmount();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ ...session("settled", routeTwo), routes: [base.routes[0]!, { ...base.routes[1]!, expires_at: routeEnds }] })));
+    renderCheckout();
+    await screen.findByTestId("payment-amount");
+    expect(screen.queryByTestId("payment-timer")).not.toBeInTheDocument();
+  });
+
   it("uses canonical EVM chain identifiers for the transaction explorer", async () => {
     vi.stubEnv("VITE_CHECKOUT_FIXTURE_MODE", "false");
     vi.stubEnv("VITE_CHECKOUT_API_URL", "https://merchant-api.example");

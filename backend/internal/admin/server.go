@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -141,6 +142,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /admin/v1/overview", s.authenticated(http.HandlerFunc(s.overview)))
 	s.mux.Handle("GET /admin/v1/intents", s.authenticated(http.HandlerFunc(s.intents)))
 	s.mux.Handle("GET /admin/v1/transfers", s.authenticated(http.HandlerFunc(s.transfers)))
+	s.mux.Handle("GET /admin/v1/reports/daily-totals", s.authenticated(http.HandlerFunc(s.dailyTotals)))
 	s.mux.Handle("GET /admin/v1/unmatched", s.authenticated(http.HandlerFunc(s.unmatched)))
 	s.mux.Handle("GET /admin/v1/webhooks/endpoints", s.authenticated(s.managementHandler(PermissionWebhookSettingsRead, false)))
 	s.mux.Handle("POST /admin/v1/webhooks/endpoints", s.authenticated(s.mutating(s.managementHandler(PermissionWebhookSettingsWrite, true))))
@@ -669,23 +671,38 @@ func (s *Server) stepUp(w http.ResponseWriter, request *http.Request) {
 	http.Redirect(w, request, location, http.StatusSeeOther)
 }
 
+// callback finishes a browser navigation from the identity provider. A
+// failure redirects to a cabinet page with one generic reason instead of
+// showing a JSON problem; details stay in the server log.
 func (s *Server) callback(w http.ResponseWriter, request *http.Request) {
-	if request.URL.Query().Get("error") != "" {
-		writeProblem(w, http.StatusUnauthorized, "identity_provider_rejected", "Identity provider authentication failed.")
+	if providerError := request.URL.Query().Get("error"); providerError != "" {
+		// Unauthenticated input: log only a known OAuth/OIDC error code.
+		code := "other"
+		if oauthErrorCodes[providerError] {
+			code = providerError
+		}
+		slog.Warn("admin authentication rejected by identity provider", "error", code)
+		reason := "provider"
+		if providerError == "access_denied" {
+			reason = "cancelled"
+		}
+		s.callbackFailed(w, request, reason)
 		return
 	}
 	correlation, ok := uniqueCookie(request, oidcCookieName)
 	state := request.URL.Query().Get("state")
 	if !ok || len(state) < 43 || !tokenMatches(tokenHash(correlation), state) {
 		slog.Warn("admin authentication correlation rejected", "cookie_present", ok, "state_length", len(state))
-		writeProblem(w, http.StatusUnauthorized, "authentication_failed", "Authentication failed.")
+		s.callbackFailed(w, request, "expired")
 		return
 	}
+	// Only a callback that matches this browser's correlation may end it; a
+	// stale callback from another tab leaves an in-flight sign-in alone.
 	s.clearOIDCCookie(w)
 	authenticated, returnPath, err := s.service.CompleteCallback(request.Context(), state, request.URL.Query().Get("code"))
 	if err != nil {
 		slog.Warn("admin authentication callback rejected", "error", err)
-		writeProblem(w, statusFor(err), "authentication_failed", "Authentication failed.")
+		s.callbackFailed(w, request, callbackFailureReason(err))
 		return
 	}
 	s.setCookies(w, *authenticated.Tokens, authenticated.Session.AbsoluteExpiresAt)
@@ -693,6 +710,33 @@ func (s *Server) callback(w http.ResponseWriter, request *http.Request) {
 		returnPath = "/"
 	}
 	http.Redirect(w, request, returnPath, http.StatusSeeOther)
+}
+
+func (s *Server) callbackFailed(w http.ResponseWriter, request *http.Request, reason string) {
+	http.Redirect(w, request, "/#/sign-in-failed?reason="+reason, http.StatusSeeOther)
+}
+
+// RFC 6749 section 4.1.2.1 and OpenID Connect Core section 3.1.2.6 codes.
+var oauthErrorCodes = map[string]bool{
+	"invalid_request": true, "unauthorized_client": true, "access_denied": true, "unsupported_response_type": true,
+	"invalid_scope": true, "server_error": true, "temporarily_unavailable": true, "interaction_required": true,
+	"login_required": true, "account_selection_required": true, "consent_required": true, "invalid_request_uri": true,
+	"invalid_request_object": true, "request_not_supported": true, "request_uri_not_supported": true, "registration_not_supported": true,
+}
+
+// callbackFailureReason maps a callback error to the reason the sign-in
+// page explains: what the person can do next, never why exactly it failed.
+func callbackFailureReason(err error) string {
+	switch {
+	case errors.Is(err, ErrStepUpRequired):
+		return "mfa"
+	case errors.Is(err, ErrForbidden):
+		return "not_allowed"
+	case errors.Is(err, ErrUnauthenticated):
+		return "expired"
+	default:
+		return "failed"
+	}
 }
 
 func (s *Server) setOIDCCookie(w http.ResponseWriter, value string) {
@@ -768,6 +812,36 @@ func (s *Server) overview(w http.ResponseWriter, request *http.Request) {
 	}
 	value, err := s.repository.Overview(request.Context(), auth.Principal, scope)
 	respond(w, value, err)
+}
+
+var (
+	reportDayPattern  = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
+	reportZonePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$`)
+)
+
+// dailyTotals is the accounting report: paid intents per payment day and
+// currency between two inclusive dates, at most 366 days, in one time zone.
+func (s *Server) dailyTotals(w http.ResponseWriter, request *http.Request) {
+	auth, scope, ok := s.authorize(w, request, PermissionPaymentsRead)
+	if !ok {
+		return
+	}
+	query := request.URL.Query()
+	zone := query.Get("time_zone")
+	if zone == "" {
+		zone = "UTC"
+	}
+	from, fromErr := time.Parse(time.DateOnly, query.Get("from"))
+	to, toErr := time.Parse(time.DateOnly, query.Get("to"))
+	if !reportDayPattern.MatchString(query.Get("from")) || !reportDayPattern.MatchString(query.Get("to")) || fromErr != nil || toErr != nil || from.Year() < 2000 || to.Before(from) || to.Sub(from) > 365*24*time.Hour || len(zone) > 64 || !reportZonePattern.MatchString(zone) {
+		respond[any](w, nil, ErrInvalid)
+		return
+	}
+	rows, err := s.repository.DailyTotals(request.Context(), auth.Principal, scope, query.Get("from"), query.Get("to"), zone)
+	if rows == nil {
+		rows = []DailyTotal{}
+	}
+	respond(w, map[string]any{"from": query.Get("from"), "to": query.Get("to"), "time_zone": zone, "data": rows}, err)
 }
 
 func (s *Server) intents(w http.ResponseWriter, request *http.Request) {

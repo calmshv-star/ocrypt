@@ -54,6 +54,7 @@ func TestCheckoutProjectionReadsDurableAggregateAndFrozenPolicy(t *testing.T) {
 		"binding.policy_snapshot->>'accumulate_partials'",
 		"binding.policy_snapshot->>'accept_late_within_grace'",
 		"collectionDeadline.After(now)",
+		"route.ExpiresAt = &deadline",
 	} {
 		if !strings.Contains(text, marker) {
 			t.Fatalf("checkout progress is missing durable safety marker %q", marker)
