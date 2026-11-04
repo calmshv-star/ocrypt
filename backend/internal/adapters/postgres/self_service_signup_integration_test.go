@@ -123,6 +123,25 @@ WHERE m.admin_user_id=$1 AND m.merchant_id=$2 AND m.status='active' AND b.role_k
 	if _, _, n := ownerGrants(faultID(t)); n != 0 {
 		t.Fatalf("an unknown admin user received %d owner grants", n)
 	}
+	// The management API checks its actor in the database too (payment
+	// links, API clients, audit rows); the projected owner must pass there
+	// for its own permissions only.
+	managementActor := func(userID, permission string) bool {
+		t.Helper()
+		var allowed bool
+		if err := f.admin.QueryRow(f.ctx, `SELECT validate_management_actor($1,$2,$3,$4)`, userID, tenant, merchant, permission).Scan(&allowed); err != nil {
+			t.Fatal(err)
+		}
+		return allowed
+	}
+	for _, permission := range []string{"payment_links:write", "api_clients:write", "api_clients:revoke", "webhook_settings:write", "checkout:write"} {
+		if !managementActor(user, permission) {
+			t.Fatalf("the self-service owner must pass the management actor check for %s", permission)
+		}
+	}
+	if managementActor(user, "matching_policy:write") || managementActor(faultID(t), "payment_links:write") {
+		t.Fatal("the management actor check must not widen owner permissions or accept unknown users")
+	}
 	if _, err := f.admin.Exec(f.ctx, `INSERT INTO admin_role_bindings(id,user_id,role_key,tenant_id,merchant_id,granted_at,reason) VALUES($1,$2,'merchant_owner',$3,$4,$5,'forged')`, faultID(t), user, tenant, merchant, now); err == nil || !strings.Contains(err.Error(), "admin_role_binding_not_merchant_owner") {
 		t.Fatalf("a stored merchant_owner binding must be refused: %v", err)
 	}
@@ -130,6 +149,9 @@ WHERE m.admin_user_id=$1 AND m.merchant_id=$2 AND m.status='active' AND b.role_k
 	faultExec(t, f.ctx, f.admin, `UPDATE merchants SET status='disabled' WHERE id=$1`, merchant)
 	if _, _, n := ownerGrants(user); n != 0 {
 		t.Fatalf("a disabled merchant kept %d owner grants", n)
+	}
+	if managementActor(user, "payment_links:write") {
+		t.Fatal("a disabled merchant's owner must fail the management actor check")
 	}
 	faultExec(t, f.ctx, f.admin, `UPDATE merchants SET status='active' WHERE id=$1`, merchant)
 	// A co-owner added through the team flow gets the same grants; the
@@ -144,6 +166,9 @@ WHERE m.admin_user_id=$1 AND m.merchant_id=$2 AND m.status='active' AND b.role_k
 	faultExec(t, f.ctx, f.admin, `UPDATE merchant_member_role_bindings SET revoked_at=$2 WHERE member_id IN (SELECT id FROM merchant_members WHERE admin_user_id=$1) AND role_key='owner'`, user, now)
 	if _, _, n := ownerGrants(user); n != 0 {
 		t.Fatalf("a removed owner kept %d owner grants", n)
+	}
+	if managementActor(user, "payment_links:write") || !managementActor(coOwner, "payment_links:write") {
+		t.Fatal("the management actor check must follow the owner role")
 	}
 	if n := f.count(t, `SELECT count(*) FROM admin_role_permissions WHERE role_key='merchant_owner' AND (permission_key LIKE 'infrastructure:%' OR permission_key LIKE 'financial:%' OR permission_key LIKE 'platform_%' OR permission_key LIKE 'provider_%')`); n != 0 {
 		t.Fatalf("merchant owner must not hold platform or custody permissions, found %d", n)

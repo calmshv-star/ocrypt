@@ -59,7 +59,7 @@ export function OnboardingPage() {
   const { t } = useI18n();
   const { steps, done } = useOnboardingSteps();
   return <div className="admin-page" data-testid="onboarding-page">
-    <PageHeader description={t("onboarding.body")} eyebrow={<><Sparkles size={13} />{t("onboarding.nav")}</>} title={t("onboarding.title")} />
+    <PageHeader actions={<a className="mp-button mp-button--primary mp-button--md" href="#/setup">{t("wizard.open")}</a>} description={t("onboarding.body")} eyebrow={<><Sparkles size={13} />{t("onboarding.nav")}</>} title={t("onboarding.title")} />
     <p aria-live="polite" className="onboarding__progress"><progress max={steps.length} value={done} /><span>{t("onboarding.progress", { done, total: steps.length })}</span></p>
     <ol className="onboarding__steps">{steps.map((step) => {
       const Icon = step.icon;

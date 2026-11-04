@@ -69,12 +69,12 @@ function MutationNotice({ notice }: { notice:Notice }) {
   </div>;
 }
 
-function SecretPanel({ kind, secret, keyId, publicURL, onClear }: { kind:"credential"|"link";secret?:string;keyId?:string;publicURL?:string;onClear:()=>void }) {
+export function SecretPanel({ kind, secret, keyId, publicURL, onClear, titleId = "one-time-value-title" }: { kind:"credential"|"link";secret?:string;keyId?:string;publicURL?:string;onClear:()=>void;titleId?:string }) {
   const { t } = useI18n();
   const value = publicURL ?? secret ?? "";
   const [copied, setCopied] = useState(false);
-  return <section aria-labelledby="one-time-value-title" className="admin-secret-panel" data-testid="one-time-value">
-    <div><Badge tone="warning">{t("management.oneTime")}</Badge><h2 id="one-time-value-title">{t(kind === "link" ? "management.savePublicURL" : "management.saveSecret")}</h2></div>
+  return <section aria-labelledby={titleId} className="admin-secret-panel" data-testid="one-time-value">
+    <div><Badge tone="warning">{t("management.oneTime")}</Badge><h2 id={titleId}>{t(kind === "link" ? "management.savePublicURL" : "management.saveSecret")}</h2></div>
     <p>{t("management.oneTimeBody")}</p>
     {keyId && <dl><div><dt>{t("management.keyId")}</dt><dd><code>{keyId}</code></dd></div></dl>}
     <output aria-label={t(kind === "link" ? "management.publicURL" : "management.secret")} tabIndex={0}><code>{value}</code></output>

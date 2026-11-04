@@ -49,6 +49,7 @@ const ProviderConfigurationPage = lazy(() => import("./ProviderConfigurationPage
 const RetentionControlPage = lazy(() => import("./RetentionControlPage").then((module) => ({ default: module.RetentionControlPage })));
 const OnboardingPage = lazy(() => import("./OnboardingPage").then((module) => ({ default: module.OnboardingPage })));
 const GoLivePage = lazy(() => import("./GoLivePage").then((module) => ({ default: module.GoLivePage })));
+const SetupWizardPage = lazy(() => import("./SetupWizardPage").then((module) => ({ default: module.SetupWizardPage })));
 const SanctionsAlertsPage = lazy(() => import("./SanctionsAlertsPage").then((module) => ({ default: module.SanctionsAlertsPage })));
 const NotificationsPage = lazy(() => import("./NotificationsPage").then((module) => ({ default: module.NotificationsPage })));
 const SecurityPage = lazy(() => import("./SecurityPage").then((module) => ({ default: module.SecurityPage })));
@@ -170,6 +171,7 @@ function ProductionRoutes() {
     <Route element={<SecurityPage />} path="/security" />
     <Route element={<NotificationsPage />} path="/notifications" />
     <Route element={<SanctionsAlertsPage />} path="/sanctions-alerts" />
+    <Route element={<SetupWizardPage />} path="/setup" />
     <Route element={<Navigate replace to="/overview" />} path="*" />
   </Routes>;
 }

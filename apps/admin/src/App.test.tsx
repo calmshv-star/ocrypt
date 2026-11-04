@@ -177,7 +177,9 @@ describe("admin application", () => {
     fireEvent.change(await screen.findByRole("combobox", { name: "Language" }), { target: { value: "ru" } });
     expect(await screen.findByText("6.028692 USDT")).toBeInTheDocument();
     // The amount can render before the Russian labels do; wait for the label.
-    expect(await screen.findByText("Финализирован")).toBeInTheDocument();
+    // Under the parallel workers of the full web check this has taken more
+    // than the default 1 s.
+    expect(await screen.findByText("Финализирован", {}, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.queryByText("6028692")).not.toBeInTheDocument();
   });
 
