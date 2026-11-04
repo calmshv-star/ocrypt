@@ -108,6 +108,9 @@ type endpointClient struct {
 	rateMu  sync.Mutex
 	nextRPC time.Time
 	minWait time.Duration
+	// postponed is the earliest time a provider asked to be called again. A
+	// returned slot must not fall below it.
+	postponed time.Time
 	// maxBytes bounds one response body.
 	maxBytes int64
 }
@@ -201,6 +204,9 @@ func (c *endpointClient) waitForRateLimit(ctx context.Context) error {
 		c.rateMu.Lock()
 		if c.nextRPC.Equal(reserved) {
 			c.nextRPC = slot
+			if c.postponed.After(slot) {
+				c.nextRPC = c.postponed
+			}
 		}
 		c.rateMu.Unlock()
 		return ctx.Err()
@@ -215,6 +221,9 @@ func (c *endpointClient) postpone(delay time.Duration) {
 	}
 	deadline := time.Now().Add(delay)
 	c.rateMu.Lock()
+	if deadline.After(c.postponed) {
+		c.postponed = deadline
+	}
 	if deadline.After(c.nextRPC) {
 		c.nextRPC = deadline
 	}

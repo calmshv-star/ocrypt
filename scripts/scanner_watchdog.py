@@ -188,9 +188,10 @@ def probe(target, fetch):
         problem = "lag unknown"
     elif limit is not None and lag > limit:
         problem = "%d blocks behind (limit %d)" % (lag, limit)
-    elif uncredited:
-        problem = "%d internal transfer records wait for an operator" % uncredited
-    return {"ready": ready, "lag": lag, "problem": problem}
+    observation = {"ready": ready, "lag": lag, "problem": problem}
+    if uncredited is not None:
+        observation["uncredited"] = uncredited
+    return observation
 
 
 def _clean_target_state(value):
@@ -225,6 +226,20 @@ def evaluate(previous, name, observation, now, cfg):
         state["alerted_at"] = now
         return state, [dict(event, kind="repeat", bad_for=bad_for)]
     return state, []
+
+
+def uncredited_key(name):
+    return "%s (internal transfers)" % name
+
+
+def evaluate_uncredited(previous, name, count, now, cfg):
+    """Keep records apart from scanner health: rows can stay open for days, and
+    they must not hide a new outage. An unknown count changes nothing."""
+    key = uncredited_key(name)
+    if count is None:
+        return _clean_target_state(previous), []
+    problem = "has %d records waiting for an operator" % count if count else None
+    return evaluate(previous, key, {"problem": problem, "lag": None}, now, cfg)
 
 
 def format_message(event):
@@ -296,7 +311,7 @@ def run_once(cfg, now, fetch=http_fetch, post=http_post):
     gap = max(2 * cfg["alert_after_seconds"], 600)
     unobserved = previous["last_run"] is not None and (now - previous["last_run"] > gap or now < previous["last_run"])
     targets, status, messages = {}, [], []
-    configured = {target["name"] for target in cfg["targets"]}
+    configured = {target["name"] for target in cfg["targets"]} | {uncredited_key(target["name"]) for target in cfg["targets"]}
     for target in cfg["targets"]:
         name = target["name"]
         before = previous["targets"].get(name, {"bad_since": None, "alerted_at": None})
@@ -308,6 +323,9 @@ def run_once(cfg, now, fetch=http_fetch, post=http_post):
         except Exception:  # noqa: BLE001 - one bad target must not stop the others
             observation = {"ready": False, "lag": None, "problem": "unreachable"}
         targets[name], events = evaluate(before, name, observation, now, cfg)
+        messages.extend(format_message(event) for event in events)
+        key = uncredited_key(name)
+        targets[key], events = evaluate_uncredited(previous["targets"].get(key), name, observation.get("uncredited"), now, cfg)
         messages.extend(format_message(event) for event in events)
         down = observation["problem"] is not None
         status.append({

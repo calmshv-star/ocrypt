@@ -46,16 +46,38 @@ def test_parse_lag_reads_only_the_scanner_lag_gauge():
     assert module.parse_lag("merchant_scanner_head_lag_blocks{service=\"scanner\"} not-a-number\n") is None
 
 
-def test_probe_reports_uncredited_internal_transfers_on_a_healthy_scanner():
+UNCREDITED = 'merchant_scanner_head_lag_blocks{service="scanner"} 5\nmerchant_scanner_unattributed_open{service="scanner"} 2\n'
+
+
+def test_probe_reads_uncredited_records_apart_from_scanner_health():
     target = {"name": "ethereum", "url": "http://scanner-ethereum:9091", "max_lag_blocks": None}
-    metrics = 'merchant_scanner_head_lag_blocks{service="scanner"} 5\nmerchant_scanner_unattributed_open{service="scanner"} 2\n'
-    fetch = fake_fetch({target["url"] + "/readyz": (200, ""), target["url"] + "/metrics": (200, metrics)})
+    fetch = fake_fetch({target["url"] + "/readyz": (200, ""), target["url"] + "/metrics": (200, UNCREDITED)})
     observation = module.probe(target, fetch)
-    assert observation["ready"] is True
-    assert observation["problem"] == "2 internal transfer records wait for an operator"
-    clean = metrics.replace("} 2", "} 0")
-    fetch = fake_fetch({target["url"] + "/readyz": (200, ""), target["url"] + "/metrics": (200, clean)})
-    assert module.probe(target, fetch)["problem"] is None
+    assert observation["ready"] is True and observation["problem"] is None and observation["uncredited"] == 2
+    fetch = fake_fetch({target["url"] + "/readyz": (200, ""), target["url"] + "/metrics": (500, "")})
+    assert "uncredited" not in module.probe(target, fetch)
+
+
+def test_open_records_alert_alone_and_do_not_hide_an_outage(tmp_path):
+    cfg = config(tmp_path, targets=[{"name": "ethereum", "url": "http://scanner-ethereum:9091"}])
+    sent = []
+    post = lambda url, payload, timeout: sent.append(payload["text"]) or (200, "")
+    def tick(now, ready=(200, ""), metrics=(200, UNCREDITED)):
+        module.run_once(cfg, now, fake_fetch({"http://scanner-ethereum:9091/readyz": ready, "http://scanner-ethereum:9091/metrics": metrics}), post)
+    tick(1000)
+    tick(1300)
+    assert len(sent) == 1 and "ethereum (internal transfers)" in sent[0] and "2 records" in sent[0]
+    tick(4000)
+    down = (503, "")
+    tick(4100, ready=down)
+    tick(4400, ready=down)
+    assert "ocrypt ALERT: scanner ethereum not ready" in sent[-1], sent
+    # An unknown count is neither a recovery nor a new alert.
+    count = len(sent)
+    tick(4500, ready=down, metrics=(500, ""))
+    assert len(sent) == count
+    tick(4600, metrics=(200, UNCREDITED.replace("} 2", "} 0")))
+    assert "recovered" in sent[-1] and "internal transfers" in sent[-1]
 
 
 def test_probe_classifies_ready_not_ready_and_unreachable():

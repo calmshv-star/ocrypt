@@ -95,17 +95,30 @@ agent assumptions. Amend the specification when accepted behavior changes.
 19. **A lease, not one lane per replica.** The chart runs two scanner replicas, and
     each would spend the same providers' quota. Double credit was never possible;
     the version and the event identity already prevent it.
-20. **Failure costs one range, one provider.** A provider that failed sits out the
+20. **Failure costs one block, one provider.** A provider that failed sits out the
     rest of the range, so a hung one cannot use up a step at one timeout per
     wallet. Pages grow back after a shrink and a block has a request budget, so
-    frames over the limit cannot pace the lane at one frame per request. A range
-    that runs out of time halves, so one heavy block does not cost 32.
+    frames over the limit cannot pace the lane at one frame per request. A failed
+    range halves what is left until the cursor passes it, for any failure, so one
+    bad block costs itself and is found in a few tries wherever it sits.
 21. **Balance reads stop at 8 wallets**, not 16: at 16 a range costs over 200
     requests and a fast chain outruns it.
 22. **Alerts must reach someone.** No shipped configuration scraped the scanner.
     The local Prometheus now does, the standalone watchdog reads the open-rows
     gauge, and the alert is on that gauge, because a counter's increase clears
-    while the row stays open. A Kubernetes install has to add the scrape.
+    while the row stays open. In the watchdog this is a separate alarm, so a row
+    open for days cannot delay a new outage. A Kubernetes install has to add the
+    scrape and apply the rules by hand.
+
+## 2026-11-04 — after the fourth review
+
+23. **What either provider cannot read is dropped on both, for blocks.** Providers cap
+    pages differently, so a crafted block can use up one provider's request budget
+    while the other reads it. Waiting for agreement would stall the lane for
+    nothing; the block is recorded. A call tree over the size limit stays different:
+    it fails on both providers, so failing on one points to that provider and is
+    retried. The cost of this choice: one provider can drop a block, but not
+    silently, because the block is recorded.
 
 Known limits, recorded for the owner: a route's `required_finality` above the
 chain's current policy can leave a lane transfer unsettled until a rewind; whether

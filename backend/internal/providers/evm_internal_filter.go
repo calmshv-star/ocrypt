@@ -245,8 +245,14 @@ func (s *EVMInternalFilter) ScanRange(ctx context.Context, from, to uint64) (sca
 		}
 		traces[index] = internalTraceResult{confirmed: confirmed, tooLarge: tooLarge, oversized: oversized}
 	}
-	// A transaction built to exceed a limit does so on both providers. On one of
-	// them it is that provider's fault, so the range is retried.
+	// Providers cap pages differently, so one can run out of its request budget
+	// on a block the other reads. Either way that block is not proved by both.
+	oversized := mergedSpans(traces[0].oversized, traces[1].oversized)
+	for index := range traces {
+		traces[index] = traces[index].outside(oversized)
+	}
+	// A transaction built to exceed the size limit does so on both providers. On
+	// one of them it is that provider's fault, so the range is retried.
 	if !reflect.DeepEqual(traces[0], traces[1]) {
 		return scanner.RangeBatch{}, errors.New("independent internal trace providers disagree")
 	}
@@ -331,7 +337,7 @@ func (s *EVMInternalFilter) ScanRange(ctx context.Context, from, to uint64) (sca
 		batch.Unattributed = append(batch.Unattributed, scanner.UnattributedInflow{Address: candidate.To, FromHeight: candidate.Height, ToHeight: candidate.Height,
 			TransactionID: candidate.TransactionHash, Reason: scanner.UnattributedCallTree})
 	}
-	for _, span := range traces[0].oversized {
+	for _, span := range oversized {
 		batch.Unattributed = append(batch.Unattributed, scanner.UnattributedInflow{FromHeight: span.from, ToHeight: span.to, Reason: scanner.UnattributedTraces})
 	}
 	sort.Slice(batch.Events, func(i, j int) bool {
@@ -345,6 +351,36 @@ func (s *EVMInternalFilter) ScanRange(ctx context.Context, from, to uint64) (sca
 		return left.Identity.EventIndex < right.Identity.EventIndex
 	})
 	return batch, nil
+}
+
+func mergedSpans(first, second []internalTraceSpan) []internalTraceSpan {
+	seen := make(map[internalTraceSpan]bool, len(first)+len(second))
+	merged := make([]internalTraceSpan, 0, len(first)+len(second))
+	for _, span := range append(append([]internalTraceSpan(nil), first...), second...) {
+		if !seen[span] {
+			seen[span] = true
+			merged = append(merged, span)
+		}
+	}
+	sort.Slice(merged, func(i, j int) bool { return merged[i].from < merged[j].from })
+	return merged
+}
+
+func (r internalTraceResult) outside(spans []internalTraceSpan) internalTraceResult {
+	keep := func(candidates []internalTraceCandidate) []internalTraceCandidate {
+		kept := make([]internalTraceCandidate, 0, len(candidates))
+	candidates:
+		for _, candidate := range candidates {
+			for _, span := range spans {
+				if candidate.Height >= span.from && candidate.Height <= span.to {
+					continue candidates
+				}
+			}
+			kept = append(kept, candidate)
+		}
+		return kept
+	}
+	return internalTraceResult{confirmed: keep(r.confirmed), tooLarge: keep(r.tooLarge)}
 }
 
 func (s *EVMInternalFilter) scanBase(ctx context.Context, from, to uint64) (scanner.RangeBatch, error) {
@@ -398,6 +434,9 @@ func (s *EVMInternalFilter) verifyReceipt(ctx context.Context, candidate interna
 		if confirmed++; confirmed == 2 {
 			return nil
 		}
+	}
+	if lastErr == nil {
+		lastErr = errors.New("too few providers left")
 	}
 	return fmt.Errorf("internal transaction receipt needs two providers: %w", lastErr)
 }

@@ -26,7 +26,7 @@ snapshot with the helper before assigning implementation workers.
   - Ethereum, `docs-demo.quiknode.pro` + `eth.drpc.org`: passed on a real exchange withdrawal (`trace:11`, 0.025067 ETH). `eth.merkle.io` hit 429 on balance reads.
   - Base, `docs-demo.base-mainnet.quiknode.pro`: `trace_filter` worked. `base.drpc.org` answered 408; `base.merkle.io` answered `trace_filter` and then 429 on `trace_transaction`. No pair was completed, so Base is not in the catalog.
   - Optimism, `docs-demo.optimism.quiknode.pro` + `optimism.drpc.org`: both answered `trace_filter` on a current block and returned the same 16-frame `trace_transaction`. No real payment was checked.
-  - The Ethereum check was repeated on the lane version and passed again.
+  - The Ethereum check was repeated on the final code (commit e0fee2f) and passed again.
 
 ## Resume / next action
 
@@ -34,8 +34,10 @@ The first independent review found stop-the-chain paths, so detection moved to i
 own lane. The second found false credits across a reorg, a stuck give-up, a
 shared limiter and memory exhaustion, all fixed; see DECISIONS.md 13-17. The third
 found a silent skip after a reorg, a lane with no lease, slow-path stalls and
-alerts nothing could fire, all fixed; see DECISIONS.md 18-22. Mutation runs over
-the new guards found the tests that proved too little, and tests were added.
+alerts nothing could fire, all fixed; see DECISIONS.md 18-22. A fourth, focused on
+the last commit, found no High issue; its findings are fixed too (DECISIONS.md 20,
+22, 23). Mutation runs over the new guards found the tests that proved too little,
+and tests were added.
 Remaining limits: customer receipts for internal transfers; the
 limits listed at the end of DECISIONS.md; no public pair for Base, Arbitrum,
 Polygon, Avalanche, BSC or Plasma. Nothing here is deployed.

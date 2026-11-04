@@ -75,7 +75,9 @@ type InternalLane struct {
 
 	failingFrom  uint64
 	failingSince time.Time
-	narrowed     uint64
+	// suspectTo ends the last range that failed. Until the cursor passes it, the
+	// lane halves what is left, which finds one bad block in a few tries.
+	suspectTo uint64
 }
 
 const (
@@ -90,20 +92,18 @@ func (l *InternalLane) RunOnce(ctx context.Context, plan InternalPlan) (bool, er
 	if l.Store == nil || l.RangeSize == 0 || l.GiveUpAfter <= 0 || l.Owner == "" || l.LeaseDuration <= 0 {
 		return false, errors.New("invalid internal lane configuration")
 	}
-	if plan.Paused {
-		// Time spent paused is not time spent failing.
-		l.failingSince = time.Time{}
-		return false, nil
-	}
-	if plan.Source == nil && !plan.Idle {
-		return false, nil
-	}
+	// The count must stay true while the lane waits: an operator relies on it.
 	progress, err := l.Store.InternalProgress(ctx, l.ChainID, l.Shard)
 	if err != nil {
 		return false, err
 	}
 	if l.Observer != nil {
 		l.Observer.SetScannerUnattributedOpen(progress.OpenFindings)
+	}
+	if plan.Paused || (plan.Source == nil && !plan.Idle) {
+		// Time spent waiting is not time spent failing.
+		l.failingSince = time.Time{}
+		return false, nil
 	}
 	if !progress.HasScanned || progress.Scanned < l.Hold {
 		return false, nil
@@ -120,12 +120,16 @@ func (l *InternalLane) RunOnce(ctx context.Context, plan InternalPlan) (bool, er
 	}
 	l.observeLag(upper - progress.Cursor)
 	claimed, err := l.Store.ClaimInternal(ctx, l.ChainID, l.Shard, l.Owner, l.LeaseDuration)
-	if err != nil || !claimed {
+	if err != nil {
 		return false, err
 	}
+	if !claimed {
+		l.failingSince = time.Time{}
+		return false, nil
+	}
 	from, size := progress.Cursor+1, l.RangeSize
-	if l.narrowed > 0 && l.failingFrom == from {
-		size = l.narrowed
+	if from <= l.suspectTo {
+		size = max(1, (l.suspectTo-from+1)/2)
 	}
 	to := min(progress.Cursor+size, upper)
 	commit := InternalCommit{ChainID: l.ChainID, Shard: l.Shard, From: from, To: to, Version: progress.Version}
@@ -133,10 +137,7 @@ func (l *InternalLane) RunOnce(ctx context.Context, plan InternalPlan) (bool, er
 		batch, scanErr := plan.Source.ScanRange(ctx, from, to)
 		if scanErr != nil {
 			if !l.exhausted(from) {
-				// A range too slow for one step may fit in a smaller one.
-				if ctx.Err() != nil {
-					l.narrowed = max(1, size/2)
-				}
+				l.suspectTo = to
 				return false, scanErr
 			}
 			commit.Unattributed = []UnattributedInflow{{FromHeight: from, ToHeight: to, Reason: UnattributedGaveUp}}
@@ -161,7 +162,7 @@ func (l *InternalLane) RunOnce(ctx context.Context, plan InternalPlan) (bool, er
 	if err != nil {
 		return false, err
 	}
-	l.failingSince, l.narrowed = time.Time{}, 0
+	l.failingSince = time.Time{}
 	if l.Observer != nil && recorded > 0 {
 		l.Observer.AddScannerUnattributed(recorded)
 	}
@@ -175,7 +176,7 @@ func (l *InternalLane) exhausted(from uint64) bool {
 		now = l.Now().UTC()
 	}
 	if l.failingSince.IsZero() || l.failingFrom != from {
-		l.failingFrom, l.failingSince, l.narrowed = from, now, 0
+		l.failingFrom, l.failingSince = from, now
 	}
 	return now.Sub(l.failingSince) >= l.GiveUpAfter
 }

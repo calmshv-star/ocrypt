@@ -44,14 +44,15 @@ Facts found in the code:
 3. A frame under a reverted ancestor, a self-transfer, or a delegatecall,
    callcode or staticcall frame is not credited and does not stop the lane.
 4. An incomplete tree, a frame the tree does not contain, a provider error or a
-   disagreement keeps the lane's cursor. After 30 minutes on one range the lane
-   records the range and moves on.
-5. What cannot be read on both providers (a trace over 8 MiB, more than 256
-   transfers in a transaction, too many frames in a block) and a balance increase
-   that agreed traces do not explain are recorded once, durably, and the lane
-   moves on. More credited money than the balance shows, on an EOA with an
-   unchanged nonce, keeps the cursor. What only one provider cannot read keeps
-   the cursor too.
+   disagreement keeps the lane's cursor. A failed range is halved until the bad
+   block is found. After 30 minutes on one range the lane records what it last
+   tried and moves on.
+5. What cannot be read (a call tree over 8 MiB on both providers, more than 256
+   transfers in a transaction, a block one provider cannot read within its request
+   budget) and a balance increase that agreed traces do not explain are recorded
+   once, durably, and the lane moves on. More credited money than the balance
+   shows, on an EOA with an unchanged nonce, keeps the cursor. A call tree that
+   only one provider cannot read keeps the cursor too.
 6. Each block is read once. Up to 8 wallets, an idle wallet costs balance reads
    only, through any two providers that agree. Above that the lane sweeps every
    range. A range waits until the trace providers pass the required confirmations.
@@ -95,7 +96,8 @@ Facts found in the code:
 | A read from before a reorg cannot commit, even below the fork; lease | live S9 |
 | Commit survives a timed-out step; budget belongs to one range; a slow range narrows | `scanner/internal_lane_test.go` |
 | A failed probe sits out the range; pages shrink and grow back; bounds in one constructor | `evm_internal_filter_test.go` |
-| Open findings reach the watchdog | `tests/unit/test_scanner_watchdog.py` |
+| Open findings alert apart from scanner health, and do not hide an outage | `tests/unit/test_scanner_watchdog.py` |
+| One bad block costs only itself, wherever it sits; waiting does not use up the budget | `scanner/internal_lane_test.go` |
 | Limiter does not hold a short deadline; confirmations from the slower provider | `evm_internal_filter_test.go` |
 | Ordinary scan never reads through trace providers | `cmd/scanner/main_test.go` |
 | Detection state reported and warned | `cmd/scanner/main_test.go` |

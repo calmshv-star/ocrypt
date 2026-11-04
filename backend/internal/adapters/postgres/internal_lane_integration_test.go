@@ -193,4 +193,11 @@ func (f *faultDatabase) internalLane(t *testing.T) {
 	if err != nil || progress.OpenFindings != 2 {
 		t.Fatalf("open findings %d: %v", progress.OpenFindings, err)
 	}
+	// The lane reads the version, then claims: a claim must not fence its owner.
+	if claimed, err = store.ClaimInternal(f.ctx, chain, shard, "replica-b", time.Minute); err != nil || !claimed {
+		t.Fatalf("claimed=%v err=%v", claimed, err)
+	}
+	if _, err := store.CommitInternal(f.ctx, scanner.InternalCommit{ChainID: chain, Shard: shard, From: progress.Cursor + 1, To: progress.Cursor + 2, Version: progress.Version}); err != nil {
+		t.Fatalf("a claim fenced its own commit: %v", err)
+	}
 }

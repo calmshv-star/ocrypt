@@ -34,20 +34,22 @@ confirmations: the lane reads a block once, so a transfer below them would stay
 unsettled.
 
 A provider error or a disagreement keeps the lane's cursor, and the lane retries.
-A provider that fails sits out the rest of the range. A range that runs out of its
-five-minute step gets smaller. After 30 minutes on one range the lane records it
-and moves on, so no single transaction can stop detection for everyone else. The
-timer lives in the process: a restart starts it again, and a pause clears it.
+A provider that fails sits out the rest of the range. A failed range is halved until
+the bad block is found, and clean blocks around it are read. After 30 minutes on one
+range the lane records what it last tried and moves on, so no single transaction
+can stop detection for everyone else. The timer lives in the process: a restart
+starts it again, and a pause clears it.
 
 ## What the lane could not credit
 
 Nothing below is credited. Each finding is one row in
 `scanner_unattributed_inflows`. These rows are the only signal of a lost payment.
-`merchant_scanner_unattributed_open` counts the open ones: the standalone scanner
-watchdog alerts on it, and so does `MerchantInternalTransferUncredited` where
-Prometheus scrapes the scanner's `/metrics` (the local profile does; a Kubernetes
-install has to add that scrape). A chain without either has no alert, so check the
-table. Look at every open row:
+`merchant_scanner_unattributed_open` counts the open ones. The standalone scanner
+watchdog alerts on it, apart from scanner health, and so does
+`MerchantInternalTransferUncredited` where Prometheus scrapes the scanner's
+`/metrics`. The local profile does. A Kubernetes install has to add that scrape and
+apply `deploy/observability/prometheus-rules.yaml` by hand: the chart ships neither.
+A chain without either has no alert, so check the table. Look at every open row:
 
 ```sql
 SELECT id,chain_id,reason,address,transaction_id,from_height,to_height,amount_atomic,first_seen_at
@@ -58,7 +60,7 @@ FROM scanner_unattributed_inflows WHERE status='open' ORDER BY first_seen_at;
 | --- | --- | --- |
 | `balance_unexplained` | An EOA with an unchanged nonce gained money that no agreed trace explains: a selfdestruct, a beacon withdrawal, or both providers missing a transfer | Compare the range in a block explorer |
 | `call_tree_too_large` | The transaction's trace exceeds 8 MiB on both providers, or it pays watched wallets more than 256 times | Check the transaction, most likely crafted. A rewind reads it the same way |
-| `traces_too_large` | One block takes more than 64 trace requests, or holds a single frame over the limit | Check the block. A rewind reads it the same way |
+| `traces_too_large` | On at least one provider, one block takes more than 64 trace requests or holds a single frame over the limit. Providers cap pages differently, so one can fail where the other reads | Check the block. A rewind reads it the same way |
 | `trace_unavailable` | The range failed for 30 minutes | Rewind the lane over the range once providers recover. If it fails the same way, check the transactions in the range by hand |
 
 Close a row by its `id`:

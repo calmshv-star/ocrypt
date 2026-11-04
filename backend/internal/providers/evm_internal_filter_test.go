@@ -892,14 +892,22 @@ func TestEVMInternalFilterRefusesWhatTheChainDoesNotConfirm(t *testing.T) {
 	})
 }
 
-func TestEVMInternalFilterOneSidedOversizeIsRetried(t *testing.T) {
+// Providers cap pages differently, so one can run out of requests on a block the
+// other reads. That block is recorded, and neither provider's reading counts.
+func TestEVMInternalFilterRecordsABlockOneProviderCouldNotRead(t *testing.T) {
 	root := internalFrame([]int{}, 1, internalTestSender, internalTestContract, "0x0", "call", "")
 	child := internalFrame([]int{0}, 0, internalTestContract, internalTestWatched, "0x5", "call", "")
 	good := internalTree{nonceEnd: "0x1", endBalance: "0x0", filter: internalJSON(t, []any{child}), tree: internalJSON(t, []any{root, child})}
 	oversized := good
 	oversized.filter = json.RawMessage(`"` + strings.Repeat("a", InternalTraceResponseLimit+1) + `"`)
-	if batch, err := internalFilterFor(t, oversized, good).ScanRange(context.Background(), 1, 1); err == nil {
-		t.Fatalf("one provider dropped a block: %+v", batch)
+	for _, pair := range [][2]internalTree{{oversized, good}, {good, oversized}} {
+		batch, err := internalFilterFor(t, pair[0], pair[1]).ScanRange(context.Background(), 1, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(batch.Events) != 0 || len(batch.Unattributed) != 1 || batch.Unattributed[0].Reason != scanner.UnattributedTraces {
+			t.Fatalf("events=%+v rows=%+v", batch.Events, batch.Unattributed)
+		}
 	}
 }
 
@@ -1143,5 +1151,127 @@ func TestRateLimitKeepsItsSpacingAndReturnsAnAbandonedSlot(t *testing.T) {
 	stop()
 	if err := client.waitForRateLimit(cancelled); !errors.Is(err, context.Canceled) || !client.nextRPC.Equal(before) {
 		t.Fatalf("a cancelled caller reserved a slot: %v", err)
+	}
+}
+
+// What a span read before it ran out of requests is discarded, not half-credited.
+func TestEVMInternalFilterDiscardsAPartlyReadSpan(t *testing.T) {
+	calls := 0
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		return 200, rpcResult(t, request, func(string, []json.RawMessage) json.RawMessage {
+			calls++
+			return internalJSON(t, []any{internalFrame([]int{calls}, 0, internalTestContract, internalTestWatched, "0x5", "call", "")})
+		})
+	})
+	source, err := NewEVMSource(EVMConfig{HTTP: HTTPConfig{Endpoint: "https://trace.example", Client: client}, ProviderID: "trace", ChainID: "eip155:1", GenesisHash: internalTestGenesis, NativeAssetID: "eth", NativeDecimals: 18, IncludeInternal: true, AddressFiltered: true, WatchedAddresses: []string{internalTestWatched}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, oversized, err := source.filteredInternalTraces(context.Background(), 1, 1, map[string]struct{}{internalTestWatched: {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 0 || len(oversized) != 1 || calls != maxInternalTraceRequests {
+		t.Fatalf("candidates=%d oversized=%v calls=%d", len(candidates), oversized, calls)
+	}
+}
+
+// Requests that come back too large count too, or pages of one frame could spend
+// a whole step.
+func TestEVMInternalFilterBudgetCountsOversizedRequests(t *testing.T) {
+	calls := 0
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		return 200, rpcResult(t, request, func(_ string, params []json.RawMessage) json.RawMessage {
+			calls++
+			var filter struct {
+				After, Count int
+			}
+			if err := json.Unmarshal(params[0], &filter); err != nil {
+				t.Fatal(err)
+			}
+			if filter.Count > 1 {
+				return json.RawMessage(`"` + strings.Repeat("a", 2048) + `"`)
+			}
+			return internalJSON(t, []any{internalFrame([]int{filter.After}, 0, internalTestContract, internalTestWatched, "0x0", "call", "")})
+		})
+	})
+	source, err := NewEVMSource(EVMConfig{HTTP: HTTPConfig{Endpoint: "https://trace.example", Client: client, MaxResponseBytes: 1024}, ProviderID: "trace", ChainID: "eip155:1", GenesisHash: internalTestGenesis, NativeAssetID: "eth", NativeDecimals: 18, IncludeInternal: true, AddressFiltered: true, WatchedAddresses: []string{internalTestWatched}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, oversized, err := source.filteredInternalTraces(context.Background(), 1, 1, map[string]struct{}{internalTestWatched: {}}); err != nil || len(oversized) != 1 || calls != maxInternalTraceRequests {
+		t.Fatalf("oversized=%v calls=%d err=%v", oversized, calls, err)
+	}
+}
+
+func TestEVMInternalFilterDoesNotAskAFailedProbeForAReceipt(t *testing.T) {
+	root := internalFrame([]int{}, 1, internalTestSender, internalTestContract, "0x0", "call", "")
+	child := internalFrame([]int{0}, 0, internalTestContract, internalTestWatched, "0x5", "call", "")
+	good := internalTree{nonceEnd: "0x1", endBalance: "0x0", filter: internalJSON(t, []any{child}), tree: internalJSON(t, []any{root, child})}
+	filter := internalFilterFor(t, good, good)
+	calls := 0
+	if err := filter.WithBalanceProbes(internalSourceFor(t, "https://dead.example", internalTree{down: true, calls: &calls}), internalSourceFor(t, "https://honest.example", good), internalSourceFor(t, "https://other.example", good)); err != nil {
+		t.Fatal(err)
+	}
+	if batch, err := filter.ScanRange(context.Background(), 1, 1); err != nil || len(batch.Events) != 1 || calls != 1 {
+		t.Fatalf("events=%d calls=%d err=%v", len(batch.Events), calls, err)
+	}
+}
+
+func TestRateLimitReturnedSlotsKeepOrderAndRespectAPostpone(t *testing.T) {
+	client, err := newEndpointClient(HTTPConfig{Endpoint: "https://rpc.example", MinInterval: 100 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An earlier caller gives up behind a later reservation: the later one stays.
+	if err := client.waitForRateLimit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	early, cancelEarly := context.WithCancel(context.Background())
+	defer cancelEarly()
+	first := make(chan error, 1)
+	go func() { first <- client.waitForRateLimit(early) }()
+	time.Sleep(10 * time.Millisecond)
+	second := make(chan error, 1)
+	go func() { second <- client.waitForRateLimit(context.Background()) }()
+	time.Sleep(10 * time.Millisecond)
+	client.rateMu.Lock()
+	reserved := client.nextRPC
+	client.rateMu.Unlock()
+	cancelEarly()
+	if err := <-first; !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v", err)
+	}
+	client.rateMu.Lock()
+	kept := client.nextRPC
+	client.rateMu.Unlock()
+	if !kept.Equal(reserved) {
+		t.Fatalf("an abandoned earlier slot moved a later reservation: %s then %s", reserved, kept)
+	}
+	if err := <-second; err != nil {
+		t.Fatal(err)
+	}
+	// A deadline that falls inside a reservation survives its return.
+	client, err = newEndpointClient(HTTPConfig{Endpoint: "https://rpc.example", MinInterval: 20 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.waitForRateLimit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waiting, cancelWaiting := context.WithCancel(context.Background())
+	defer cancelWaiting()
+	abandoned := make(chan error, 1)
+	go func() { abandoned <- client.waitForRateLimit(waiting) }()
+	time.Sleep(10 * time.Millisecond)
+	client.postpone(30 * time.Second)
+	cancelWaiting()
+	if err := <-abandoned; !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v", err)
+	}
+	client.rateMu.Lock()
+	defer client.rateMu.Unlock()
+	if client.nextRPC.Before(client.postponed) {
+		t.Fatalf("a returned slot undid a postpone: %s before %s", client.nextRPC, client.postponed)
 	}
 }

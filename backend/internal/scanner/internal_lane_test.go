@@ -146,15 +146,15 @@ func TestInternalLaneGivesUpOnARangeAfterItsBudgetAndRecordsIt(t *testing.T) {
 	if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source}); err != nil {
 		t.Fatal(err)
 	}
-	if len(store.commits) != 1 || len(store.commits[0].Events) != 0 || store.commits[0].To != 110 {
+	// The range halved on each failure, and only the last one tried is recorded.
+	if len(store.commits) != 1 || len(store.commits[0].Events) != 0 || store.commits[0].To != 102 {
 		t.Fatalf("commits=%+v", store.commits)
 	}
 	row := store.commits[0].Unattributed
-	if len(row) != 1 || row[0].Reason != UnattributedGaveUp || row[0].FromHeight != 101 || row[0].ToHeight != 110 || observer.unattributed != 1 {
+	if len(row) != 1 || row[0].Reason != UnattributedGaveUp || row[0].FromHeight != 101 || row[0].ToHeight != 102 || observer.unattributed != 1 {
 		t.Fatalf("rows=%+v observed=%d", row, observer.unattributed)
 	}
 	// The budget belongs to one range: the next failure starts a new one.
-	store.progress.Scanned = 120
 	if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source}); !errors.Is(err, source.err) {
 		t.Fatalf("the next range must get its own budget: %v", err)
 	}
@@ -271,19 +271,17 @@ func TestInternalLaneCommitsTheVersionItRead(t *testing.T) {
 	}
 }
 
-// A range too slow for one step gets smaller, so one heavy block does not cost
-// the whole range.
-func TestInternalLaneNarrowsARangeThatRunsOutOfTime(t *testing.T) {
+// A range that fails gets smaller, for any reason, so one bad block does not
+// cost the whole range.
+func TestInternalLaneNarrowsARangeThatFails(t *testing.T) {
 	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
 	store := &laneStore{progress: InternalProgress{Cursor: 100, Scanned: 500, Started: true, HasScanned: true}}
-	source := &laneSource{err: context.DeadlineExceeded}
+	source := &laneSource{err: errors.New("provider refused")}
 	lane := newLane(store)
 	lane.Now = func() time.Time { return now }
-	expired, cancel := context.WithCancel(t.Context())
-	cancel()
 	for _, size := range []uint64{32, 16, 8, 4, 2, 1, 1} {
 		source.calls = nil
-		if _, err := lane.RunOnce(expired, InternalPlan{Source: source}); err == nil {
+		if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source}); err == nil {
 			t.Fatal("the range must fail")
 		}
 		if source.calls[0] != [2]uint64{101, 100 + size} {
@@ -291,14 +289,99 @@ func TestInternalLaneNarrowsARangeThatRunsOutOfTime(t *testing.T) {
 		}
 		now = now.Add(time.Minute)
 	}
-	// A failure that is not about time keeps the range.
-	source.err, source.calls = errors.New("provider refused"), nil
-	store.progress.Cursor = 200
-	if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source}); err == nil || source.calls[0] != [2]uint64{201, 232} {
-		t.Fatalf("err=%v calls=%v", err, source.calls)
+}
+
+type heavyBlockSource struct {
+	laneSource
+	heavy uint64
+}
+
+func (s *heavyBlockSource) ScanRange(_ context.Context, from, to uint64) (RangeBatch, error) {
+	s.calls = append(s.calls, [2]uint64{from, to})
+	if s.heavy >= from && s.heavy <= to {
+		return RangeBatch{}, errors.New("step ran out of time")
 	}
-	if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source}); err == nil || source.calls[1] != [2]uint64{201, 232} {
-		t.Fatalf("err=%v calls=%v", err, source.calls)
+	return RangeBatch{From: from, To: to}, nil
+}
+
+// Halving what is left finds one bad block in a few tries, wherever it sits, and
+// the block itself is all that is lost. Clean blocks around it are all read.
+func TestInternalLaneFindsTheBadBlockQuickly(t *testing.T) {
+	for _, offset := range []uint64{0, 15, 31} {
+		now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+		store := &laneStore{progress: InternalProgress{Cursor: 100, Scanned: 500, Started: true, HasScanned: true}}
+		source := &heavyBlockSource{heavy: 101 + offset}
+		lane := newLane(store)
+		lane.Now = func() time.Time { return now }
+		failures := 0
+		for len(store.commits) == 0 || store.progress.Cursor < source.heavy {
+			if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source}); err != nil {
+				failures++
+			}
+			now = now.Add(5 * time.Minute)
+			if failures > 40 {
+				t.Fatalf("offset %d: too many failures", offset)
+			}
+		}
+		last := store.commits[len(store.commits)-1]
+		if last.From != source.heavy || last.To != source.heavy || len(last.Unattributed) != 1 || last.Unattributed[0].Reason != UnattributedGaveUp {
+			t.Fatalf("offset %d: commit %+v", offset, last)
+		}
+		if failures > 13 {
+			t.Fatalf("offset %d: %d failed steps", offset, failures)
+		}
+		for _, commit := range store.commits[:len(store.commits)-1] {
+			if len(commit.Unattributed) != 0 {
+				t.Fatalf("offset %d: a clean range was recorded: %+v", offset, commit)
+			}
+		}
+		// Past the bad block the lane reads whole ranges again.
+		source.calls = nil
+		if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source}); err != nil || source.calls[0][1]-source.calls[0][0] != 31 {
+			t.Fatalf("offset %d: err=%v calls=%v", offset, err, source.calls)
+		}
+	}
+}
+
+// The count stays true while the lane waits, so an alert does not clear itself.
+func TestInternalLaneReportsOpenFindingsWhileWaiting(t *testing.T) {
+	store := &laneStore{progress: InternalProgress{Cursor: 100, Scanned: 110, Started: true, HasScanned: true, OpenFindings: 3}}
+	for _, plan := range []InternalPlan{{Paused: true}, {}} {
+		observer := &laneObserver{}
+		lane := newLane(store)
+		lane.Observer = observer
+		if _, err := lane.RunOnce(t.Context(), plan); err != nil || observer.open != 3 {
+			t.Fatalf("plan=%+v open=%d err=%v", plan, observer.open, err)
+		}
+	}
+}
+
+func TestInternalLaneWaitingDoesNotUseUpTheBudget(t *testing.T) {
+	for name, wait := range map[string]func(*laneStore) InternalPlan{
+		"no source": func(*laneStore) InternalPlan { return InternalPlan{} },
+		"lease lost": func(store *laneStore) InternalPlan {
+			store.denied = true
+			return InternalPlan{Source: &laneSource{}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+			store := &laneStore{progress: InternalProgress{Cursor: 100, Scanned: 110, Started: true, HasScanned: true}}
+			source := &laneSource{err: errors.New("provider refused")}
+			lane := newLane(store)
+			lane.Now = func() time.Time { return now }
+			if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source}); err == nil {
+				t.Fatal("the range must fail")
+			}
+			if _, err := lane.RunOnce(t.Context(), wait(store)); err != nil {
+				t.Fatal(err)
+			}
+			store.denied = false
+			now = now.Add(4 * time.Hour)
+			if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source}); err == nil || len(store.commits) != 0 {
+				t.Fatalf("waiting used up the budget: %v %+v", err, store.commits)
+			}
+		})
 	}
 }
 
