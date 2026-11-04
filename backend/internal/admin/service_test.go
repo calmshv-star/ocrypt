@@ -30,6 +30,10 @@ type repositoryStub struct {
 	userSessions                            []SessionSummary
 	revokedSession, revokedFor, keptSession string
 	revokeErr                               error
+	syncedEmail                             string
+	syncErr                                 error
+	soleOwned                               []OwnedMerchant
+	deleted                                 bool
 	savedEmailEvents                        []string
 	savedLocale                             string
 	savedSignInEmail                        *bool
@@ -282,6 +286,23 @@ func (r *repositoryStub) UnlinkTelegram(_ context.Context, _ Principal, audit Au
 	r.audit = audit
 	return nil
 }
+func (r *repositoryStub) SyncEmail(_ context.Context, _ Principal, email string, _ time.Time) (bool, error) {
+	r.syncedEmail = email
+	return true, r.syncErr
+}
+func (r *repositoryStub) AccountExport(context.Context, Principal) (json.RawMessage, error) {
+	return json.RawMessage(`{"format":"ocrypt-account-export-v1","user":{"email":"operator@example.com"}}`), nil
+}
+func (r *repositoryStub) SoleOwnedMerchants(context.Context, Principal) ([]OwnedMerchant, error) {
+	return append([]OwnedMerchant{}, r.soleOwned...), nil
+}
+func (r *repositoryStub) DeleteAccount(_ context.Context, _ Principal, closeMerchantIDs []string, _ time.Time) (int, error) {
+	if len(r.soleOwned) != len(closeMerchantIDs) {
+		return 0, ErrSoleOwner
+	}
+	r.deleted = true
+	return len(r.soleOwned), nil
+}
 func (r *repositoryStub) SanctionsAlerts(_ context.Context, _ Principal, scope Scope, _ int) ([]SanctionsAlert, error) {
 	if scope.MerchantID == "" {
 		return nil, ErrInvalid
@@ -307,7 +328,7 @@ func testService(repo Repository, now time.Time) *Service {
 	if err != nil {
 		panic(err)
 	}
-	return &Service{repository: repo, stateBox: box, config: ServiceConfig{IdleTTL: 15 * time.Minute, AbsoluteTTL: 8 * time.Hour, RotationInterval: 5 * time.Minute, StepUpTTL: 10 * time.Minute, RequiredACR: "urn:mfa", AcceptedAMR: map[string]bool{"otp": true}}, now: func() time.Time { return now }}
+	return &Service{repository: repo, stateBox: box, config: ServiceConfig{IdleTTL: 15 * time.Minute, AbsoluteTTL: 8 * time.Hour, RotationInterval: 5 * time.Minute, StepUpTTL: 10 * time.Minute, RequiredACR: "urn:mfa", AcceptedAMR: map[string]bool{"otp": true}, FollowProviderEmail: true}, now: func() time.Time { return now }}
 }
 
 func TestRBACScopeAndStepUpAreServerAuthoritative(t *testing.T) {

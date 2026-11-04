@@ -3,6 +3,7 @@ import { Badge, Button, PageHeader, SectionCard } from "@merchant/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LockKeyhole, LogOut, RefreshCw } from "lucide-react";
 import { useState } from "react";
+import { AccountSection } from "./AccountSection";
 import { useAdmin } from "./AdminProvider";
 import { AdminAPIError } from "./api/client";
 import type { SessionSummary } from "./api/types";
@@ -63,5 +64,6 @@ export function SecurityPage() {
       {sessions.isSuccess && others.length === 0 && <p className="security__outcome">{t("security.noOthers")}</p>}
       <p className="go-live__note">{t("security.idpSignOut")}</p>
     </SectionCard>
+    <AccountSection />
   </div>;
 }

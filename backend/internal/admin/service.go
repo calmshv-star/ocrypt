@@ -49,6 +49,14 @@ type ServiceConfig struct {
 	// TelegramBotUsername is the operator's notification bot; empty turns
 	// Telegram notifications off.
 	TelegramBotUsername string
+	// AccountURL and RecoveryURL are the identity provider's account and
+	// password-recovery pages; empty hides the links.
+	AccountURL  string
+	RecoveryURL string
+	// FollowProviderEmail takes over a verified email changed at the
+	// provider. Turn it off for a provider that may reuse subjects (some
+	// LDAP or SAML connectors); a changed email then refuses the login.
+	FollowProviderEmail bool
 }
 
 var (
@@ -119,6 +127,9 @@ func NewService(repository Repository, provider *OIDCProvider, stateBox SecretBo
 	}
 	if config.SelfServiceSignup && (config.SignupRegionHeader == "") == !config.SignupUnscreenedIP {
 		return nil, errors.New("self-service signup needs either a trusted region header or an explicit opt-out of IP screening, not both")
+	}
+	if !validAccountLink(config.AccountURL) || !validAccountLink(config.RecoveryURL) {
+		return nil, errors.New("admin identity provider account and recovery links must be https URLs without credentials")
 	}
 	if config.TelegramBotUsername != "" && !telegramBotUsername.MatchString(config.TelegramBotUsername) {
 		return nil, errors.New("admin Telegram bot username must be a bot username such as ocrypt_alerts_bot")
@@ -306,6 +317,7 @@ func (s *Service) CompleteCallback(ctx context.Context, state, code string) (Aut
 		return AuthResult{}, "", err
 	}
 	if attempt.Purpose == "invitation" {
+		s.followEmail(ctx, claims)
 		if attempt.InvitationID == "" || attempt.InvitationTenantID == "" || attempt.InvitationMerchantID == "" ||
 			normalizeAdminEmail(claims.Email) == "" || normalizeAdminEmail(claims.Email) != attempt.ExpectedEmail || !claims.EmailVerified {
 			return AuthResult{}, "", ErrForbidden
@@ -323,6 +335,7 @@ func (s *Service) CompleteCallback(ctx context.Context, state, code string) (Aut
 		return AuthResult{Principal: PrincipalFor(identity, session), Session: session, Tokens: &tokens, MFAAt: now}, "/#/invite", nil
 	}
 	if attempt.Purpose == "signup" {
+		s.followEmail(ctx, claims)
 		return s.completeSignup(ctx, attempt, claims, now)
 	}
 	identity, err := s.repository.FindIdentity(ctx, claims.Issuer, claims.Subject)
@@ -333,7 +346,11 @@ func (s *Service) CompleteCallback(ctx context.Context, state, code string) (Aut
 	if err != nil || identity.Status != "active" {
 		return AuthResult{}, "", fmt.Errorf("resolve active admin identity (%v): %w", err, ErrForbidden)
 	}
-	if !claims.EmailVerified || !strings.EqualFold(strings.TrimSpace(claims.Email), strings.TrimSpace(identity.Email)) {
+	// The identity is the provider's issuer and subject; its verified email
+	// may change there, and the cabinet follows it (REG-5) after the session
+	// exists, instead of locking the user out.
+	if !claims.EmailVerified || normalizeAdminEmail(claims.Email) == "" ||
+		(!s.config.FollowProviderEmail && normalizeAdminEmail(claims.Email) != normalizeAdminEmail(identity.Email)) {
 		return AuthResult{}, "", ErrForbidden
 	}
 	if attempt.ExpectedUserID != "" && identity.UserID != attempt.ExpectedUserID {
@@ -380,6 +397,7 @@ func (s *Service) CompleteCallback(ctx context.Context, state, code string) (Aut
 		_ = s.repository.RevokeSession(ctx, session.SessionHash, "audit_write_failed", now)
 		return AuthResult{}, "", err
 	}
+	s.syncEmail(ctx, &identity, session, claims.Email)
 	principal := PrincipalFor(identity, session)
 	return AuthResult{Principal: principal, Session: session, Tokens: &tokens, MFAAt: now, Login: attempt.Purpose == "login"}, attempt.ReturnPath, nil
 }

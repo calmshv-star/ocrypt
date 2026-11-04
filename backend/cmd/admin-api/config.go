@@ -32,6 +32,9 @@ type adminConfig struct {
 	SignupRegionHeader             string
 	SignupUnscreenedIP             bool
 	TelegramBotUsername            string
+	AccountURL                     string
+	RecoveryURL                    string
+	FollowProviderEmail            bool
 	IdleTTL                        time.Duration
 	AbsoluteTTL                    time.Duration
 	RotationInterval               time.Duration
@@ -177,6 +180,12 @@ func loadAdminConfig() (adminConfig, error) {
 	// Notifications: the bot the notification worker runs; empty keeps
 	// Telegram off. Validated as a bot username by the service.
 	config.TelegramBotUsername = strings.TrimPrefix(strings.TrimSpace(os.Getenv("ADMIN_TELEGRAM_BOT_USERNAME")), "@")
+	// REG-5: the identity provider's account and password-recovery pages.
+	config.AccountURL = strings.TrimSpace(os.Getenv("ADMIN_IDP_ACCOUNT_URL"))
+	config.RecoveryURL = strings.TrimSpace(os.Getenv("ADMIN_IDP_RECOVERY_URL"))
+	if config.FollowProviderEmail, err = strconv.ParseBool(envOr("ADMIN_FOLLOW_IDP_EMAIL", "true")); err != nil {
+		return adminConfig{}, errors.New("ADMIN_FOLLOW_IDP_EMAIL must be true or false")
+	}
 	if config.SignupRegionHeader != "" && !signupRegionHeaderPattern.MatchString(config.SignupRegionHeader) {
 		return adminConfig{}, errors.New("ADMIN_SIGNUP_REGION_HEADER must be a plain HTTP header name")
 	}

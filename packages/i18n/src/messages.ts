@@ -1486,7 +1486,27 @@ export const en = {
   "sanctions.transaction": "Transaction",
   "notifications.sanctionedAlways": "Payments from a sanctioned address are always reported to everyone who gets this merchant's notifications.",
   "goLive.addressNotAccepted": "One of the addresses cannot be used for live payments. Use a different address or contact support.",
-  "sanctions.operatorList": "Operator list"
+  "sanctions.operatorList": "Operator list",
+  "account.recovery": "Forgot your password or lost your second factor?",
+  "account.title": "Your account",
+  "account.body": "Your password, second factor and email are managed at your sign-in provider. An email changed there is taken over at your next sign-in, and the old address is told.",
+  "account.manage": "Manage at sign-in provider",
+  "account.export": "Download my data",
+  "account.exportBody": "A JSON file with your profile, memberships, roles, sessions, notification settings and recent actions.",
+  "account.exportFailed": "The download failed. Try again.",
+  "account.deleteTitle": "Delete account",
+  "account.deleteBody": "Ends every session and your access to all merchants, removes your notification settings and anonymises your profile. The audit log and payment records stay, as the law requires. Your account at the sign-in provider is not deleted.",
+  "account.operator": "Platform operators are removed by another operator.",
+  "account.soleOwned": "You are the only owner of these merchants. Deleting your account closes them: their payment pages and API stop, and their records stay.",
+  "account.closeConfirm": "Close these merchants",
+  "account.confirmEmail": "Type your email to confirm",
+  "account.delete": "Delete my account",
+  "account.deleting": "Deleting…",
+  "account.failed": "The account could not be deleted. Refresh the page and try again.",
+  "account.ownerConflict": "A merchant would be left without an owner. Tick “Close these merchants” or add another owner first.",
+  "account.previewFailed": "Could not check what deleting the account would do.",
+  "account.deletedTitle": "Your account was deleted",
+  "account.deletedBody": "Every session has ended. A confirmation went to your email. Your account at the sign-in provider still exists; delete it there if you wish."
 } as const;
 
 export type MessageKey = keyof typeof en;
