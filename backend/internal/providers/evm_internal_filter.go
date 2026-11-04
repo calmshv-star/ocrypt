@@ -28,7 +28,23 @@ type EVMInternalFilter struct {
 	chainID   string
 	genesis   string
 	traceDown error
+	required  uint64
 }
+
+// What one range may cost. A stranger's transaction decides how much a trace
+// returns, so each bound turns an attack into a recorded finding.
+const (
+	// InternalTraceResponseLimit caps one trace response: decoded, a response
+	// takes several times its size, and the scanner shares its memory limit
+	// with ordinary payments.
+	InternalTraceResponseLimit = 8 << 20
+	// Up to this many wallets the balance check saves traces. Beyond it a
+	// single trace_filter sweep is cheaper than reading every wallet.
+	maxBalanceWatched      = 16
+	maxInternalTraceFrames = 100000
+	// More transfers to watched wallets in one transaction are not a payment.
+	maxTransfersPerTransaction = 256
+)
 
 func NewEVMInternalFilter(base scanner.Source, first, second *EVMSource, chainID, genesis string, addresses []string) (*EVMInternalFilter, error) {
 	if base == nil || first == nil || second == nil || first == second || first.http.base.Host == second.http.base.Host ||
@@ -70,6 +86,13 @@ func (s *EVMInternalFilter) WithBalanceProbes(sources ...*EVMSource) error {
 	return nil
 }
 
+// WithRequiredConfirmations holds a range until the trace providers are this far
+// past it. A transfer below a route's finality would stay unsettled, and the
+// lane reads a block only once.
+func (s *EVMInternalFilter) WithRequiredConfirmations(confirmations uint64) {
+	s.required = confirmations
+}
+
 // WithTraceUnavailable records why the trace providers cannot be used now. It
 // matters only for a range that needs a trace: balances prove the others clean.
 func (s *EVMInternalFilter) WithTraceUnavailable(reason error) {
@@ -80,38 +103,32 @@ func (s *EVMInternalFilter) Heads(ctx context.Context) ([]scanner.ProviderHead, 
 	return s.base.Heads(ctx)
 }
 
-// ScanRange reads the range once. Balances first: an idle wallet needs nothing
-// else. Movement that ordinary transfers explain needs no trace either. Anything
-// else is traced on both providers, and each transfer has to survive its
-// transaction's complete call tree. An error keeps the lane's cursor.
+// ScanRange reads the range once. For a few wallets, balances come first: an idle
+// wallet needs nothing else, and movement that ordinary transfers explain needs
+// no trace. Anything else is traced on both providers, and each transfer has to
+// survive its transaction's complete call tree. An error keeps the lane's cursor.
 func (s *EVMInternalFilter) ScanRange(ctx context.Context, from, to uint64) (scanner.RangeBatch, error) {
-	windows, err := s.balanceWindows(ctx, from, to)
-	if err != nil {
-		return scanner.RangeBatch{}, err
-	}
-	if from > 0 && !anyMovement(windows) {
-		return scanner.RangeBatch{From: from, To: to}, nil
-	}
-	batch, err := s.base.ScanRange(ctx, from, to)
-	if err != nil {
-		return scanner.RangeBatch{}, err
-	}
-	if len(batch.Blocks) == 0 {
-		return scanner.RangeBatch{}, errors.New("internal transfer scan received no canonical blocks")
-	}
-	if from > 0 && s.explained(windows, batch.Events, from, to) {
-		return batch, nil
+	batch := scanner.RangeBatch{From: from, To: to}
+	var windows map[string]evmBalanceWindow
+	if from > 0 && len(s.watched) <= maxBalanceWatched {
+		var err error
+		if windows, err = s.balanceWindows(ctx, from, to); err != nil {
+			return scanner.RangeBatch{}, err
+		}
+		if !anyMovement(windows) {
+			return batch, nil
+		}
+		if batch, err = s.scanBase(ctx, from, to); err != nil {
+			return scanner.RangeBatch{}, err
+		}
+		if s.explained(windows, batch.Events, from, to) {
+			return batch, nil
+		}
 	}
 	if s.traceDown != nil {
 		return scanner.RangeBatch{}, s.traceDown
 	}
-	blocks := make(map[uint64]scanner.Block, len(batch.Blocks))
-	for _, block := range batch.Blocks {
-		blocks[block.Height] = block
-	}
-	var observations [2][]internalTraceCandidate
-	var spans []internalTraceSpan
-	skipped := make(map[string]internalTraceCandidate)
+	var traces [2]internalTraceResult
 	safeHeight := uint64(^uint64(0))
 	for index, source := range s.tracers {
 		heads, headErr := source.Heads(ctx)
@@ -129,26 +146,35 @@ func (s *EVMInternalFilter) ScanRange(ctx context.Context, from, to uint64) (sca
 		if traceErr != nil {
 			return scanner.RangeBatch{}, fmt.Errorf("internal trace provider %d: %w", index+1, traceErr)
 		}
-		spans = append(spans, oversized...)
 		confirmed, tooLarge, confirmErr := source.confirmedInternalTraces(ctx, candidates)
 		if confirmErr != nil {
 			return scanner.RangeBatch{}, fmt.Errorf("internal trace provider %d: %w", index+1, confirmErr)
 		}
-		for _, candidate := range tooLarge {
-			skipped[candidate.TransactionHash] = candidate
-		}
-		observations[index] = confirmed
+		traces[index] = internalTraceResult{confirmed: confirmed, tooLarge: tooLarge, oversized: oversized}
 	}
-	// What one provider cannot read is dropped on both, so a crafted transaction
-	// costs a recorded row, not the lane.
-	for index := range observations {
-		observations[index] = withoutSkipped(observations[index], skipped, spans)
-	}
-	if !reflect.DeepEqual(observations[0], observations[1]) {
+	// A transaction built to exceed a limit does so on both providers. On one of
+	// them it is that provider's fault, so the range is retried.
+	if !reflect.DeepEqual(traces[0], traces[1]) {
 		return scanner.RangeBatch{}, errors.New("independent internal trace providers disagree")
 	}
-	seen := make(map[string]struct{}, len(observations[0]))
-	for _, candidate := range observations[0] {
+	if len(traces[0].confirmed) > 0 {
+		if safeHeight-to+1 < s.required {
+			return scanner.RangeBatch{}, &ProviderError{Kind: ErrorTransient, Operation: "evm internal trace head", Cause: errors.New("trace provider is not yet past the required confirmations")}
+		}
+		if len(batch.Blocks) == 0 {
+			var err error
+			if batch, err = s.scanBase(ctx, from, to); err != nil {
+				return scanner.RangeBatch{}, err
+			}
+		}
+	}
+	blocks := make(map[uint64]scanner.Block, len(batch.Blocks))
+	for _, block := range batch.Blocks {
+		blocks[block.Height] = block
+	}
+	seen := make(map[string]struct{}, len(traces[0].confirmed))
+	receipts := make(map[string]struct{}, len(traces[0].confirmed))
+	for _, candidate := range traces[0].confirmed {
 		block, present := blocks[candidate.Height]
 		if !present || block.Hash != candidate.BlockHash {
 			return scanner.RangeBatch{}, errors.New("internal trace does not bind to the canonical scanned block")
@@ -158,8 +184,11 @@ func (s *EVMInternalFilter) ScanRange(ctx context.Context, from, to uint64) (sca
 			return scanner.RangeBatch{}, errors.New("duplicate internal trace")
 		}
 		seen[key] = struct{}{}
-		if err := s.verifyReceipt(ctx, candidate, block); err != nil {
-			return scanner.RangeBatch{}, err
+		if _, verified := receipts[candidate.TransactionHash]; !verified {
+			if err := s.verifyReceipt(ctx, candidate, block); err != nil {
+				return scanner.RangeBatch{}, err
+			}
+			receipts[candidate.TransactionHash] = struct{}{}
 		}
 		path, pathErr := traceAddressPath(candidate.EventIndex)
 		if pathErr != nil {
@@ -199,11 +228,17 @@ func (s *EVMInternalFilter) ScanRange(ctx context.Context, from, to uint64) (sca
 				Amount: new(big.Int).Sub(window.delta, explained).String(), Reason: scanner.UnattributedBalance})
 		}
 	}
-	for _, candidate := range skipped {
+	recorded := make(map[string]struct{}, len(traces[0].tooLarge))
+	for _, candidate := range traces[0].tooLarge {
+		key := candidate.TransactionHash + ":" + candidate.To
+		if _, duplicate := recorded[key]; duplicate {
+			continue
+		}
+		recorded[key] = struct{}{}
 		batch.Unattributed = append(batch.Unattributed, scanner.UnattributedInflow{Address: candidate.To, FromHeight: candidate.Height, ToHeight: candidate.Height,
 			TransactionID: candidate.TransactionHash, Reason: scanner.UnattributedCallTree})
 	}
-	for _, span := range uniqueSpans(spans) {
+	for _, span := range traces[0].oversized {
 		batch.Unattributed = append(batch.Unattributed, scanner.UnattributedInflow{FromHeight: span.from, ToHeight: span.to, Reason: scanner.UnattributedTraces})
 	}
 	sort.Slice(batch.Events, func(i, j int) bool {
@@ -216,6 +251,17 @@ func (s *EVMInternalFilter) ScanRange(ctx context.Context, from, to uint64) (sca
 		}
 		return left.Identity.EventIndex < right.Identity.EventIndex
 	})
+	return batch, nil
+}
+
+func (s *EVMInternalFilter) scanBase(ctx context.Context, from, to uint64) (scanner.RangeBatch, error) {
+	batch, err := s.base.ScanRange(ctx, from, to)
+	if err != nil {
+		return scanner.RangeBatch{}, err
+	}
+	if len(batch.Blocks) == 0 {
+		return scanner.RangeBatch{}, errors.New("internal transfer scan received no canonical blocks")
+	}
 	return batch, nil
 }
 
@@ -235,35 +281,6 @@ func (s *EVMInternalFilter) explained(windows map[string]evmBalanceWindow, event
 		}
 	}
 	return true
-}
-
-func withoutSkipped(candidates []internalTraceCandidate, skipped map[string]internalTraceCandidate, spans []internalTraceSpan) []internalTraceCandidate {
-	kept := make([]internalTraceCandidate, 0, len(candidates))
-candidates:
-	for _, candidate := range candidates {
-		if _, drop := skipped[candidate.TransactionHash]; drop {
-			continue
-		}
-		for _, span := range spans {
-			if candidate.Height >= span.from && candidate.Height <= span.to {
-				continue candidates
-			}
-		}
-		kept = append(kept, candidate)
-	}
-	return kept
-}
-
-func uniqueSpans(spans []internalTraceSpan) []internalTraceSpan {
-	seen := make(map[internalTraceSpan]bool, len(spans))
-	unique := make([]internalTraceSpan, 0, len(spans))
-	for _, span := range spans {
-		if !seen[span] {
-			seen[span] = true
-			unique = append(unique, span)
-		}
-	}
-	return unique
 }
 
 // verifyReceipt needs two providers to confirm the transaction succeeded in
@@ -420,9 +437,16 @@ type internalTraceCandidate struct {
 	Amount          string
 }
 
-// internalTraceSpan is a block span too large to read: a crafted transaction
-// can fill it with more frames or bytes than the limits allow.
+// internalTraceSpan is a block too large to read: a crafted transaction can fill
+// it with more frames or bytes than the limits allow.
 type internalTraceSpan struct{ from, to uint64 }
+
+// internalTraceResult is one provider's answer. Lists are never nil, so two
+// agreeing providers compare equal.
+type internalTraceResult struct {
+	confirmed, tooLarge []internalTraceCandidate
+	oversized           []internalTraceSpan
+}
 
 type filteredEVMTrace struct {
 	Action struct {
@@ -436,57 +460,29 @@ type filteredEVMTrace struct {
 	Type            string   `json:"type"`
 }
 
-// trace_filter is bounded to four blocks per call. A span that exceeds the frame
-// or response limit comes back as oversized, without its candidates.
+// trace_filter is bounded to four blocks per call. A response over the limit
+// retries with smaller pages, then block by block, so a crafted transaction costs
+// at most its own block, which comes back as oversized without its candidates.
 func (s *EVMSource) filteredInternalTraces(ctx context.Context, from, to uint64, watched map[string]struct{}) ([]internalTraceCandidate, []internalTraceSpan, error) {
 	if to < from {
 		return nil, nil, errors.New("invalid internal trace range")
 	}
-	candidates := make([]internalTraceCandidate, 0)
+	candidates, oversized := make([]internalTraceCandidate, 0), make([]internalTraceSpan, 0)
 	if len(watched) == 0 {
-		return candidates, nil, nil
+		return candidates, oversized, nil
 	}
 	addresses := make([]string, 0, len(watched))
 	for address := range watched {
 		addresses = append(addresses, address)
 	}
 	sort.Strings(addresses)
-	var oversized []internalTraceSpan
 	for start := from; start <= to; {
 		end := min(start+3, to)
-		kept := len(candidates)
-	pages:
-		for offset := 0; ; {
-			filter := map[string]any{
-				"fromBlock": hexQuantity(start), "toBlock": hexQuantity(end),
-				"toAddress": addresses, "after": offset, "count": 1000,
-			}
-			var page []filteredEVMTrace
-			if err := s.http.rpc(ctx, "evm watched internal traces", "trace_filter", []any{filter}, &page); err != nil {
-				if errors.Is(err, ErrResponseTooLarge) {
-					candidates, oversized = candidates[:kept], append(oversized, internalTraceSpan{start, end})
-					break pages
-				}
-				return nil, nil, err
-			}
-			for _, trace := range page {
-				candidate, credited, err := internalCandidate(trace, start, end, watched)
-				if err != nil {
-					return nil, nil, err
-				}
-				if credited {
-					candidates = append(candidates, candidate)
-				}
-			}
-			if len(page) < 1000 {
-				break
-			}
-			offset += len(page)
-			if offset > maxInternalTraceFrames {
-				candidates, oversized = candidates[:kept], append(oversized, internalTraceSpan{start, end})
-				break pages
-			}
+		found, skipped, err := s.internalTraceSpan(ctx, start, end, addresses, watched)
+		if err != nil {
+			return nil, nil, err
 		}
+		candidates, oversized = append(candidates, found...), append(oversized, skipped...)
 		if end == to {
 			break
 		}
@@ -505,7 +501,60 @@ func (s *EVMSource) filteredInternalTraces(ctx context.Context, from, to uint64,
 	return candidates, oversized, nil
 }
 
-const maxInternalTraceFrames = 10000
+// internalTraceSpan reads until an empty page: a provider may cap a page below
+// the count it was asked for, so a short page does not prove the end.
+func (s *EVMSource) internalTraceSpan(ctx context.Context, start, end uint64, addresses []string, watched map[string]struct{}) ([]internalTraceCandidate, []internalTraceSpan, error) {
+	var found []internalTraceCandidate
+	count := 1000
+	for offset := 0; ; {
+		filter := map[string]any{
+			"fromBlock": hexQuantity(start), "toBlock": hexQuantity(end),
+			"toAddress": addresses, "after": offset, "count": count,
+		}
+		var page []filteredEVMTrace
+		if err := s.http.rpc(ctx, "evm watched internal traces", "trace_filter", []any{filter}, &page); err != nil {
+			if !errors.Is(err, ErrResponseTooLarge) {
+				return nil, nil, err
+			}
+			if count > 1 {
+				count /= 10
+				continue
+			}
+			return s.narrowInternalTraceSpan(ctx, start, end, addresses, watched)
+		}
+		if len(page) == 0 {
+			return found, nil, nil
+		}
+		for _, trace := range page {
+			candidate, credited, err := internalCandidate(trace, start, end, watched)
+			if err != nil {
+				return nil, nil, err
+			}
+			if credited {
+				found = append(found, candidate)
+			}
+		}
+		if offset += len(page); offset >= maxInternalTraceFrames {
+			return s.narrowInternalTraceSpan(ctx, start, end, addresses, watched)
+		}
+	}
+}
+
+func (s *EVMSource) narrowInternalTraceSpan(ctx context.Context, start, end uint64, addresses []string, watched map[string]struct{}) ([]internalTraceCandidate, []internalTraceSpan, error) {
+	if start == end {
+		return nil, []internalTraceSpan{{start, end}}, nil
+	}
+	var found []internalTraceCandidate
+	var oversized []internalTraceSpan
+	for height := start; height <= end; height++ {
+		blockFound, blockOversized, err := s.internalTraceSpan(ctx, height, height, addresses, watched)
+		if err != nil {
+			return nil, nil, err
+		}
+		found, oversized = append(found, blockFound...), append(oversized, blockOversized...)
+	}
+	return found, oversized, nil
+}
 
 // internalCandidate decides whether one discovered frame can pay a watched
 // wallet. Only a plain CALL moves value to its target: DELEGATECALL and CALLCODE
@@ -565,48 +614,52 @@ func internalCandidate(trace filteredEVMTrace, start, end uint64, watched map[st
 // so a transfer inside a reverted call looks successful until its ancestors
 // are read, and the balance check is skipped for contracts and for wallets
 // that also sent a transaction. A transfer that did not survive is dropped; a
-// tree that contradicts the discovery keeps the cursor. A tree over the response
-// limit cannot be proved, so its transaction comes back as tooLarge.
+// tree that contradicts the discovery keeps the cursor. A transaction over the
+// limits cannot be proved, so its transfers come back as tooLarge. Candidates
+// arrive sorted, and one tree at a time stays in memory.
 func (s *EVMSource) confirmedInternalTraces(ctx context.Context, candidates []internalTraceCandidate) (confirmed, tooLarge []internalTraceCandidate, err error) {
-	trees := make(map[string]*evmTraceCall)
-	confirmed = make([]internalTraceCandidate, 0, len(candidates))
-	for _, candidate := range candidates {
-		root, loaded := trees[candidate.TransactionHash]
-		if !loaded {
-			var flat []evmFlatTrace
-			if err := s.http.rpc(ctx, "evm internal call tree", "trace_transaction", []any{candidate.TransactionHash}, &flat); err != nil {
-				if !errors.Is(err, ErrResponseTooLarge) {
-					return nil, nil, err
-				}
-				trees[candidate.TransactionHash] = nil
-				tooLarge = append(tooLarge, candidate)
-				continue
-			}
-			tree, err := canonicalTraceTree(flat, candidate.TransactionHash, candidate.Height, candidate.BlockHash)
-			if err != nil {
-				return nil, nil, err
-			}
-			root, trees[candidate.TransactionHash] = &tree, &tree
+	confirmed, tooLarge = make([]internalTraceCandidate, 0, len(candidates)), make([]internalTraceCandidate, 0)
+	for start := 0; start < len(candidates); {
+		end := start
+		for end < len(candidates) && candidates[end].TransactionHash == candidates[start].TransactionHash {
+			end++
 		}
-		if root == nil {
+		group := candidates[start:end]
+		start = end
+		if len(group) > maxTransfersPerTransaction {
+			tooLarge = append(tooLarge, group...)
 			continue
 		}
-		path, err := traceAddressPath(candidate.EventIndex)
+		var flat []evmFlatTrace
+		if err := s.http.rpc(ctx, "evm internal call tree", "trace_transaction", []any{group[0].TransactionHash}, &flat); err != nil {
+			if !errors.Is(err, ErrResponseTooLarge) {
+				return nil, nil, err
+			}
+			tooLarge = append(tooLarge, group...)
+			continue
+		}
+		root, err := canonicalTraceTree(flat, group[0].TransactionHash, group[0].Height, group[0].BlockHash)
 		if err != nil {
 			return nil, nil, err
 		}
-		call, survived, found := callAtPath(*root, path)
-		if !found {
-			return nil, nil, malformed("evm internal call tree", errors.New("discovered transfer is absent from the call tree"))
-		}
-		from, fromErr := canonicalEVMAddress(call.From)
-		to, toErr := canonicalEVMAddress(call.To)
-		value, valueErr := parseHexAmount(call.Value)
-		if fromErr != nil || toErr != nil || valueErr != nil || call.Type != "CALL" || from != candidate.From || to != candidate.To || value != candidate.Amount {
-			return nil, nil, malformed("evm internal call tree", errors.New("call tree differs from the discovered transfer"))
-		}
-		if survived {
-			confirmed = append(confirmed, candidate)
+		for _, candidate := range group {
+			path, err := traceAddressPath(candidate.EventIndex)
+			if err != nil {
+				return nil, nil, err
+			}
+			call, survived, found := callAtPath(root, path)
+			if !found {
+				return nil, nil, malformed("evm internal call tree", errors.New("discovered transfer is absent from the call tree"))
+			}
+			from, fromErr := canonicalEVMAddress(call.From)
+			to, toErr := canonicalEVMAddress(call.To)
+			value, valueErr := parseHexAmount(call.Value)
+			if fromErr != nil || toErr != nil || valueErr != nil || call.Type != "CALL" || from != candidate.From || to != candidate.To || value != candidate.Amount {
+				return nil, nil, malformed("evm internal call tree", errors.New("call tree differs from the discovered transfer"))
+			}
+			if survived {
+				confirmed = append(confirmed, candidate)
+			}
 		}
 	}
 	return confirmed, tooLarge, nil

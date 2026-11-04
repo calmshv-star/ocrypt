@@ -470,6 +470,17 @@ func insertCanonicalTransfer(ctx context.Context, tx pgx.Tx, event domain.Transf
 		return false, "", domain.TransferEvent{}, err
 	}
 	if command.RowsAffected() == 1 {
+		// A replaced block never gets a new transfer: nothing would compensate a
+		// settlement that begins after the reorg was processed. This read shares
+		// the SERIALIZABLE transaction, so a concurrent reorg serializes against
+		// it, and the error rolls the insert back.
+		var orphaned bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM chain_blocks WHERE chain_id=$1 AND block_hash=$2 AND canonical_status='reorged')`, event.Identity.ChainID, event.BlockHash).Scan(&orphaned); err != nil {
+			return false, "", domain.TransferEvent{}, err
+		}
+		if orphaned {
+			return false, "", domain.TransferEvent{}, fmt.Errorf("%w: transfer belongs to a replaced block", domain.ErrStateConflict)
+		}
 		return true, event.ID, event, nil
 	}
 	canonical := event

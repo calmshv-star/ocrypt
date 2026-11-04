@@ -2,12 +2,14 @@ package postgres
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/domain"
 	"github.com/calmshv-star/ocrypt/backend/internal/money"
 	"github.com/calmshv-star/ocrypt/backend/internal/scanner"
+	"github.com/jackc/pgx/v5"
 )
 
 // internalLane proves the lane's storage under the production scanner role: its
@@ -17,6 +19,7 @@ func (f *faultDatabase) internalLane(t *testing.T) {
 	const chain, shard = "eip155:990099", "default"
 	now := time.Now().UTC()
 	faultExec(t, f.ctx, f.admin, `INSERT INTO chains(id,family,network_name,status,required_confirmations,maximum_reorg_depth,created_at,updated_at) VALUES($1,'evm','Internal lane chain','active',12,64,$2,$2)`, chain, now)
+	faultExec(t, f.ctx, f.admin, `INSERT INTO assets(id,chain_id,symbol,name,kind,canonical_contract,decimals,status,created_at,updated_at) VALUES('eth-lane',$1,'ETH','Lane ether','native','native',18,'active',$2,$2)`, chain, now)
 	store, err := NewScannerStore(f.pool(t, "merchant_scanner_worker"), "internal-lane-test")
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +41,7 @@ func (f *faultDatabase) internalLane(t *testing.T) {
 	}
 	event := domain.TransferEvent{
 		ID:            faultID(t),
-		Identity:      domain.EventIdentity{ChainID: chain, TransactionID: "0xtx", EventIndex: "trace:0,11", AssetID: "eth", ToAddress: "0xwallet"},
+		Identity:      domain.EventIdentity{ChainID: chain, TransactionID: "0xtx", EventIndex: "trace:0,11", AssetID: "eth-lane", ToAddress: "0xwallet"},
 		Kind:          "native_internal",
 		Amount:        money.MustParse("5"),
 		AssetDecimals: 18,
@@ -87,5 +90,57 @@ func (f *faultDatabase) internalLane(t *testing.T) {
 	}
 	if n := f.count(t, `SELECT count(*) FROM scanner_cursors WHERE chain_id=$1 AND cursor_height=1000`, chain); n != 1 {
 		t.Fatal("the lane touched the ordinary cursor")
+	}
+
+	// A range ahead of the ordinary scan cannot be committed.
+	if _, err := store.CommitInternal(f.ctx, scanner.InternalCommit{ChainID: chain, Shard: shard, From: 965, To: 1001}); !errors.Is(err, domain.ErrVersionConflict) {
+		t.Fatalf("a range ahead of the ordinary scan was accepted: %v", err)
+	}
+	// A block the scan replaced gives no transfer, by its hash or by its height.
+	faultExec(t, f.ctx, f.admin, `INSERT INTO chain_blocks(chain_id,height,block_hash,block_time,canonical_status,first_observed_at,last_observed_at) VALUES($1,966,'0xorphan',$2,'reorged',$2,$2),($1,967,'0xcanonical',$2,'safe',$2,$2)`, chain, now)
+	for height, hash := range map[uint64]string{966: "0xorphan", 967: "0xother"} {
+		orphaned := event
+		orphaned.ID, orphaned.Identity.TransactionID, orphaned.BlockHeight, orphaned.BlockHash = faultID(t), "0xorphaned"+hash, height, hash
+		if _, err := store.CommitInternal(f.ctx, scanner.InternalCommit{ChainID: chain, Shard: shard, From: 965, To: 970, Events: []domain.TransferEvent{orphaned}}); !errors.Is(err, domain.ErrStateConflict) {
+			t.Fatalf("a transfer from a replaced block was accepted: %v", err)
+		}
+	}
+	if n := f.count(t, `SELECT count(*) FROM scanner_internal_cursors WHERE chain_id=$1 AND cursor_height=964`, chain); n != 1 {
+		t.Fatal("a refused commit moved the lane cursor")
+	}
+	// Settlement refuses a replaced block even for a transfer that got past the queue.
+	orphaned := event
+	orphaned.ID, orphaned.Identity.TransactionID, orphaned.BlockHeight, orphaned.BlockHash = faultID(t), "0xlate", 966, "0xorphan"
+	orphaned.EvidenceHash, orphaned.ParserVersion, orphaned.OnChainTime = strings.Repeat("a", 64), "evm-v1", now
+	err = pgx.BeginFunc(f.ctx, f.admin, func(tx pgx.Tx) error {
+		_, _, _, err := insertCanonicalTransfer(f.ctx, tx, orphaned)
+		return err
+	})
+	if !errors.Is(err, domain.ErrStateConflict) {
+		t.Fatalf("settlement accepted a replaced block: %v", err)
+	}
+
+	// A reorg rewinds the lane with the scan and takes the queue with it.
+	const owner = "internal-lane-reorg"
+	faultExec(t, f.ctx, f.admin, `UPDATE scanner_cursors SET cursor_hash='0xtip' WHERE chain_id=$1`, chain)
+	faultExec(t, f.ctx, f.admin, `INSERT INTO chain_blocks(chain_id,height,block_hash,block_time,canonical_status,first_observed_at,last_observed_at) VALUES($1,900,'0xancestor',$2,'safe',$2,$2),($1,1000,'0xtip',$2,'safe',$2,$2)`, chain, now)
+	queued := event
+	queued.ID, queued.Identity.TransactionID, queued.BlockHeight, queued.BlockHash = faultID(t), "0xqueued", 1000, "0xtip"
+	if _, err := store.CommitInternal(f.ctx, scanner.InternalCommit{ChainID: chain, Shard: shard, From: 965, To: 1000, Events: []domain.TransferEvent{queued}}); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := store.Acquire(f.ctx, chain, shard, owner, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := scanner.RangeBatch{From: 900, To: 1000, Blocks: []scanner.Block{{Height: 900, Hash: "0xancestor", Time: now}, {Height: 1000, Hash: "0xnewtip", Time: now}}}
+	if err := store.RewindReorg(f.ctx, lease, batch, scanner.ReorgError{Height: 1000, CommittedHash: "0xtip", NewHash: "0xnewtip"}); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.count(t, `SELECT count(*) FROM scanner_transfer_queue WHERE event_id=$1 AND status='reorged'`, queued.ID); n != 1 {
+		t.Fatal("a queued transfer from a replaced block stayed claimable")
+	}
+	if n := f.count(t, `SELECT count(*) FROM scanner_internal_cursors WHERE chain_id=$1 AND cursor_height=900`, chain); n != 1 {
+		t.Fatal("the lane stayed ahead of a rewound scan and would skip the new blocks")
 	}
 }

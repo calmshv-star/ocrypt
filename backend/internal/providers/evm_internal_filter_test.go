@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -11,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/calmshv-star/ocrypt/backend/internal/domain"
+	"github.com/calmshv-star/ocrypt/backend/internal/money"
 	"github.com/calmshv-star/ocrypt/backend/internal/scanner"
 )
 
@@ -169,6 +172,15 @@ func TestEVMInternalFilterRequiresTwoMatchingTransactionProofs(t *testing.T) {
 					if traceCalls != nil {
 						*traceCalls++
 					}
+					var filter struct {
+						After int `json:"after"`
+					}
+					if err := json.Unmarshal(params[0], &filter); err != nil {
+						t.Fatal(err)
+					}
+					if filter.After > 0 {
+						return marshal([]any{})
+					}
 					return marshal([]any{map[string]any{
 						"action": map[string]any{"from": "0x2222222222222222222222222222222222222222",
 							"to": watched, "value": traceValue, "callType": "call"},
@@ -293,6 +305,11 @@ type internalTree struct {
 	receiptStatus string
 	safeHeight    string
 	down          bool
+	endless       bool
+	code          string
+	receiptHeight string
+	receiptBlock  string
+	traceCalls    *int
 }
 
 const (
@@ -358,10 +375,36 @@ func internalSourceFor(t *testing.T, endpoint string, state internalTree) *EVMSo
 				}
 				return internalJSON(t, state.nonceEnd)
 			case "eth_getCode":
+				var height string
+				if err := json.Unmarshal(params[1], &height); err != nil {
+					t.Fatal(err)
+				}
+				if height != "0x0" && state.code != "" {
+					return internalJSON(t, state.code)
+				}
 				return internalJSON(t, "0x")
 			case "eth_getTransactionReceipt":
-				return internalJSON(t, evmReceipt{TransactionHash: internalTestTx, BlockHash: internalTestBlock, BlockNumber: "0x1", Status: status})
+				receiptHeight, receiptBlock := "0x1", internalTestBlock
+				if state.receiptHeight != "" {
+					receiptHeight = state.receiptHeight
+				}
+				if state.receiptBlock != "" {
+					receiptBlock = state.receiptBlock
+				}
+				return internalJSON(t, evmReceipt{TransactionHash: internalTestTx, BlockHash: receiptBlock, BlockNumber: receiptHeight, Status: status})
 			case "trace_filter":
+				if state.traceCalls != nil {
+					*state.traceCalls++
+				}
+				var filter struct {
+					After int `json:"after"`
+				}
+				if err := json.Unmarshal(params[0], &filter); err != nil {
+					t.Fatal(err)
+				}
+				if filter.After > 0 && !state.endless {
+					return internalJSON(t, []any{})
+				}
 				return state.filter
 			case "trace_transaction":
 				return state.tree
@@ -371,7 +414,7 @@ func internalSourceFor(t *testing.T, endpoint string, state internalTree) *EVMSo
 			}
 		})
 	})
-	source, err := NewEVMSource(EVMConfig{HTTP: HTTPConfig{Endpoint: endpoint, Client: client}, ProviderID: endpoint,
+	source, err := NewEVMSource(EVMConfig{HTTP: HTTPConfig{Endpoint: endpoint, Client: client, MaxResponseBytes: InternalTraceResponseLimit}, ProviderID: endpoint,
 		ChainID: "eip155:1", GenesisHash: internalTestGenesis, NativeAssetID: "eth", NativeDecimals: 18,
 		IncludeInternal: true, AddressFiltered: true, WatchedAddresses: []string{internalTestWatched}})
 	if err != nil {
@@ -501,7 +544,7 @@ func TestEVMInternalFilterRecordsWhatCannotBeRead(t *testing.T) {
 	child := internalFrame([]int{0}, 0, internalTestContract, internalTestWatched, "0x5", "call", "")
 	discovered := internalJSON(t, []any{child})
 	tree := internalJSON(t, []any{root, child})
-	tooLarge := json.RawMessage(`"` + strings.Repeat("a", maxResponseBytes+1) + `"`)
+	tooLarge := json.RawMessage(`"` + strings.Repeat("a", InternalTraceResponseLimit+1) + `"`)
 	t.Run("call tree too large on both", func(t *testing.T) {
 		state := internalTree{nonceEnd: "0x1", endBalance: "0x0", filter: discovered, tree: tooLarge}
 		batch, err := internalFilterFor(t, state, state).ScanRange(context.Background(), 1, 1)
@@ -513,14 +556,26 @@ func TestEVMInternalFilterRecordsWhatCannotBeRead(t *testing.T) {
 			t.Fatalf("events=%+v rows=%+v", batch.Events, batch.Unattributed)
 		}
 	})
-	t.Run("call tree too large on one provider", func(t *testing.T) {
+	t.Run("call tree too large on one provider is that provider's fault", func(t *testing.T) {
 		batch, err := internalFilterFor(t, internalTree{nonceEnd: "0x1", endBalance: "0x0", filter: discovered, tree: tooLarge},
 			internalTree{nonceEnd: "0x1", endBalance: "0x0", filter: discovered, tree: tree}).ScanRange(context.Background(), 1, 1)
+		if err == nil {
+			t.Fatalf("one provider must not decide what is dropped: events=%+v rows=%+v", batch.Events, batch.Unattributed)
+		}
+	})
+	t.Run("more transfers in a transaction than a payment has", func(t *testing.T) {
+		frames, flat := make([]any, 0, maxTransfersPerTransaction+1), []any{internalFrame([]int{}, maxTransfersPerTransaction+1, internalTestSender, internalTestContract, "0x0", "call", "")}
+		for index := 0; index <= maxTransfersPerTransaction; index++ {
+			frame := internalFrame([]int{index}, 0, internalTestContract, internalTestWatched, "0x1", "call", "")
+			frames, flat = append(frames, frame), append(flat, frame)
+		}
+		state := internalTree{nonceEnd: "0x1", endBalance: "0x0", filter: internalJSON(t, frames), tree: internalJSON(t, flat)}
+		batch, err := internalFilterFor(t, state, state).ScanRange(context.Background(), 1, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(batch.Events) != 0 || len(batch.Unattributed) != 1 {
-			t.Fatalf("what one provider cannot read must not be credited: events=%+v rows=%+v", batch.Events, batch.Unattributed)
+		if len(batch.Events) != 0 || len(batch.Unattributed) != 1 || batch.Unattributed[0].Reason != scanner.UnattributedCallTree {
+			t.Fatalf("events=%d rows=%+v", len(batch.Events), batch.Unattributed)
 		}
 	})
 	t.Run("too many frames", func(t *testing.T) {
@@ -528,7 +583,7 @@ func TestEVMInternalFilterRecordsWhatCannotBeRead(t *testing.T) {
 		for index := range page {
 			page[index] = internalFrame([]int{index}, 0, internalTestContract, internalTestWatched, "0x0", "call", "")
 		}
-		state := internalTree{nonceEnd: "0x1", endBalance: "0x0", filter: internalJSON(t, page), tree: tree}
+		state := internalTree{nonceEnd: "0x1", endBalance: "0x0", filter: internalJSON(t, page), tree: tree, endless: true}
 		batch, err := internalFilterFor(t, state, state).ScanRange(context.Background(), 1, 1)
 		if err != nil {
 			t.Fatal(err)
@@ -669,4 +724,278 @@ func TestTransportErrorsDoNotQuoteTheEndpoint(t *testing.T) {
 	if err == nil || strings.Contains(err.Error(), "SECRETKEY") || !strings.Contains(err.Error(), "connection refused") {
 		t.Fatalf("err=%v", err)
 	}
+}
+
+// A range that needs a trace is cheap only when watched wallets are few. With
+// many, a sweep replaces the balance reads, and a clean sweep needs nothing else.
+func TestEVMInternalFilterSweepsInsteadOfReadingManyBalances(t *testing.T) {
+	calls := map[string]int{}
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		return 200, rpcResult(t, request, func(method string, _ []json.RawMessage) json.RawMessage {
+			calls[method]++
+			switch method {
+			case "eth_chainId":
+				return internalJSON(t, "0x1")
+			case "eth_getBlockByNumber":
+				return internalJSON(t, evmBlock{Number: "0x1", Hash: internalTestBlock, ParentHash: internalTestGenesis, Timestamp: "0x64"})
+			case "trace_filter":
+				return internalJSON(t, []any{})
+			default:
+				t.Fatalf("unexpected RPC %s", method)
+				return nil
+			}
+		})
+	})
+	addresses := make([]string, 0, maxBalanceWatched+1)
+	for index := 0; index <= maxBalanceWatched; index++ {
+		addresses = append(addresses, fmt.Sprintf("0x%040x", index+1))
+	}
+	source := func(endpoint string) *EVMSource {
+		evm, err := NewEVMSource(EVMConfig{HTTP: HTTPConfig{Endpoint: endpoint, Client: client}, ProviderID: endpoint, ChainID: "eip155:1", GenesisHash: internalTestGenesis, NativeAssetID: "eth", NativeDecimals: 18, IncludeInternal: true, AddressFiltered: true, WatchedAddresses: addresses})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return evm
+	}
+	base := internalBaseFixture{}
+	filter, err := NewEVMInternalFilter(base, source("https://trace-a.example"), source("https://trace-b.example"), "eip155:1", internalTestGenesis, addresses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := filter.ScanRange(context.Background(), 1, 1)
+	if err != nil || batch.From != 1 || batch.To != 1 || len(batch.Events) != 0 {
+		t.Fatalf("batch=%+v err=%v", batch, err)
+	}
+	if calls["eth_getBalance"] != 0 || calls["trace_filter"] != 2 {
+		t.Fatalf("calls=%v", calls)
+	}
+}
+
+func TestEVMInternalFilterHoldsARangeBelowTheRequiredConfirmations(t *testing.T) {
+	root := internalFrame([]int{}, 1, internalTestSender, internalTestContract, "0x0", "call", "")
+	child := internalFrame([]int{0}, 0, internalTestContract, internalTestWatched, "0x5", "call", "")
+	state := internalTree{nonceEnd: "0x1", endBalance: "0x0", filter: internalJSON(t, []any{child}), tree: internalJSON(t, []any{root, child}), safeHeight: "0x3"}
+	filter := internalFilterFor(t, state, state)
+	filter.WithRequiredConfirmations(4)
+	if _, err := filter.ScanRange(context.Background(), 1, 1); err == nil || !scanner.Retryable(err) {
+		t.Fatalf("a transfer below its finality must wait: %v", err)
+	}
+	filter.WithRequiredConfirmations(3)
+	batch, err := filter.ScanRange(context.Background(), 1, 1)
+	if err != nil || len(batch.Events) != 1 || batch.Events[0].Confirmations != 3 {
+		t.Fatalf("events=%+v err=%v", batch.Events, err)
+	}
+}
+
+// Movement that ordinary transfers explain needs no trace provider at all.
+func TestEVMInternalFilterExplainedMovementNeedsNoTrace(t *testing.T) {
+	calls := 0
+	state := internalTree{nonceEnd: "0x0", endBalance: "0x5", traceCalls: &calls}
+	amount, err := money.Parse("5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := internalBaseFixture{batch: scanner.RangeBatch{From: 1, To: 1, Blocks: []scanner.Block{{Height: 1, Hash: internalTestBlock, Time: time.Unix(100, 0).UTC()}},
+		Events: []domain.TransferEvent{{Kind: "native_top_level", Amount: amount, BlockHeight: 1, Identity: domain.EventIdentity{ToAddress: internalTestWatched, AssetID: "eth"}}}}}
+	filter, err := NewEVMInternalFilter(base, internalSourceFor(t, "https://trace-a.example", state), internalSourceFor(t, "https://trace-b.example", state), "eip155:1", internalTestGenesis, []string{internalTestWatched})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := filter.ScanRange(context.Background(), 1, 1)
+	if err != nil || calls != 0 || len(batch.Unattributed) != 0 {
+		t.Fatalf("calls=%d batch=%+v err=%v", calls, batch, err)
+	}
+}
+
+// A contract wallet's balance proves nothing, so it is always traced, and its
+// unexplained movement is not reported as if it were an EOA's.
+func TestEVMInternalFilterAlwaysTracesAWalletWithCode(t *testing.T) {
+	calls := 0
+	state := internalTree{nonceEnd: "0x0", endBalance: "0x0", code: "0x60", filter: internalJSON(t, []any{}), tree: internalJSON(t, []any{}), traceCalls: &calls}
+	batch, err := internalFilterFor(t, state, state).ScanRange(context.Background(), 1, 1)
+	if err != nil || calls == 0 || len(batch.Unattributed) != 0 {
+		t.Fatalf("calls=%d batch=%+v err=%v", calls, batch, err)
+	}
+}
+
+func TestEVMInternalFilterConfirmationsComeFromTheSlowerProvider(t *testing.T) {
+	root := internalFrame([]int{}, 1, internalTestSender, internalTestContract, "0x0", "call", "")
+	child := internalFrame([]int{0}, 0, internalTestContract, internalTestWatched, "0x5", "call", "")
+	state := internalTree{nonceEnd: "0x1", endBalance: "0x0", filter: internalJSON(t, []any{child}), tree: internalJSON(t, []any{root, child})}
+	fast, slow := state, state
+	fast.safeHeight, slow.safeHeight = "0x9", "0x4"
+	batch, err := internalFilterFor(t, fast, slow).ScanRange(context.Background(), 1, 1)
+	if err != nil || len(batch.Events) != 1 || batch.Events[0].Confirmations != 4 {
+		t.Fatalf("events=%+v err=%v", batch.Events, err)
+	}
+}
+
+func TestEVMInternalFilterRefusesWhatTheChainDoesNotConfirm(t *testing.T) {
+	root := internalFrame([]int{}, 1, internalTestSender, internalTestContract, "0x0", "call", "")
+	child := internalFrame([]int{0}, 0, internalTestContract, internalTestWatched, "0x5", "call", "")
+	good := internalTree{nonceEnd: "0x1", endBalance: "0x0", filter: internalJSON(t, []any{child}), tree: internalJSON(t, []any{root, child})}
+	for name, change := range map[string]func(*internalTree){
+		"receipt in another block number": func(state *internalTree) { state.receiptHeight = "0x2" },
+		"receipt in another block hash":   func(state *internalTree) { state.receiptBlock = internalTestGenesis },
+	} {
+		t.Run(name, func(t *testing.T) {
+			state := good
+			change(&state)
+			if _, err := internalFilterFor(t, state, state).ScanRange(context.Background(), 1, 1); err == nil {
+				t.Fatal("a mismatched receipt was accepted")
+			}
+		})
+	}
+	t.Run("one receipt is not enough", func(t *testing.T) {
+		filter := internalFilterFor(t, good, good)
+		broken := internalSourceFor(t, "https://broken.example", internalTree{down: true})
+		honest := internalSourceFor(t, "https://honest.example", good)
+		other := internalSourceFor(t, "https://other.example", good)
+		if err := filter.WithBalanceProbes(honest, other); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := filter.ScanRange(context.Background(), 1, 1); err != nil {
+			t.Fatal(err)
+		}
+		// Balances agree on the first two; only the receipt reaches the broken one.
+		single := internalFilterFor(t, good, good)
+		if err := single.WithBalanceProbes(honest, broken); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := single.ScanRange(context.Background(), 1, 1); err == nil {
+			t.Fatal("one provider's word was enough")
+		}
+	})
+	t.Run("block outside the canonical scan", func(t *testing.T) {
+		base := internalBaseFixture{batch: scanner.RangeBatch{From: 1, To: 1, Blocks: []scanner.Block{{Height: 1, Hash: internalTestGenesis, Time: time.Unix(100, 0).UTC()}}}}
+		filter, err := NewEVMInternalFilter(base, internalSourceFor(t, "https://trace-a.example", good), internalSourceFor(t, "https://trace-b.example", good), "eip155:1", internalTestGenesis, []string{internalTestWatched})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := filter.ScanRange(context.Background(), 1, 1); err == nil {
+			t.Fatal("a transfer from a block the scan does not know was accepted")
+		}
+	})
+}
+
+func TestEVMInternalFilterOneSidedOversizeIsRetried(t *testing.T) {
+	root := internalFrame([]int{}, 1, internalTestSender, internalTestContract, "0x0", "call", "")
+	child := internalFrame([]int{0}, 0, internalTestContract, internalTestWatched, "0x5", "call", "")
+	good := internalTree{nonceEnd: "0x1", endBalance: "0x0", filter: internalJSON(t, []any{child}), tree: internalJSON(t, []any{root, child})}
+	oversized := good
+	oversized.filter = json.RawMessage(`"` + strings.Repeat("a", InternalTraceResponseLimit+1) + `"`)
+	if batch, err := internalFilterFor(t, oversized, good).ScanRange(context.Background(), 1, 1); err == nil {
+		t.Fatalf("one provider dropped a block: %+v", batch)
+	}
+}
+
+// Both agree nothing was credited, but only one of them could read the
+// transaction: that is not agreement.
+func TestEVMInternalFilterAgreementCoversWhatCouldNotBeRead(t *testing.T) {
+	root := internalFrame([]int{}, 1, internalTestSender, internalTestContract, "0x0", "call", "Reverted")
+	child := internalFrame([]int{0}, 0, internalTestContract, internalTestWatched, "0x5", "call", "")
+	discovered := internalJSON(t, []any{child})
+	read := internalTree{nonceEnd: "0x1", endBalance: "0x0", filter: discovered, tree: internalJSON(t, []any{root, child})}
+	unread := internalTree{nonceEnd: "0x1", endBalance: "0x0", filter: discovered, tree: json.RawMessage(`"` + strings.Repeat("a", InternalTraceResponseLimit+1) + `"`)}
+	if batch, err := internalFilterFor(t, read, unread).ScanRange(context.Background(), 1, 1); err == nil {
+		t.Fatalf("a transaction one provider could not read passed: %+v", batch)
+	}
+}
+
+// One crafted block costs itself, not the four-block span around it.
+func TestEVMInternalFilterNarrowsAnOversizedSpanToItsBlock(t *testing.T) {
+	frame := func(height int) map[string]any {
+		frame := internalFrame([]int{0}, 0, internalTestContract, internalTestWatched, "0x5", "call", "")
+		frame["blockNumber"] = height
+		frame["transactionHash"] = fmt.Sprintf("0x%064x", height)
+		return frame
+	}
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		return 200, rpcResult(t, request, func(method string, params []json.RawMessage) json.RawMessage {
+			if method != "trace_filter" {
+				t.Fatalf("unexpected RPC %s", method)
+			}
+			var filter struct {
+				From  string `json:"fromBlock"`
+				To    string `json:"toBlock"`
+				After int    `json:"after"`
+			}
+			if err := json.Unmarshal(params[0], &filter); err != nil {
+				t.Fatal(err)
+			}
+			if filter.From != filter.To || filter.From == "0x2" {
+				return json.RawMessage(`"` + strings.Repeat("a", InternalTraceResponseLimit+1) + `"`)
+			}
+			if filter.After > 0 {
+				return internalJSON(t, []any{})
+			}
+			height, err := strconv.ParseInt(strings.TrimPrefix(filter.From, "0x"), 16, 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return internalJSON(t, []any{frame(int(height))})
+		})
+	})
+	source, err := NewEVMSource(EVMConfig{HTTP: HTTPConfig{Endpoint: "https://trace.example", Client: client, MaxResponseBytes: InternalTraceResponseLimit}, ProviderID: "trace", ChainID: "eip155:1", GenesisHash: internalTestGenesis, NativeAssetID: "eth", NativeDecimals: 18, IncludeInternal: true, AddressFiltered: true, WatchedAddresses: []string{internalTestWatched}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, oversized, err := source.filteredInternalTraces(context.Background(), 1, 4, map[string]struct{}{internalTestWatched: {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 3 || len(oversized) != 1 || oversized[0] != (internalTraceSpan{2, 2}) {
+		t.Fatalf("candidates=%+v oversized=%+v", candidates, oversized)
+	}
+}
+
+func TestCallTreeDepthStopsAtTheEVMLimit(t *testing.T) {
+	flat := make([]evmFlatTrace, 0, maxEVMCallDepth+2)
+	path := make([]uint32, 0, maxEVMCallDepth+1)
+	for depth := 0; depth <= maxEVMCallDepth+1; depth++ {
+		frame := evmFlatTrace{TransactionHash: internalTestTx, BlockHash: internalTestBlock, BlockNumber: 1, TraceAddress: append([]uint32(nil), path...), Subtraces: 1, Type: "call"}
+		frame.Action.CallType, frame.Action.Value = "call", "0x0"
+		flat = append(flat, frame)
+		path = append(path, 0)
+	}
+	flat[len(flat)-1].Subtraces = 0
+	if _, err := canonicalTraceTree(flat, internalTestTx, 1, internalTestBlock); err == nil {
+		t.Fatal("a tree deeper than the EVM allows was accepted")
+	}
+	flat = flat[:maxEVMCallDepth]
+	flat[len(flat)-1].Subtraces = 0
+	if _, err := canonicalTraceTree(flat, internalTestTx, 1, internalTestBlock); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCallcodeDoesNotMoveValueToItsTarget(t *testing.T) {
+	if evmTraceMovesValue("CALLCODE") || evmTraceMovesValue("DELEGATECALL") || !evmTraceMovesValue("CALL") {
+		t.Fatal("wrong value-moving call types")
+	}
+}
+
+// The limiter must not make a short deadline wait for a long one.
+func TestRateLimitWaitDoesNotHoldOtherCallers(t *testing.T) {
+	client, err := newEndpointClient(HTTPConfig{Endpoint: "https://rpc.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.postpone(time.Hour)
+	long, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- client.waitForRateLimit(long) }()
+	time.Sleep(20 * time.Millisecond)
+	short, cancelShort := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancelShort()
+	started := time.Now()
+	if err := client.waitForRateLimit(short); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err=%v", err)
+	}
+	if waited := time.Since(started); waited > time.Second {
+		t.Fatalf("a short deadline waited %s", waited)
+	}
+	cancel()
+	<-done
 }

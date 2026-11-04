@@ -70,6 +70,10 @@ const (
 	// DefaultInternalRange is about one Ethereum finality epoch.
 	DefaultInternalRange       = uint64(32)
 	DefaultInternalGiveUpAfter = 30 * time.Minute
+	// InternalRequestInterval paces the lane's own clients, so it cannot use up
+	// a provider's quota that the ordinary scan shares.
+	InternalRequestInterval = 250 * time.Millisecond
+	internalCommitTimeout   = 30 * time.Second
 )
 
 // RunOnce handles one range and says whether more work may be waiting.
@@ -120,7 +124,11 @@ func (l *InternalLane) RunOnce(ctx context.Context, plan InternalPlan) (bool, er
 			commit.Unattributed = batch.Unattributed
 		}
 	}
-	recorded, err := l.Store.CommitInternal(ctx, commit)
+	// The commit survives a step that ran out of time: otherwise the range that
+	// used up the budget could never be given up.
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), internalCommitTimeout)
+	defer cancel()
+	recorded, err := l.Store.CommitInternal(commitCtx, commit)
 	if err != nil {
 		return false, err
 	}

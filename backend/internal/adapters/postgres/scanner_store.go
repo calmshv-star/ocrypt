@@ -231,7 +231,25 @@ func (s *ScannerStore) CommitInternal(ctx context.Context, commit scanner.Intern
 			if command.RowsAffected() != 1 {
 				return fmt.Errorf("%w: internal lane cursor moved", domain.ErrVersionConflict)
 			}
+			// The ordinary cursor is the only proof a range is still canonical: a
+			// reorg may have rewound it while the lane was reading.
+			var scanned bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM scanner_cursors WHERE chain_id=$1 AND scanner_shard=$2 AND capability=$3 AND cursor_height>=$4::numeric)`, commit.ChainID, commit.Shard, s.capability, strconv.FormatUint(commit.To, 10)).Scan(&scanned); err != nil {
+				return err
+			}
+			if !scanned {
+				return fmt.Errorf("%w: internal lane range is ahead of the ordinary scan", domain.ErrVersionConflict)
+			}
 			for _, event := range commit.Events {
+				// History older than the scanner keeps has no rows to contradict it.
+				var replaced bool
+				err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM chain_blocks WHERE chain_id=$1 AND ((block_hash=$2 AND canonical_status='reorged') OR (height=$3::numeric AND block_hash<>$2 AND canonical_status<>'reorged')))`, commit.ChainID, event.BlockHash, strconv.FormatUint(event.BlockHeight, 10)).Scan(&replaced)
+				if err != nil {
+					return err
+				}
+				if replaced {
+					return fmt.Errorf("%w: internal transfer belongs to a replaced block", domain.ErrStateConflict)
+				}
 				if err := enqueueTransfer(ctx, tx, commit.ChainID, event); err != nil {
 					return err
 				}

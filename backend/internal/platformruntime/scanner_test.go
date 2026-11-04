@@ -1,13 +1,17 @@
 package platformruntime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -302,6 +306,140 @@ func TestScannerLoaderPausesTheLaneDuringMaintenance(t *testing.T) {
 	keys, state := tracedState()
 	runtime, err := tracedLoader(state).Load(context.Background(), keys, time.Date(2026, 8, 12, 1, 30, 0, 0, time.UTC))
 	if err != nil || !runtime.Paused || !runtime.Internal.Paused {
+		t.Fatalf("unexpected runtime: %+v %v", runtime, err)
+	}
+}
+
+// laneChain answers the internal lane's RPC by host, and records who was asked.
+type laneChain struct {
+	t        *testing.T
+	balance  string
+	down     map[string]bool
+	mu       sync.Mutex
+	hosts    map[string]int
+	requests []string
+}
+
+func (c *laneChain) RoundTrip(request *http.Request) (*http.Response, error) {
+	raw, err := io.ReadAll(request.Body)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	var call struct {
+		ID     json.RawMessage   `json:"id"`
+		Method string            `json:"method"`
+		Params []json.RawMessage `json:"params"`
+	}
+	if err := json.Unmarshal(raw, &call); err != nil {
+		c.t.Fatal(err)
+	}
+	c.mu.Lock()
+	c.hosts[request.URL.Host]++
+	c.mu.Unlock()
+	if c.down[request.URL.Host] {
+		return &http.Response{StatusCode: 500, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(""))}, nil
+	}
+	var result any
+	switch call.Method {
+	case "eth_chainId":
+		result = "0x1"
+	case "eth_getBalance":
+		var height string
+		_ = json.Unmarshal(call.Params[1], &height)
+		result = "0x0"
+		if height != "0x4" {
+			result = c.balance
+		}
+	case "eth_getTransactionCount":
+		result = "0x0"
+	case "eth_getCode":
+		result = "0x"
+	case "eth_getBlockByNumber":
+		result = map[string]any{"number": "0x5", "hash": "0x" + strings.Repeat("b", 64), "parentHash": "0x" + strings.Repeat("a", 64), "timestamp": "0x64", "transactions": []any{}}
+	case "eth_getLogs":
+		result = []any{}
+	default:
+		c.t.Fatalf("unexpected RPC %s", call.Method)
+	}
+	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": call.ID, "result": result})
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body))}, nil
+}
+
+func lanePlan(t *testing.T, chain *laneChain, admission *traceAdmission, pause bool) ScannerRuntime {
+	t.Helper()
+	keys, state := tracedState()
+	if pause {
+		state.Paused = map[platformadmin.RuntimeSnapshotKey]bool{{Kind: platformadmin.KindRPCProvider, LogicalKey: "rpc/trace-a"}: true}
+	}
+	loader := tracedLoader(state)
+	loader.LaneClient = &http.Client{Transport: chain}
+	if admission != nil {
+		loader.ProviderAdmission, loader.UnsafeTestBypass = admission, false
+	}
+	runtime, err := loader.Load(context.Background(), keys, time.Date(2026, 8, 11, 0, 0, 0, 0, time.UTC))
+	if err != nil || runtime.InternalError != nil || runtime.Internal.Source == nil {
+		t.Fatalf("unexpected runtime: %+v %v", runtime, err)
+	}
+	return runtime
+}
+
+// Lost admission and an emergency pause reach the lane: nothing but a range that
+// needs a trace waits, and the provider is not used at all.
+func TestLanePlanStopsUsingAProviderThatLostItsStanding(t *testing.T) {
+	for name, build := range map[string]func(*testing.T, *laneChain) ScannerRuntime{
+		"lost admission": func(t *testing.T, chain *laneChain) ScannerRuntime {
+			return lanePlan(t, chain, &traceAdmission{refuse: true}, false)
+		},
+		"paused": func(t *testing.T, chain *laneChain) ScannerRuntime { return lanePlan(t, chain, nil, true) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			chain := &laneChain{t: t, balance: "0x0", hosts: map[string]int{}}
+			if batch, err := build(t, chain).Internal.Source.ScanRange(context.Background(), 5, 5); err != nil || batch.To != 5 {
+				t.Fatalf("an idle range needs no trace provider: %+v %v", batch, err)
+			}
+			if chain.hosts["trace-a.example"]+chain.hosts["trace-b.example"] != 0 {
+				t.Fatalf("hosts=%v", chain.hosts)
+			}
+			moved := &laneChain{t: t, balance: "0x5", hosts: map[string]int{}}
+			if _, err := build(t, moved).Internal.Source.ScanRange(context.Background(), 5, 5); err == nil {
+				t.Fatal("a range that needs a trace went on without the provider")
+			}
+			if moved.hosts["trace-a.example"]+moved.hosts["trace-b.example"] != 0 {
+				t.Fatalf("hosts=%v", moved.hosts)
+			}
+		})
+	}
+}
+
+func TestLanePlanDoesNotFallBackToAProviderThatLostItsStanding(t *testing.T) {
+	chain := &laneChain{t: t, balance: "0x0", hosts: map[string]int{}, down: map[string]bool{"one.example": true}}
+	if _, err := lanePlan(t, chain, &traceAdmission{refuse: true}, false).Internal.Source.ScanRange(context.Background(), 5, 5); err == nil {
+		t.Fatal("one provider's balance was accepted")
+	}
+	if chain.hosts["trace-a.example"]+chain.hosts["trace-b.example"] != 0 {
+		t.Fatalf("hosts=%v", chain.hosts)
+	}
+}
+
+func TestLanePlanReadsBalancesFromAnyTwoProviders(t *testing.T) {
+	chain := &laneChain{t: t, balance: "0x0", hosts: map[string]int{}, down: map[string]bool{"one.example": true}}
+	batch, err := lanePlan(t, chain, nil, false).Internal.Source.ScanRange(context.Background(), 5, 5)
+	if err != nil || batch.To != 5 {
+		t.Fatalf("batch=%+v err=%v", batch, err)
+	}
+	if chain.hosts["two.example"] == 0 || chain.hosts["trace-a.example"] == 0 {
+		t.Fatalf("hosts=%v", chain.hosts)
+	}
+}
+
+func TestLanePlanRefusesAnInvalidTraceSnapshot(t *testing.T) {
+	keys, state := tracedState()
+	state.Snapshots[7].PayloadHash = "short"
+	runtime, err := tracedLoader(state).Load(context.Background(), keys, time.Date(2026, 8, 11, 0, 0, 0, 0, time.UTC))
+	if err != nil || runtime.InternalError == nil || runtime.Source == nil {
 		t.Fatalf("unexpected runtime: %+v %v", runtime, err)
 	}
 }

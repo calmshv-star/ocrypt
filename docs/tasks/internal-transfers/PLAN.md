@@ -31,7 +31,9 @@ snapshot with the helper before assigning implementation workers.
 ## Resume / next action
 
 The first independent review found stop-the-chain paths, so detection moved to its
-own lane. Remaining limits: customer receipts for internal transfers; health
-probes do not exercise the trace methods; trace and balance calls bypass the
-policy source's rate limits; no public pair for Base, Arbitrum, Polygon,
-Avalanche, BSC or Plasma. Nothing here is deployed.
+own lane. The second found false credits across a reorg, a stuck give-up, a
+shared limiter and memory exhaustion, all fixed; see DECISIONS.md 13-17. A
+mutation run over 16 of the new guards found two unproved ones, and tests were
+added for both. Remaining limits: customer receipts for internal transfers; the
+limits listed at the end of DECISIONS.md; no public pair for Base, Arbitrum,
+Polygon, Avalanche, BSC or Plasma. Nothing here is deployed.

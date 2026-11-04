@@ -152,7 +152,14 @@ func (c recoveryChain) RoundTrip(request *http.Request) (*http.Response, error) 
 	case "eth_getCode":
 		result = "0x"
 	case "trace_filter":
-		result = []any{child}
+		var filter struct {
+			After int `json:"after"`
+		}
+		_ = json.Unmarshal(call.Params[0], &filter)
+		result = []any{}
+		if filter.After == 0 {
+			result = []any{child}
+		}
 	case "trace_transaction":
 		result = []any{root, child}
 	case "eth_getTransactionReceipt":

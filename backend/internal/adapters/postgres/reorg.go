@@ -104,6 +104,11 @@ func (s *ScannerStore) RewindReorg(ctx context.Context, lease scanner.Lease, bat
 
 		var eventIDs []string
 		if len(replacedHashes) > 0 {
+			// A queued transfer has no transfer_events row yet, so only its stored
+			// block binds it to the orphaned block. Left alone, it would settle.
+			if _, err := tx.Exec(ctx, `UPDATE scanner_transfer_queue SET status='reorged',locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error='canonical_block_replaced',updated_at=clock_timestamp() WHERE chain_id=$1 AND status<>'reorged' AND canonical_event->>'block_hash'=ANY($2::text[])`, lease.ChainID, replacedHashes); err != nil {
+				return err
+			}
 			eventRows, err := tx.Query(ctx, `SELECT id::text FROM transfer_events WHERE chain_id=$1 AND block_hash=ANY($2::text[]) AND status<>'reorged' FOR UPDATE`, lease.ChainID, replacedHashes)
 			if err != nil {
 				return err
@@ -173,6 +178,11 @@ func (s *ScannerStore) RewindReorg(ctx context.Context, lease scanner.Lease, bat
 		}
 		if command.RowsAffected() != 1 {
 			return fmt.Errorf("%w: scanner lease was lost", domain.ErrVersionConflict)
+		}
+		// The internal lane must read the replacement blocks too. Moving its cursor
+		// also makes a commit already in flight for the old blocks lose its race.
+		if _, err := tx.Exec(ctx, `UPDATE scanner_internal_cursors SET cursor_height=LEAST(cursor_height,$1::numeric),updated_at=clock_timestamp() WHERE chain_id=$2 AND scanner_shard=$3`, strconv.FormatUint(rewindHeight, 10), lease.ChainID, lease.Shard); err != nil {
+			return err
 		}
 		return nil
 	})

@@ -25,7 +25,10 @@ func (s *laneStore) StartInternal(_ context.Context, _, _ string, height uint64)
 	return nil
 }
 
-func (s *laneStore) CommitInternal(_ context.Context, commit InternalCommit) (int, error) {
+func (s *laneStore) CommitInternal(ctx context.Context, commit InternalCommit) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	if s.fail != nil {
 		return 0, s.fail
 	}
@@ -184,5 +187,51 @@ func TestInternalLaneKeepsItsCursorWhenTheCommitFails(t *testing.T) {
 func TestInternalLaneRejectsInvalidConfiguration(t *testing.T) {
 	if _, err := (&InternalLane{}).RunOnce(t.Context(), InternalPlan{}); err == nil {
 		t.Fatal("accepted an empty lane")
+	}
+}
+
+// A step that ran out of time is exactly the range that needs giving up.
+func TestInternalLaneRecordsARangeAfterItsStepTimedOut(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	store := &laneStore{progress: InternalProgress{Cursor: 100, Scanned: 110, Started: true, HasScanned: true}}
+	source := &laneSource{err: context.DeadlineExceeded}
+	lane := newLane(store)
+	lane.Now = func() time.Time { return now }
+	expired, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := lane.RunOnce(expired, InternalPlan{Source: source}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err=%v", err)
+	}
+	now = now.Add(lane.GiveUpAfter)
+	if _, err := lane.RunOnce(expired, InternalPlan{Source: source}); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.commits) != 1 || store.commits[0].Unattributed[0].Reason != UnattributedGaveUp {
+		t.Fatalf("commits=%+v", store.commits)
+	}
+}
+
+func TestInternalLaneBudgetBelongsToOneRange(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	store := &laneStore{progress: InternalProgress{Cursor: 100, Scanned: 300, Started: true, HasScanned: true}}
+	source := &laneSource{err: errors.New("provider timed out")}
+	lane := newLane(store)
+	lane.Now = func() time.Time { return now }
+	if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source}); err == nil {
+		t.Fatal("the range must fail")
+	}
+	// A reorg or an operator's rewind moved the cursor to another range.
+	store.progress.Cursor = 200
+	now = now.Add(29 * time.Minute)
+	if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source}); err == nil {
+		t.Fatal("the new range must fail")
+	}
+	now = now.Add(2 * time.Minute)
+	if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source}); err == nil || len(store.commits) != 0 {
+		t.Fatalf("the new range used the old range's budget: %v %+v", err, store.commits)
+	}
+	now = now.Add(28 * time.Minute)
+	if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source}); err != nil || len(store.commits) != 1 {
+		t.Fatalf("err=%v commits=%+v", err, store.commits)
 	}
 }

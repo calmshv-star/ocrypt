@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
 	"net/url"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/providers"
+	"github.com/calmshv-star/ocrypt/backend/internal/scanner"
 )
 
 func TestLoadScannerConfigMapsDirectProviderSecretsByURL(t *testing.T) {
@@ -224,5 +227,67 @@ func TestOrdinaryScanNeverDependsOnTraceProviders(t *testing.T) {
 	config.evmInternalTraceURLs = nil
 	if sources, err = scannerSources(config); err != nil || sources.internal.Source != nil {
 		t.Fatalf("no trace endpoints means no lane: %+v %v", sources.internal, err)
+	}
+}
+
+func TestInternalHoldFollowsTheScannerMode(t *testing.T) {
+	if internalHold(scannerConfig{staticConfig: true, overlap: 64}) != 64 {
+		t.Fatal("a static scanner must wait out its overlap")
+	}
+	if internalHold(scannerConfig{overlap: 64}) != 0 {
+		t.Fatal("a runtime scanner stops at its finality depth already")
+	}
+}
+
+type laneProbe struct {
+	deadline bool
+	panics   bool
+}
+
+func (p *laneProbe) Heads(context.Context) ([]scanner.ProviderHead, error) { return nil, nil }
+
+func (p *laneProbe) ScanRange(ctx context.Context, from, to uint64) (scanner.RangeBatch, error) {
+	if p.panics {
+		panic("provider decoded nonsense")
+	}
+	_, p.deadline = ctx.Deadline()
+	return scanner.RangeBatch{From: from, To: to}, nil
+}
+
+type laneProgress struct{}
+
+func (laneProgress) InternalProgress(context.Context, string, string) (scanner.InternalProgress, error) {
+	return scanner.InternalProgress{Cursor: 1, Scanned: 2, Started: true, HasScanned: true}, nil
+}
+func (laneProgress) StartInternal(context.Context, string, string, uint64) error { return nil }
+func (laneProgress) CommitInternal(context.Context, scanner.InternalCommit) (int, error) {
+	return 0, nil
+}
+
+func TestInternalLaneStepIsBoundedAndCannotPanicTheScanner(t *testing.T) {
+	runner := &internalLaneRunner{}
+	lane := &scanner.InternalLane{ChainID: "eip155:1", Shard: "default", Store: laneProgress{}, RangeSize: 32, GiveUpAfter: time.Minute}
+	if _, err := runner.step(t.Context(), lane); err != nil {
+		t.Fatalf("a lane without a plan must rest: %v", err)
+	}
+	probe := &laneProbe{}
+	runner.setPlan(scanner.InternalPlan{Source: probe})
+	if _, err := runner.step(t.Context(), lane); err != nil || !probe.deadline {
+		t.Fatalf("deadline=%v err=%v", probe.deadline, err)
+	}
+	probe.panics = true
+	if _, err := runner.step(t.Context(), lane); err == nil {
+		t.Fatal("a lane panic must come back as an error")
+	}
+}
+
+func TestStaticScannerSurvivesAWrongTraceEndpoint(t *testing.T) {
+	sources, err := scannerSources(scannerConfig{
+		providerKind: "evm-jsonrpc", providerMode: "quorum", quorum: 2, chainID: "eip155:1", genesisHash: "genesis", nativeAssetID: "eth-ethereum", nativeDecimals: 18,
+		providerURLs: []string{"https://one.example", "https://two.example"}, providerHeaders: []http.Header{{}, {}},
+		addressFiltered: true, watchedAddresses: []string{"0x000000000000000000000000000000000000dead"}, evmInternalTraceURLs: []string{"http://plain.example", "https://trace-b.example"},
+	})
+	if err != nil || sources.ordinary == nil || sources.internalErr == nil || sources.internal.Source != nil {
+		t.Fatalf("sources=%+v err=%v", sources, err)
 	}
 }

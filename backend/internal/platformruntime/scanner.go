@@ -64,6 +64,8 @@ type ScannerLoader struct {
 	SecretDir           string
 	ProviderMinInterval time.Duration
 	UnsafeTestBypass    bool
+	// LaneClient replaces the internal lane's HTTP client in tests.
+	LaneClient *http.Client
 }
 
 // internalWatchMargin keeps a route watched while the lane catches up with
@@ -263,7 +265,7 @@ func (l ScannerLoader) Load(ctx context.Context, keys ScannerKeys, now time.Time
 		}
 	}
 	sources := make([]scanner.Source, 0, len(providerIDs))
-	balanceProbes := make([]*providers.EVMSource, 0, len(providerIDs))
+	admitted := make([]rpcPayload, 0, len(providerIDs))
 	var solanaAddressIndex *providers.SolanaAddressIndex
 	for _, providerID := range providerIDs {
 		headPolicy, headOK := headPolicies[providerID]
@@ -305,9 +307,7 @@ func (l ScannerLoader) Load(ctx context.Context, keys ScannerKeys, now time.Time
 		if err != nil {
 			return ScannerRuntime{}, fmt.Errorf("initialize admitted RPC provider %s: %w", key, err)
 		}
-		if evmSource, isEVM := source.(*providers.EVMSource); isEVM {
-			balanceProbes = append(balanceProbes, evmSource)
-		}
+		admitted = append(admitted, rpc)
 		source, err = providers.NewDestinationFilterSource(source, watchedAddresses)
 		if err != nil {
 			return ScannerRuntime{}, fmt.Errorf("initialize destination filter for %s: %w", key, err)
@@ -338,7 +338,7 @@ func (l ScannerLoader) Load(ctx context.Context, keys ScannerKeys, now time.Time
 	result.InternalDetectionMissing = chain.Family == "evm" && nativeAssetID != "" && !chain.IncludeInternal && len(keys.TraceProviders) == 0
 	if len(keys.TraceProviders) != 0 {
 		result.InternalConfigured = true
-		result.Internal, result.InternalError = l.internalPlan(ctx, keys, chain, quorum, nativeAssetID, nativeDecimals, balanceProbes, watchedAddresses, now)
+		result.Internal, result.InternalError = l.internalPlan(ctx, internalInputs{keys: keys, chain: chain, nativeAssetID: nativeAssetID, nativeDecimals: nativeDecimals, confirmations: finality.Confirmations, admitted: admitted, watched: watchedAddresses}, now)
 		result.InternalDetectionMissing = result.InternalError != nil
 	}
 	result.Internal.Paused = result.Paused
@@ -347,16 +347,29 @@ func (l ScannerLoader) Load(ctx context.Context, keys ScannerKeys, now time.Time
 	return result, nil
 }
 
+type internalInputs struct {
+	keys           ScannerKeys
+	chain          chainPayload
+	nativeAssetID  string
+	nativeDecimals uint8
+	confirmations  uint64
+	admitted       []rpcPayload
+	watched        []string
+}
+
 // internalPlan prepares the internal lane. Its snapshots load on their own, so a
-// missing trace provider cannot stop the ordinary scan. A trace provider that
-// lost admission does not stop the lane either: balances still prove idle ranges
-// clean, and only a range that needs a trace waits.
-func (l ScannerLoader) internalPlan(ctx context.Context, keys ScannerKeys, chain chainPayload, base scanner.Source, nativeAssetID string, nativeDecimals uint8, probes []*providers.EVMSource, watched []string, now time.Time) (scanner.InternalPlan, error) {
+// missing trace provider cannot stop the ordinary scan, and it talks to every
+// provider through its own paced clients, so it cannot hold the ordinary scan on
+// a shared limiter. A trace provider that lost admission or was paused does not
+// stop the lane: balances still prove idle ranges clean, and only a range that
+// needs a trace waits.
+func (l ScannerLoader) internalPlan(ctx context.Context, in internalInputs, now time.Time) (scanner.InternalPlan, error) {
 	var plan scanner.InternalPlan
+	keys, chain := in.keys, in.chain
 	if len(keys.TraceProviders) != 2 {
 		return plan, errors.New("internal transfer detection requires exactly two trace providers")
 	}
-	if chain.Family != "evm" || chain.IncludeInternal || nativeAssetID == "" {
+	if chain.Family != "evm" || chain.IncludeInternal || in.nativeAssetID == "" {
 		return plan, errors.New("internal transfer detection needs an EVM chain with a native asset that is not traced per transaction")
 	}
 	requested := make([]platformadmin.RuntimeSnapshotKey, 0, 2)
@@ -367,45 +380,42 @@ func (l ScannerLoader) internalPlan(ctx context.Context, keys ScannerKeys, chain
 	if err != nil {
 		return plan, fmt.Errorf("load trace providers: %w", err)
 	}
-	snapshots := make(map[string]platformadmin.Snapshot, len(state.Snapshots))
-	for _, snapshot := range state.Snapshots {
-		snapshots[snapshot.LogicalKey] = snapshot
-	}
+	var unavailable error
 	payloads := make(map[string]rpcPayload, 2)
 	providerIDs := make([]string, 0, 2)
-	for _, key := range keys.TraceProviders {
-		snapshot, found := snapshots[key]
+	for _, key := range requested {
+		var snapshot platformadmin.Snapshot
+		found := false
+		for _, candidate := range state.Snapshots {
+			if candidate.Kind == key.Kind && candidate.LogicalKey == key.LogicalKey {
+				snapshot, found = candidate, true
+			}
+		}
 		var rpc rpcPayload
-		if !found || snapshot.Kind != platformadmin.KindRPCProvider || strictDecode(snapshot.Payload, &rpc) != nil || rpc.ChainRef != keys.Chain || rpc.ProviderID == "" || !contains(rpc.Capabilities, "traces") || rpc.ProviderKind != string(providers.KindEVMJSONRPC) {
-			return plan, fmt.Errorf("trace snapshot %s lacks required capabilities", key)
+		if !found || !ids.Valid(snapshot.ID) || snapshot.Version < 1 || snapshot.FenceToken < 1 || len(snapshot.PayloadHash) != 64 ||
+			strictDecode(snapshot.Payload, &rpc) != nil || rpc.ChainRef != keys.Chain || rpc.ProviderID == "" || !contains(rpc.Capabilities, "traces") || rpc.ProviderKind != string(providers.KindEVMJSONRPC) {
+			return plan, fmt.Errorf("trace snapshot %s lacks required capabilities", key.LogicalKey)
 		}
 		if _, duplicate := payloads[rpc.ProviderID]; duplicate {
 			return plan, errors.New("trace providers must be independent")
+		}
+		if state.Paused[key] {
+			unavailable = fmt.Errorf("trace provider %s is paused", key.LogicalKey)
 		}
 		payloads[rpc.ProviderID] = rpc
 		providerIDs = append(providerIDs, rpc.ProviderID)
 	}
 	sort.Strings(providerIDs)
-	timeouts := make(map[string]time.Duration, 2)
-	var unavailable error
 	if l.ProviderAdmission == nil {
 		if !l.UnsafeTestBypass {
 			return plan, errors.New("provider operations admission is required")
 		}
-		for _, providerID := range providerIDs {
-			timeouts[providerID] = developmentPolicy(providerops.OperationRange).Timeout
-		}
 	} else if admission, admitErr := l.ProviderAdmission.Admit(ctx, providerops.AdmissionRequest{Kind: providerops.ProviderOnChain, ProviderIDs: providerIDs, Operation: providerops.OperationRange, Quorum: 2, Now: now}); admitErr != nil {
 		unavailable = fmt.Errorf("admit trace providers: %w", admitErr)
-	} else {
-		for _, candidate := range admission.Candidates {
-			timeouts[candidate.ProviderID] = candidate.Policy.Timeout
-		}
-		if len(timeouts) != 2 {
-			unavailable = providerops.ErrQuorumUnavailable
-		}
+	} else if len(admission.Candidates) != 2 {
+		unavailable = providerops.ErrQuorumUnavailable
 	}
-	addresses := append([]string(nil), watched...)
+	addresses := append([]string(nil), in.watched...)
 	if l.WatchAddresses != nil {
 		recent, err := l.WatchAddresses.ScannerWatchAddresses(ctx, keys.Chain, now.Add(-internalWatchMargin))
 		if err != nil {
@@ -417,39 +427,58 @@ func (l ScannerLoader) internalPlan(ctx context.Context, keys ScannerKeys, chain
 			}
 		}
 	}
-	var tracers [2]*providers.EVMSource
-	for index, providerID := range providerIDs {
-		rpc := payloads[providerID]
+	timeout := developmentPolicy(providerops.OperationRange).Timeout
+	pace := max(l.ProviderMinInterval, scanner.InternalRequestInterval)
+	newSource := func(rpc rpcPayload, tracer bool) (*providers.EVMSource, error) {
 		headers, err := l.readHeaders(rpc.CredentialRef)
 		if err != nil {
-			return plan, fmt.Errorf("resolve trace credential reference %s: %w", providerID, err)
+			return nil, fmt.Errorf("resolve RPC credential reference of %s: %w", rpc.ProviderID, err)
 		}
-		timeout := timeouts[providerID]
-		if timeout <= 0 {
-			timeout = developmentPolicy(providerops.OperationRange).Timeout
+		config := providers.EVMConfig{
+			HTTP:       providers.HTTPConfig{Endpoint: rpc.Endpoint, Headers: headers, Timeout: timeout, MinInterval: pace, Client: l.LaneClient},
+			ProviderID: rpc.ProviderID, ChainID: keys.Chain, GenesisHash: chain.GenesisHash, HeadTag: rpc.HeadTag,
+			NativeAssetID: in.nativeAssetID, NativeDecimals: in.nativeDecimals,
+			AddressFiltered: true, WatchedAddresses: addresses, Overlap: chain.Overlap,
 		}
-		headTag := rpc.HeadTag
-		if headTag == "" {
-			headTag = "finalized"
+		if tracer {
+			config.IncludeInternal, config.HTTP.MaxResponseBytes = true, providers.InternalTraceResponseLimit
+			if config.HeadTag == "" {
+				config.HeadTag = "finalized"
+			}
 		}
-		tracers[index], err = providers.NewEVMSource(providers.EVMConfig{
-			HTTP:       providers.HTTPConfig{Endpoint: rpc.Endpoint, Headers: headers, Timeout: timeout, MinInterval: l.ProviderMinInterval},
-			ProviderID: rpc.ProviderID, ChainID: keys.Chain, GenesisHash: chain.GenesisHash, HeadTag: headTag,
-			NativeAssetID: nativeAssetID, NativeDecimals: nativeDecimals,
-			IncludeInternal: true, AddressFiltered: true, WatchedAddresses: addresses,
-		})
+		return providers.NewEVMSource(config)
+	}
+	sources := make([]scanner.Source, 0, len(in.admitted))
+	probes := make([]*providers.EVMSource, 0, len(in.admitted)+2)
+	for _, rpc := range in.admitted {
+		source, err := newSource(rpc, false)
 		if err != nil {
-			return plan, fmt.Errorf("initialize trace provider %s: %w", providerID, err)
+			return plan, err
+		}
+		sources, probes = append(sources, source), append(probes, source)
+	}
+	base, err := providers.NewQuorumSource(sources, chain.Quorum)
+	if err != nil {
+		return plan, err
+	}
+	var tracers [2]*providers.EVMSource
+	for index, providerID := range providerIDs {
+		if tracers[index], err = newSource(payloads[providerID], true); err != nil {
+			return plan, err
 		}
 	}
 	filter, err := providers.NewEVMInternalFilter(base, tracers[0], tracers[1], keys.Chain, chain.GenesisHash, addresses)
 	if err != nil {
 		return plan, err
 	}
-	if err := filter.WithBalanceProbes(append(append([]*providers.EVMSource(nil), probes...), tracers[0], tracers[1])...); err != nil {
+	if unavailable == nil {
+		probes = append(probes, tracers[0], tracers[1])
+	}
+	if err := filter.WithBalanceProbes(probes...); err != nil {
 		return plan, err
 	}
 	filter.WithTraceUnavailable(unavailable)
+	filter.WithRequiredConfirmations(in.confirmations)
 	return scanner.InternalPlan{Source: filter, Idle: len(addresses) == 0}, nil
 }
 

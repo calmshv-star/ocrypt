@@ -31,8 +31,9 @@ agent assumptions. Amend the specification when accepted behavior changes.
 5. **A sweep instead of a bisection.** The old filter split a range to single blocks
    with balance reads, which multiplied with the number of addresses. When a
    range needs a trace, the lane now sweeps it with `trace_filter`, whose cost
-   does not depend on the number of addresses. The price: an unexplained increase
-   is not reported in a range where the same wallet also sent a transaction.
+   does not depend on the number of addresses. Above 16 wallets balance reads are
+   skipped altogether. The price: an unexplained increase is not reported in a
+   range where the same wallet also sent a transaction, nor above 16 wallets.
 6. **"By default" means the shipped configuration, not the binary.** Third-party
    endpoints are not hard-coded: they receive the receiving addresses, and the
    handover says not to change providers on the owner's behalf. The catalog names
@@ -59,3 +60,34 @@ agent assumptions. Amend the specification when accepted behavior changes.
 12. **Fee note.** The checkout already mentioned fees in general; it now says plainly
     that exchanges often deduct theirs. "May not complete" because an
     underpayment tolerance can still settle a shortfall.
+
+## 2026-11-04 — after the second review
+
+13. **A reorg is the lane's business too.** Both reorg paths were open: a commit
+    could land after the rewind, and a queued transfer settled from a replaced
+    block with nothing to compensate it. `RewindReorg` now lowers the lane cursor
+    and marks queued rows by block hash; `CommitInternal` requires the ordinary
+    cursor to have reached the range and refuses replaced blocks; first insert at
+    settlement refuses a replaced block. The last two also close a path that
+    ordinary queued transfers had before this task.
+14. **Finality is checked before the block is passed.** The lane reads once, so a
+    transfer below the route's `required_finality` would stay unsettled with no
+    record. A range with transfers waits until the slower trace provider is past
+    it; after 30 minutes it is recorded like any other failure.
+15. **Own clients, in the same process.** The lane shares no client with the ordinary
+    scan, and `waitForRateLimit` no longer sleeps holding its mutex. It stays in
+    the scanner process instead of a new service: an 8 MiB trace limit, one tree
+    in memory at a time and a recover in the step bound what it can do there, and
+    a separate workload would add one deployment per chain.
+16. **Bounds turn attacks into rows.** Pages shrink and spans narrow to one block
+    before anything is dropped. Receipts are read once per transaction. A provider
+    that alone cannot read something is retried, because a crafted transaction
+    fails on both.
+17. **A failed platform read holds the lane.** Its last plan may be stale.
+
+Known limits, recorded for the owner: a route's `required_finality` above the
+chain's current policy can leave a lane transfer unsettled until a rewind; whether
+tracers mark a call that fails on insufficient balance with `error` was not
+verified on real providers, which matters for wallets outside the balance check;
+the lane's trace and balance calls do not pass through the provider health policy.
+

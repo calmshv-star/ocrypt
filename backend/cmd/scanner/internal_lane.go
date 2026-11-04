@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/calmshv-star/ocrypt/backend/internal/scanner"
 )
+
+const internalStepTimeout = 5 * time.Minute
 
 // internalLaneRunner runs the internal lane beside the ordinary scan loop, so a
 // slow trace provider cannot hold up a scanner cycle.
@@ -50,12 +53,19 @@ func (r *internalLaneRunner) run(ctx context.Context, lane *scanner.InternalLane
 	}
 }
 
-func (r *internalLaneRunner) step(ctx context.Context, lane *scanner.InternalLane) (bool, error) {
+// step bounds one range. A panic here must not take the ordinary scan with it,
+// because both live in one process.
+func (r *internalLaneRunner) step(ctx context.Context, lane *scanner.InternalLane) (more bool, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			more, err = false, fmt.Errorf("internal lane panic: %v", recovered)
+		}
+	}()
 	plan := r.plan.Load()
 	if plan == nil {
 		return false, nil
 	}
-	stepCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	stepCtx, cancel := context.WithTimeout(ctx, internalStepTimeout)
 	defer cancel()
 	return lane.RunOnce(stepCtx, *plan)
 }

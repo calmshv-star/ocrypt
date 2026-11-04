@@ -31,8 +31,11 @@ Facts found in the code:
 
 ## Behaviour
 
-1. Detection runs in an internal lane with its own cursor, behind the ordinary
-   scan. Nothing in the lane can hold the ordinary cursor.
+1. Detection runs in an internal lane with its own cursor and its own paced
+   clients, behind the ordinary scan. Nothing in the lane can hold the ordinary
+   cursor or wait on its limiter. A reorg rewinds both cursors together, and the
+   lane cannot commit a range the ordinary scan has not reached or a transfer
+   from a replaced block.
 2. An internal transfer is credited only when both trace providers agree and
    the complete `trace_transaction` call tree shows that the frame and all its
    ancestors succeeded, the frame is a plain `CALL` to a watched address, and
@@ -42,12 +45,15 @@ Facts found in the code:
 4. An incomplete tree, a frame the tree does not contain, a provider error or a
    disagreement keeps the lane's cursor. After 30 minutes on one range the lane
    records the range and moves on.
-5. What cannot be read (a call tree over the response limit, too many frames)
-   and a balance increase that agreed traces do not explain are recorded once,
-   durably, and the lane moves on. More credited money than the balance shows,
-   on an EOA with an unchanged nonce, keeps the cursor.
-6. Each block is read once. An idle wallet costs balance reads only, through any
-   two providers that agree.
+5. What cannot be read on both providers (a trace over 8 MiB, more than 256
+   transfers in a transaction, too many frames in a block) and a balance increase
+   that agreed traces do not explain are recorded once, durably, and the lane
+   moves on. More credited money than the balance shows, on an EOA with an
+   unchanged nonce, keeps the cursor. What only one provider cannot read keeps
+   the cursor too.
+6. Each block is read once. Up to 16 wallets, an idle wallet costs balance reads
+   only, through any two providers that agree. Above that the lane sweeps every
+   range. A range waits until the trace providers pass the required confirmations.
 7. Every EVM scanner reports whether internal detection is on, and warns when
    it is off. A wrong trace configuration never stops the ordinary scan.
 8. A production scanner gets two trace providers from admitted platform
@@ -83,6 +89,9 @@ Facts found in the code:
 | Endpoint URLs stay out of errors | `evm_internal_filter_test.go` |
 | Lane follows the ordinary cursor, gives up after its budget, idle, paused | `scanner/internal_lane_test.go` |
 | Lane storage under the production role, replay, cursor race, no ordinary cursor change | live S9 |
+| Reorg lowers the lane cursor, marks queued rows, refuses replaced blocks at commit and settlement | live S9 |
+| Commit survives a timed-out step; budget belongs to one range | `scanner/internal_lane_test.go` |
+| Limiter does not hold a short deadline; confirmations from the slower provider | `evm_internal_filter_test.go` |
 | Ordinary scan never reads through trace providers | `cmd/scanner/main_test.go` |
 | Detection state reported and warned | `cmd/scanner/main_test.go` |
 | Catalog endpoints: two, HTTPS, distinct hosts | `cmd/scanner/main_test.go` |
