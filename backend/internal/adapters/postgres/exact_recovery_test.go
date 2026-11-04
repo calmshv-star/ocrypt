@@ -177,3 +177,19 @@ func TestExactRecoveryChecksRemainInsideSerializableCommitBoundary(t *testing.T)
 		t.Fatal("ordinary settlement must not enable the recovery guard")
 	}
 }
+
+func TestExactRecoveryAcceptsOnlyCanonicalInternalTransfers(t *testing.T) {
+	expected, event, _ := exactRecoveryFixture()
+	event.Kind, event.Identity.EventIndex = "native_internal", "trace:0,11"
+	expected.Identity.EventIndex = event.Identity.EventIndex
+	if err := expected.validateEvent(event); err != nil {
+		t.Fatal(err)
+	}
+	for _, index := range []string{"trace:", "trace:-1", "trace:01", "trace:0,", "trace:1 ", "native:0"} {
+		bad, target := event, expected
+		bad.Identity.EventIndex, target.Identity.EventIndex = index, index
+		if target.validateEvent(bad) == nil {
+			t.Fatalf("accepted internal transfer index %q", index)
+		}
+	}
+}

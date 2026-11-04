@@ -32,6 +32,9 @@ type ScannerKeys struct {
 	RPCProviders []string `json:"rpc_providers"`
 	Assets       []string `json:"assets"`
 	Maintenance  []string `json:"maintenance"`
+	// TraceProviders names exactly two admitted RPC snapshots with the
+	// "traces" capability. They find native transfers made through contracts.
+	TraceProviders []string `json:"trace_providers,omitempty"`
 }
 
 type ScannerRuntime struct {
@@ -42,7 +45,10 @@ type ScannerRuntime struct {
 	FinalityDepth        uint64
 	MaxHeadAge           time.Duration
 	Paused               bool
-	Evidence             []scanner.ConfigEvidence
+	// InternalDetectionMissing marks an EVM chain whose native transfers
+	// through contracts stay invisible to this scanner.
+	InternalDetectionMissing bool
+	Evidence                 []scanner.ConfigEvidence
 }
 
 type ScannerLoader struct {
@@ -52,6 +58,7 @@ type ScannerLoader struct {
 	SecretDir           string
 	ProviderMinInterval time.Duration
 	UnsafeTestBypass    bool
+	UnexplainedInflow   providers.UnexplainedInflowReport
 }
 
 type WatchAddressReader interface {
@@ -125,9 +132,17 @@ func (l ScannerLoader) Load(ctx context.Context, keys ScannerKeys, now time.Time
 	if l.Reader == nil || keys.Chain == "" || keys.Finality == "" || len(keys.RPCProviders) < 1 || len(keys.RPCProviders) > 16 || len(keys.Assets) < 1 || len(keys.Assets) > 256 {
 		return ScannerRuntime{}, errors.New("scanner runtime configuration is incomplete")
 	}
+	if len(keys.TraceProviders) != 0 && len(keys.TraceProviders) != 2 {
+		return ScannerRuntime{}, errors.New("internal transfer detection requires exactly two trace providers")
+	}
 	requested := []platformadmin.RuntimeSnapshotKey{{Kind: platformadmin.KindChain, LogicalKey: keys.Chain}, {Kind: platformadmin.KindFinalityPolicy, LogicalKey: keys.Finality}}
 	for _, key := range keys.RPCProviders {
 		requested = append(requested, platformadmin.RuntimeSnapshotKey{Kind: platformadmin.KindRPCProvider, LogicalKey: key})
+	}
+	for _, key := range keys.TraceProviders {
+		if !contains(keys.RPCProviders, key) {
+			requested = append(requested, platformadmin.RuntimeSnapshotKey{Kind: platformadmin.KindRPCProvider, LogicalKey: key})
+		}
 	}
 	for _, key := range keys.Assets {
 		requested = append(requested, platformadmin.RuntimeSnapshotKey{Kind: platformadmin.KindAssetContract, LogicalKey: key})
@@ -247,6 +262,7 @@ func (l ScannerLoader) Load(ctx context.Context, keys ScannerKeys, now time.Time
 		}
 	}
 	sources := make([]scanner.Source, 0, len(providerIDs))
+	balanceProbes := make([]*providers.EVMSource, 0, len(providerIDs))
 	var solanaAddressIndex *providers.SolanaAddressIndex
 	for _, providerID := range providerIDs {
 		headPolicy, headOK := headPolicies[providerID]
@@ -288,6 +304,9 @@ func (l ScannerLoader) Load(ctx context.Context, keys ScannerKeys, now time.Time
 		if err != nil {
 			return ScannerRuntime{}, fmt.Errorf("initialize admitted RPC provider %s: %w", key, err)
 		}
+		if evmSource, isEVM := source.(*providers.EVMSource); isEVM {
+			balanceProbes = append(balanceProbes, evmSource)
+		}
 		source, err = providers.NewDestinationFilterSource(source, watchedAddresses)
 		if err != nil {
 			return ScannerRuntime{}, fmt.Errorf("initialize destination filter for %s: %w", key, err)
@@ -315,9 +334,98 @@ func (l ScannerLoader) Load(ctx context.Context, keys ScannerKeys, now time.Time
 		return result.Evidence[i].Kind+"\x1f"+result.Evidence[i].LogicalKey < result.Evidence[j].Kind+"\x1f"+result.Evidence[j].LogicalKey
 	})
 	result.ChainID, result.GenesisHash, result.Source = keys.Chain, chain.GenesisHash, quorum
+	result.InternalDetectionMissing = chain.Family == "evm" && nativeAssetID != "" && !chain.IncludeInternal && len(keys.TraceProviders) == 0
+	if len(keys.TraceProviders) == 2 {
+		if chain.Family != "evm" || chain.IncludeInternal || nativeAssetID == "" {
+			return ScannerRuntime{}, errors.New("internal transfer detection needs an EVM chain with a native asset that is not traced per transaction")
+		}
+		tracers, err := l.traceSources(ctx, keys, byKey, chain.GenesisHash, nativeAssetID, nativeDecimals, watchedAddresses, now)
+		if err != nil {
+			return ScannerRuntime{}, err
+		}
+		// With no active route there is nothing to watch this cycle.
+		if len(watchedAddresses) > 0 {
+			filter, err := providers.NewEVMInternalFilter(quorum, tracers[0], tracers[1], keys.Chain, chain.GenesisHash, watchedAddresses)
+			if err != nil {
+				return ScannerRuntime{}, err
+			}
+			if len(balanceProbes) < 2 {
+				return ScannerRuntime{}, errors.New("internal transfer detection requires two ordinary EVM balance providers")
+			}
+			if err := filter.WithBalanceProbes(balanceProbes[0], balanceProbes[1]); err != nil {
+				return ScannerRuntime{}, err
+			}
+			filter.WithUnexplainedInflowReport(l.UnexplainedInflow)
+			result.Source = filter
+		}
+	}
 	result.Quorum, result.Overlap, result.RangeSize = chain.Quorum, chain.Overlap, chain.RangeSize
 	result.FinalityDepth, result.MaxHeadAge = finality.Confirmations, time.Duration(chain.MaxHeadAgeSeconds)*time.Second
 	return result, nil
+}
+
+// traceSources builds the two trace providers from admitted snapshots. A trace
+// provider that is not admitted stops the scan like a lost RPC quorum: moving
+// on would skip the transfers only it can see.
+func (l ScannerLoader) traceSources(ctx context.Context, keys ScannerKeys, byKey map[platformadmin.RuntimeSnapshotKey]platformadmin.Snapshot, genesis, nativeAssetID string, nativeDecimals uint8, watched []string, now time.Time) ([2]*providers.EVMSource, error) {
+	var tracers [2]*providers.EVMSource
+	payloads := make(map[string]rpcPayload, 2)
+	providerIDs := make([]string, 0, 2)
+	for _, key := range keys.TraceProviders {
+		var rpc rpcPayload
+		snapshot := byKey[platformadmin.RuntimeSnapshotKey{Kind: platformadmin.KindRPCProvider, LogicalKey: key}]
+		if strictDecode(snapshot.Payload, &rpc) != nil || rpc.ChainRef != keys.Chain || rpc.ProviderID == "" || !contains(rpc.Capabilities, "traces") || rpc.ProviderKind != string(providers.KindEVMJSONRPC) {
+			return tracers, fmt.Errorf("trace snapshot %s lacks required capabilities", key)
+		}
+		if _, duplicate := payloads[rpc.ProviderID]; duplicate {
+			return tracers, errors.New("trace providers must be independent")
+		}
+		payloads[rpc.ProviderID] = rpc
+		providerIDs = append(providerIDs, rpc.ProviderID)
+	}
+	sort.Strings(providerIDs)
+	timeouts := map[string]time.Duration{}
+	if l.ProviderAdmission == nil {
+		if !l.UnsafeTestBypass {
+			return tracers, errors.New("provider operations admission is required")
+		}
+		for _, providerID := range providerIDs {
+			timeouts[providerID] = developmentPolicy(providerops.OperationRange).Timeout
+		}
+	} else {
+		admission, err := l.ProviderAdmission.Admit(ctx, providerops.AdmissionRequest{Kind: providerops.ProviderOnChain, ProviderIDs: providerIDs, Operation: providerops.OperationRange, Quorum: 2, Now: now})
+		if err != nil {
+			return tracers, fmt.Errorf("admit trace providers: %w", err)
+		}
+		for _, candidate := range admission.Candidates {
+			timeouts[candidate.ProviderID] = candidate.Policy.Timeout
+		}
+	}
+	for index, providerID := range providerIDs {
+		timeout, admitted := timeouts[providerID]
+		if !admitted {
+			return tracers, providerops.ErrQuorumUnavailable
+		}
+		rpc := payloads[providerID]
+		headers, err := l.readHeaders(rpc.CredentialRef)
+		if err != nil {
+			return tracers, fmt.Errorf("resolve trace credential reference %s: %w", providerID, err)
+		}
+		headTag := rpc.HeadTag
+		if headTag == "" {
+			headTag = "finalized"
+		}
+		tracers[index], err = providers.NewEVMSource(providers.EVMConfig{
+			HTTP:       providers.HTTPConfig{Endpoint: rpc.Endpoint, Headers: headers, Timeout: timeout, MinInterval: l.ProviderMinInterval},
+			ProviderID: rpc.ProviderID, ChainID: keys.Chain, GenesisHash: genesis, HeadTag: headTag,
+			NativeAssetID: nativeAssetID, NativeDecimals: nativeDecimals,
+			IncludeInternal: true, AddressFiltered: true, WatchedAddresses: watched,
+		})
+		if err != nil {
+			return tracers, fmt.Errorf("initialize trace provider %s: %w", providerID, err)
+		}
+	}
+	return tracers, nil
 }
 
 func developmentPolicy(operation providerops.Operation) providerops.Policy {

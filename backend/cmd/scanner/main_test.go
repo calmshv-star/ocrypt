@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"net/url"
+	"os"
 	"testing"
 	"time"
 )
@@ -117,5 +120,72 @@ func TestProductionScannerParsesStrictRuntimeKeys(t *testing.T) {
 	}
 	if configuration.staticConfig || configuration.platformKeys.Chain != "eip155:1" || len(configuration.platformKeys.RPCProviders) != 2 {
 		t.Fatalf("unexpected runtime keys: %+v", configuration.platformKeys)
+	}
+}
+
+func TestScannerReportsMissingInternalDetection(t *testing.T) {
+	values := map[string]string{
+		"SCANNER_UNSAFE_DEVELOPMENT_STATIC_CONFIG": "true", "ENVIRONMENT": "test",
+		"DATABASE_URL": "postgres://example", "WORKER_ID": "scanner-1", "SCANNER_CHAIN_ID": "eip155:1", "SCANNER_GENESIS_HASH": "genesis",
+		"SCANNER_PROVIDER_KIND": "evm-jsonrpc", "SCANNER_PROVIDER_URLS": "https://one.example,https://two.example", "SCANNER_QUORUM": "2",
+		"SCANNER_OVERLAP": "12", "SCANNER_RANGE_SIZE": "100", "SCANNER_NATIVE_ASSET_ID": "eth-ethereum", "SCANNER_ADDRESS_FILTERED": "true",
+		"SCANNER_WATCHED_ADDRESSES": "0x000000000000000000000000000000000000dead",
+	}
+	for key, value := range values {
+		t.Setenv(key, value)
+	}
+	for _, test := range []struct {
+		name, traces, native string
+		missing              bool
+	}{
+		{"no trace endpoints", "", "eth-ethereum", true},
+		{"two trace endpoints", "https://trace-a.example,https://trace-b.example", "eth-ethereum", false},
+		{"no native asset", "", "", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("SCANNER_EVM_INTERNAL_TRACE_URLS", test.traces)
+			t.Setenv("SCANNER_NATIVE_ASSET_ID", test.native)
+			config, err := loadScannerConfig()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if config.internalDetectionMissing() != test.missing {
+				t.Fatalf("missing=%v", config.internalDetectionMissing())
+			}
+		})
+	}
+}
+
+// The shipped catalog is what an operator copies, so a pair that the scanner
+// would refuse must not reach it.
+func TestCatalogTraceEndpointsAreTwoIndependentHTTPSHosts(t *testing.T) {
+	raw, err := os.ReadFile("../../../deploy/standalone/public-evm-networks.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var networks []struct {
+		Name   string   `json:"name"`
+		Traces []string `json:"internal_trace_endpoints"`
+	}
+	if err := json.Unmarshal(raw, &networks); err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for _, network := range networks {
+		if len(network.Traces) == 0 {
+			continue
+		}
+		found[network.Name] = true
+		if len(network.Traces) != 2 {
+			t.Fatalf("%s needs exactly two trace endpoints", network.Name)
+		}
+		first, firstErr := url.Parse(network.Traces[0])
+		second, secondErr := url.Parse(network.Traces[1])
+		if firstErr != nil || secondErr != nil || first.Scheme != "https" || second.Scheme != "https" || first.Host == "" || first.Host == second.Host {
+			t.Fatalf("%s trace endpoints are not independent HTTPS hosts: %v", network.Name, network.Traces)
+		}
+	}
+	if !found["ethereum"] {
+		t.Fatal("Ethereum, where the missed exchange withdrawal happened, has no trace endpoints")
 	}
 }

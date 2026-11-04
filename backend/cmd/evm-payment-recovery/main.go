@@ -29,6 +29,10 @@ import (
 type config struct {
 	endpoint, wallet, chain, asset, amount, transaction, intent, route string
 	apply                                                              bool
+	// traces and block select an internal transfer: two independent trace
+	// endpoints verify its complete call tree, as the scanner does.
+	traces []string
+	block  uint64
 }
 
 func main() {
@@ -42,7 +46,11 @@ func main() {
 	flag.StringVar(&c.intent, "intent", "", "expected payment intent UUID")
 	flag.StringVar(&c.route, "route", "", "expected payment route UUID")
 	flag.BoolVar(&c.apply, "apply", false, "ingest ONE verified native payment through the standard settlement pipeline")
+	flag.Uint64Var(&c.block, "block", 0, "block of an internal transfer; needs EVM_RECOVERY_TRACE_URLS")
 	flag.Parse()
+	if raw := os.Getenv("EVM_RECOVERY_TRACE_URLS"); raw != "" {
+		c.traces = strings.Split(raw, ",")
+	}
 	if flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "unexpected positional arguments")
 		os.Exit(2)
@@ -81,6 +89,9 @@ func (c config) validate() error {
 	if a, err := money.Parse(c.amount); err != nil || a.IsZero() {
 		return errors.New("amount must be positive canonical atomic units")
 	}
+	if (len(c.traces) != 0 || c.block != 0) && (len(c.traces) != 2 || c.block == 0) {
+		return errors.New("an internal transfer needs exactly two trace endpoints and its block")
+	}
 	return nil
 }
 
@@ -107,7 +118,7 @@ func run(ctx context.Context, c config) error {
 	if err != nil {
 		return fmt.Errorf("verify RPC chain identity/finality: %w", err)
 	}
-	events, err := source.LookupTransaction(ctx, c.chain, c.transaction)
+	events, err := recoveryEvents(ctx, c, source, heads)
 	if err != nil {
 		return fmt.Errorf("lookup finalized chain transaction: %w", err)
 	}
@@ -168,6 +179,42 @@ func run(ctx context.Context, c config) error {
 	return nil
 }
 
+func recoveryEvents(ctx context.Context, c config, source *providers.EVMSource, heads []scanner.ProviderHead) ([]domain.TransferEvent, error) {
+	if len(c.traces) == 0 {
+		return source.LookupTransaction(ctx, c.chain, c.transaction)
+	}
+	if len(heads) != 1 {
+		return nil, errors.New("missing verified chain identity")
+	}
+	var tracers [2]*providers.EVMSource
+	for index, endpoint := range c.traces {
+		tracer, err := providers.NewEVMSource(providers.EVMConfig{
+			HTTP:       providers.HTTPConfig{Endpoint: strings.TrimSpace(endpoint), Timeout: 20 * time.Second, MinInterval: time.Second},
+			ProviderID: fmt.Sprintf("operator-evm-recovery-trace-%d", index+1), ChainID: c.chain, HeadTag: "finalized", GenesisHash: heads[0].GenesisHash,
+			NativeAssetID: c.asset, NativeDecimals: 18, IncludeInternal: true, WatchedAddresses: []string{c.wallet}, AddressFiltered: true,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("initialize trace endpoint %d: %w", index+1, err)
+		}
+		tracers[index] = tracer
+	}
+	filter, err := providers.NewEVMInternalFilter(source, tracers[0], tracers[1], c.chain, heads[0].GenesisHash, []string{c.wallet})
+	if err != nil {
+		return nil, err
+	}
+	batch, err := filter.ScanRange(ctx, c.block, c.block)
+	return batch.Events, err
+}
+
+// canonicalKind keeps each recovery mode to its own proof: an internal transfer
+// counts only after the two trace endpoints verified its call tree.
+func (c config) canonicalKind(event domain.TransferEvent) bool {
+	if len(c.traces) == 0 {
+		return event.Kind == "native_top_level" && event.Identity.EventIndex == "native:0"
+	}
+	return event.Kind == "native_internal" && strings.HasPrefix(event.Identity.EventIndex, "trace:") && len(event.Identity.EventIndex) > len("trace:")
+}
+
 func selectEvent(c config, events []domain.TransferEvent, heads []scanner.ProviderHead) (domain.TransferEvent, error) {
 	if len(heads) != 1 || heads[0].ChainID != c.chain || heads[0].Provider == "" || !canonicalHex(heads[0].GenesisHash, 32) || heads[0].ObservedAt.IsZero() {
 		return domain.TransferEvent{}, errors.New("missing verified chain identity")
@@ -177,8 +224,8 @@ func selectEvent(c config, events []domain.TransferEvent, heads []scanner.Provid
 		if event.Identity.ChainID != c.chain || event.Identity.TransactionID != c.transaction || event.Identity.AssetID != c.asset || event.Identity.ToAddress != c.wallet || event.Amount.String() != c.amount {
 			continue
 		}
-		if event.Status != domain.TransferFinalized || event.Kind != "native_top_level" || event.Identity.EventIndex != "native:0" || event.AssetDecimals != 18 || event.BlockHeight == 0 || event.BlockHeight > heads[0].SafeHeight || event.Confirmations == 0 || event.ID == "" || !canonicalHex(event.BlockHash, 32) || event.OnChainTime.IsZero() || event.ParserVersion == "" || len(event.EvidenceHash) != 64 {
-			return domain.TransferEvent{}, errors.New("target is not a finalized canonical native top-level EVM transfer")
+		if event.Status != domain.TransferFinalized || !c.canonicalKind(event) || event.AssetDecimals != 18 || event.BlockHeight == 0 || event.BlockHeight > heads[0].SafeHeight || event.Confirmations == 0 || event.ID == "" || !canonicalHex(event.BlockHash, 32) || event.OnChainTime.IsZero() || event.ParserVersion == "" || len(event.EvidenceHash) != 64 {
+			return domain.TransferEvent{}, errors.New("target is not a finalized canonical native EVM transfer")
 		}
 		selected = append(selected, event)
 	}

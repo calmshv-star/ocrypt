@@ -26,7 +26,12 @@ type EVMInternalFilter struct {
 	watched map[string]struct{}
 	chainID string
 	genesis string
+	report  UnexplainedInflowReport
 }
+
+// UnexplainedInflowReport receives a balance increase of a watched wallet that
+// agreed traces do not explain, as a decimal amount of base units.
+type UnexplainedInflowReport func(address string, from, to uint64, amount string)
 
 func NewEVMInternalFilter(base scanner.Source, first, second *EVMSource, chainID, genesis string, addresses []string) (*EVMInternalFilter, error) {
 	if base == nil || first == nil || second == nil || first == second || first.http.base.Host == second.http.base.Host ||
@@ -58,6 +63,12 @@ func (s *EVMInternalFilter) WithBalanceProbes(first, second *EVMSource) error {
 	}
 	s.probes = [2]*EVMSource{first, second}
 	return nil
+}
+
+// WithUnexplainedInflowReport sets who hears about forced Ether: a selfdestruct
+// or a beacon withdrawal raises a balance without a frame the filter credits.
+func (s *EVMInternalFilter) WithUnexplainedInflowReport(report UnexplainedInflowReport) {
+	s.report = report
 }
 
 func (s *EVMInternalFilter) Heads(ctx context.Context) ([]scanner.ProviderHead, error) {
@@ -96,7 +107,11 @@ func (s *EVMInternalFilter) ScanRange(ctx context.Context, from, to uint64) (sca
 			if traceErr != nil {
 				return scanner.RangeBatch{}, fmt.Errorf("internal trace provider %d: %w", index+1, traceErr)
 			}
-			observations[index] = append(observations[index], candidates...)
+			confirmed, confirmErr := source.confirmedInternalTraces(ctx, candidates)
+			if confirmErr != nil {
+				return scanner.RangeBatch{}, fmt.Errorf("internal trace provider %d: %w", index+1, confirmErr)
+			}
+			observations[index] = append(observations[index], confirmed...)
 		}
 	}
 	if !reflect.DeepEqual(observations[0], observations[1]) {
@@ -151,8 +166,13 @@ func (s *EVMInternalFilter) ScanRange(ctx context.Context, from, to uint64) (sca
 			continue
 		}
 		explained := nativeInflows(batch.Events, address, s.tracers[0].nativeAssetID, from, to)
-		if window.delta.Cmp(explained) != 0 {
-			return scanner.RangeBatch{}, fmt.Errorf("internal transfer trace does not explain balance change for %s", address)
+		switch window.delta.Cmp(explained) {
+		case -1:
+			return scanner.RangeBatch{}, fmt.Errorf("internal transfers exceed the balance change of %s", address)
+		case 1:
+			if s.report != nil {
+				s.report(address, from, to, new(big.Int).Sub(window.delta, explained).String())
+			}
 		}
 	}
 	sort.Slice(batch.Events, func(i, j int) bool {
@@ -375,7 +395,9 @@ func (s *EVMSource) filteredInternalTraces(ctx context.Context, from, to uint64,
 				return nil, err
 			}
 			for _, trace := range page {
-				if trace.Error != "" || len(trace.TraceAddress) == 0 || !evmTraceMovesValue(trace.Type) {
+				// Only a plain CALL moves value to its target: DELEGATECALL and
+				// CALLCODE run foreign code on the caller's own balance.
+				if trace.Error != "" || len(trace.TraceAddress) == 0 || !strings.EqualFold(trace.Type, "call") || !strings.EqualFold(trace.Action.CallType, "call") {
 					continue
 				}
 				if trace.BlockNumber < start || trace.BlockNumber > end {
@@ -440,4 +462,158 @@ func (s *EVMSource) filteredInternalTraces(ctx context.Context, from, to uint64,
 		return a.EventIndex < b.EventIndex
 	})
 	return candidates, nil
+}
+
+// confirmedInternalTraces checks each discovered transfer against the complete
+// call tree of its transaction. trace_filter marks only the frame that failed,
+// so a transfer inside a reverted call looks successful until its ancestors
+// are read, and the balance check is skipped for contracts and for wallets
+// that also sent a transaction. A transfer that did not survive is dropped;
+// a tree that contradicts the discovery keeps the cursor.
+func (s *EVMSource) confirmedInternalTraces(ctx context.Context, candidates []internalTraceCandidate) ([]internalTraceCandidate, error) {
+	trees := make(map[string]evmTraceCall)
+	confirmed := make([]internalTraceCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		root, loaded := trees[candidate.TransactionHash]
+		if !loaded {
+			var flat []evmFlatTrace
+			if err := s.http.rpc(ctx, "evm internal call tree", "trace_transaction", []any{candidate.TransactionHash}, &flat); err != nil {
+				return nil, err
+			}
+			tree, err := canonicalTraceTree(flat, candidate.TransactionHash, candidate.Height, candidate.BlockHash)
+			if err != nil {
+				return nil, err
+			}
+			root, trees[candidate.TransactionHash] = tree, tree
+		}
+		path, err := traceAddressPath(candidate.EventIndex)
+		if err != nil {
+			return nil, err
+		}
+		call, survived, found := callAtPath(root, path)
+		if !found {
+			return nil, malformed("evm internal call tree", errors.New("discovered transfer is absent from the call tree"))
+		}
+		from, fromErr := canonicalEVMAddress(call.From)
+		to, toErr := canonicalEVMAddress(call.To)
+		value, valueErr := parseHexAmount(call.Value)
+		if fromErr != nil || toErr != nil || valueErr != nil || call.Type != "CALL" || from != candidate.From || to != candidate.To || value != candidate.Amount {
+			return nil, malformed("evm internal call tree", errors.New("call tree differs from the discovered transfer"))
+		}
+		if survived {
+			confirmed = append(confirmed, candidate)
+		}
+	}
+	return confirmed, nil
+}
+
+// callAtPath walks to one frame and says whether it and every ancestor succeeded.
+func callAtPath(root evmTraceCall, path []uint32) (evmTraceCall, bool, bool) {
+	call, survived := root, root.Error == ""
+	for _, index := range path {
+		if uint64(index) >= uint64(len(call.Calls)) {
+			return evmTraceCall{}, false, false
+		}
+		call = call.Calls[index]
+		survived = survived && call.Error == ""
+	}
+	return call, survived, true
+}
+
+type evmFlatTrace struct {
+	TransactionHash string   `json:"transactionHash"`
+	BlockHash       string   `json:"blockHash"`
+	BlockNumber     uint64   `json:"blockNumber"`
+	TraceAddress    []uint32 `json:"traceAddress"`
+	Subtraces       uint32   `json:"subtraces"`
+	Type            string   `json:"type"`
+	Error           string   `json:"error"`
+	Action          struct {
+		From          string `json:"from"`
+		To            string `json:"to"`
+		Value         string `json:"value"`
+		CallType      string `json:"callType"`
+		Address       string `json:"address"`
+		Balance       string `json:"balance"`
+		RefundAddress string `json:"refundAddress"`
+	} `json:"action"`
+	Result struct {
+		Address string `json:"address"`
+	} `json:"result"`
+}
+
+// The EVM's own call depth limit; the provider response limit bounds the size.
+const maxEVMCallDepth = 1024
+
+// canonicalTraceTree rebuilds the nested call tree from a flat trace and
+// requires it to be complete, including reverted parents.
+func canonicalTraceTree(flat []evmFlatTrace, hash string, height uint64, blockHash string) (evmTraceCall, error) {
+	fail := func() (evmTraceCall, error) {
+		return evmTraceCall{}, malformed("evm internal call tree", errors.New("incomplete or incorrectly bound call tree"))
+	}
+	if len(flat) == 0 {
+		return fail()
+	}
+	nodes := make(map[string]evmFlatTrace, len(flat))
+	for _, item := range flat {
+		if item.BlockNumber != height || !strings.EqualFold(item.BlockHash, blockHash) || !strings.EqualFold(item.TransactionHash, hash) ||
+			len(item.TraceAddress) > maxEVMCallDepth || int(item.Subtraces) > len(flat) {
+			return fail()
+		}
+		parts := make([]string, len(item.TraceAddress))
+		for i, part := range item.TraceAddress {
+			parts[i] = strconv.FormatUint(uint64(part), 10)
+		}
+		key := strings.Join(parts, ",")
+		if _, duplicate := nodes[key]; duplicate {
+			return fail()
+		}
+		nodes[key] = item
+	}
+	visited := 0
+	var build func(string, int) (evmTraceCall, error)
+	build = func(key string, depth int) (evmTraceCall, error) {
+		item, exists := nodes[key]
+		if !exists || depth > maxEVMCallDepth {
+			return fail()
+		}
+		visited++
+		call := evmTraceCall{From: item.Action.From, To: item.Action.To, Value: item.Action.Value, Error: item.Error}
+		switch item.Type {
+		case "call":
+			call.Type = strings.ToUpper(item.Action.CallType)
+			if call.Type == "" {
+				return fail()
+			}
+		case "create":
+			call.Type, call.To = "CREATE", item.Result.Address
+		case "suicide":
+			call.Type, call.From, call.To, call.Value = "SELFDESTRUCT", item.Action.Address, item.Action.RefundAddress, item.Action.Balance
+		default:
+			return fail()
+		}
+		if call.Value == "" {
+			call.Value = "0x0"
+		}
+		for index := uint32(0); index < item.Subtraces; index++ {
+			childKey := strconv.FormatUint(uint64(index), 10)
+			if key != "" {
+				childKey = key + "," + childKey
+			}
+			child, err := build(childKey, depth+1)
+			if err != nil {
+				return evmTraceCall{}, err
+			}
+			call.Calls = append(call.Calls, child)
+		}
+		return call, nil
+	}
+	root, err := build("", 0)
+	if err != nil {
+		return evmTraceCall{}, err
+	}
+	if visited != len(flat) {
+		return fail()
+	}
+	return root, nil
 }

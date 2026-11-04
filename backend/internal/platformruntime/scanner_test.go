@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/platformadmin"
+	"github.com/calmshv-star/ocrypt/backend/internal/providers"
 )
 
 type stateReader struct {
@@ -140,4 +142,77 @@ func evidenceFence(runtime ScannerRuntime, kind, key string) int64 {
 		}
 	}
 	return 0
+}
+
+type fixedWatchAddresses []string
+
+func (f fixedWatchAddresses) ScannerWatchAddresses(context.Context, string, time.Time) ([]string, error) {
+	return f, nil
+}
+
+func tracedState() (ScannerKeys, platformadmin.RuntimeState) {
+	keys, state := admittedState()
+	keys.TraceProviders = []string{"rpc/trace-a", "rpc/trace-b"}
+	state.Snapshots = append(state.Snapshots,
+		runtimeSnapshot(7, platformadmin.KindRPCProvider, "rpc/trace-a", `{"chain_ref":"eip155:1","endpoint":"https://trace-a.example/rpc","capabilities":["traces"],"provider_kind":"evm-jsonrpc","provider_id":"rpc/trace-a"}`),
+		runtimeSnapshot(8, platformadmin.KindRPCProvider, "rpc/trace-b", `{"chain_ref":"eip155:1","endpoint":"https://trace-b.example/rpc","capabilities":["traces"],"provider_kind":"evm-jsonrpc","provider_id":"rpc/trace-b"}`),
+	)
+	return keys, state
+}
+
+func tracedLoader(state platformadmin.RuntimeState) ScannerLoader {
+	loader := testScannerLoader(state)
+	loader.WatchAddresses = fixedWatchAddresses{"0x3333333333333333333333333333333333333333"}
+	return loader
+}
+
+func TestScannerLoaderAddsInternalDetectionFromAdmittedTraceProviders(t *testing.T) {
+	keys, state := tracedState()
+	runtime, err := tracedLoader(state).Load(context.Background(), keys, time.Date(2026, 8, 11, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, wrapped := runtime.Source.(*providers.EVMInternalFilter); !wrapped || runtime.InternalDetectionMissing || len(runtime.Evidence) != 9 {
+		t.Fatalf("unexpected runtime: source=%T missing=%v evidence=%d", runtime.Source, runtime.InternalDetectionMissing, len(runtime.Evidence))
+	}
+	plainKeys, plain := admittedState()
+	runtime, err = tracedLoader(plain).Load(context.Background(), plainKeys, time.Date(2026, 8, 11, 0, 0, 0, 0, time.UTC))
+	if err != nil || !runtime.InternalDetectionMissing {
+		t.Fatalf("a chain without trace providers must report the gap: %v %v", runtime.InternalDetectionMissing, err)
+	}
+}
+
+func TestScannerLoaderRefusesUnfitTraceProviders(t *testing.T) {
+	replace := func(state platformadmin.RuntimeState, index int, old, new string) {
+		state.Snapshots[index].Payload = json.RawMessage(strings.Replace(string(state.Snapshots[index].Payload), old, new, 1))
+	}
+	cases := map[string]func(*ScannerKeys, platformadmin.RuntimeState){
+		"one provider":         func(keys *ScannerKeys, _ platformadmin.RuntimeState) { keys.TraceProviders = keys.TraceProviders[:1] },
+		"no traces capability": func(_ *ScannerKeys, state platformadmin.RuntimeState) { replace(state, 7, `"traces"`, `"blocks"`) },
+		"another chain": func(_ *ScannerKeys, state platformadmin.RuntimeState) {
+			replace(state, 8, `"chain_ref":"eip155:1"`, `"chain_ref":"eip155:10"`)
+		},
+		"same identity": func(_ *ScannerKeys, state platformadmin.RuntimeState) {
+			replace(state, 8, `"provider_id":"rpc/trace-b"`, `"provider_id":"rpc/trace-a"`)
+		},
+		"same host": func(_ *ScannerKeys, state platformadmin.RuntimeState) {
+			replace(state, 8, "trace-b.example", "trace-a.example")
+		},
+		"not an EVM provider": func(_ *ScannerKeys, state platformadmin.RuntimeState) {
+			replace(state, 7, "evm-jsonrpc", "solana-jsonrpc")
+		},
+		"chain traces every transaction already": func(_ *ScannerKeys, state platformadmin.RuntimeState) {
+			replace(state, 0, `"quorum":2`, `"quorum":2,"include_internal":true`)
+		},
+	}
+	for name, change := range cases {
+		t.Run(name, func(t *testing.T) {
+			keys, state := tracedState()
+			change(&keys, state)
+			state.Snapshots = state.Snapshots[:7+len(keys.TraceProviders)]
+			if _, err := tracedLoader(state).Load(context.Background(), keys, time.Date(2026, 8, 11, 0, 0, 0, 0, time.UTC)); err == nil {
+				t.Fatal("unfit trace providers were accepted")
+			}
+		})
+	}
 }

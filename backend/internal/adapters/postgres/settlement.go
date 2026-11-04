@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -67,10 +68,17 @@ func (expected ExactRecoveryTarget) validateEvent(event domain.TransferEvent) er
 	if event.Identity != expected.Identity || event.Amount.Cmp(expected.Amount) != 0 || event.AssetDecimals != expected.AssetDecimals || event.Status != domain.TransferFinalized {
 		return fmt.Errorf("%w: recovery transfer differs from the explicit target", domain.ErrStateConflict)
 	}
-	if (expected.AssetDecimals == 18 && (event.Kind != "native_top_level" || event.Identity.EventIndex != "native:0")) || (expected.AssetDecimals == 9 && event.Kind != "native_message") {
+	if (expected.AssetDecimals == 18 && !canonicalEVMNativeTransfer(event)) || (expected.AssetDecimals == 9 && event.Kind != "native_message") {
 		return fmt.Errorf("%w: recovery requires a canonical native transfer", domain.ErrStateConflict)
 	}
 	return nil
+}
+
+var internalTransferIndex = regexp.MustCompile(`^trace:(0|[1-9][0-9]*)(,(0|[1-9][0-9]*))*$`)
+
+func canonicalEVMNativeTransfer(event domain.TransferEvent) bool {
+	return (event.Kind == "native_top_level" && event.Identity.EventIndex == "native:0") ||
+		(event.Kind == "native_internal" && internalTransferIndex.MatchString(event.Identity.EventIndex))
 }
 
 func (expected ExactRecoveryTarget) validateCandidates(event domain.TransferEvent, candidates []settlementCandidate) error {

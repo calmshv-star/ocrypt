@@ -85,6 +85,15 @@ func main() {
 		slog.Error("scanner store initialization failed", "error", err)
 		os.Exit(1)
 	}
+	metrics := telemetry.New("scanner")
+	config.unexplainedInflow = func(address string, from, to uint64, amount string) {
+		metrics.IncScannerUnexplainedInflow()
+		slog.Warn("a watched wallet received money that no agreed trace explains; it is not credited", "chain_id", config.scannerChain(), "address", address, "from_block", from, "to_block", to, "amount", amount)
+	}
+	metrics.SetScannerInternalDetectionMissing(config.internalDetectionMissing())
+	if config.internalDetectionMissing() {
+		slog.Warn(internalDetectionWarning, "chain_id", config.chainID)
+	}
 	var source scanner.Source
 	var runtimeLoader *platformruntime.ScannerLoader
 	var staticWatchAddresses platformruntime.WatchAddressReader
@@ -122,9 +131,8 @@ func main() {
 			slog.Error("provider operations service initialization failed", "error", createErr)
 			os.Exit(1)
 		}
-		runtimeLoader = &platformruntime.ScannerLoader{Reader: platformRepository, ProviderAdmission: providerService, WatchAddresses: platformRepository, SecretDir: config.platformSecretDir, ProviderMinInterval: config.providerMinInterval}
+		runtimeLoader = &platformruntime.ScannerLoader{Reader: platformRepository, ProviderAdmission: providerService, WatchAddresses: platformRepository, SecretDir: config.platformSecretDir, ProviderMinInterval: config.providerMinInterval, UnexplainedInflow: config.unexplainedInflow}
 	}
-	metrics := telemetry.New("scanner")
 	health := &scanHealth{}
 	worker := scanner.Worker{
 		ChainID: config.chainID, GenesisHash: config.genesisHash, Shard: config.shard, Owner: config.workerID,
@@ -141,6 +149,7 @@ func main() {
 
 	staticWatchKey := ""
 	staticWatchSourceReady := false
+	warnedDetection := false
 	run := func() bool {
 		started := time.Now()
 		health.paused.Store(false)
@@ -179,6 +188,11 @@ func main() {
 				health.lastSuccess.Store(time.Now().UTC().Unix())
 				metrics.ObserveCycle("scanner", "idle", 0, time.Since(started))
 				return true
+			}
+			metrics.SetScannerInternalDetectionMissing(runtime.InternalDetectionMissing)
+			if runtime.InternalDetectionMissing && !warnedDetection {
+				warnedDetection = true
+				slog.Warn(internalDetectionWarning, "chain_id", runtime.ChainID)
 			}
 			worker.ChainID, worker.GenesisHash, worker.Source = runtime.ChainID, runtime.GenesisHash, runtime.Source
 			worker.Quorum, worker.Overlap, worker.RangeSize = runtime.Quorum, runtime.Overlap, runtime.RangeSize
@@ -296,6 +310,22 @@ type scannerConfig struct {
 	addressFiltered, routeWatchAddresses                                             bool
 	platformSecretDir                                                                string
 	platformKeys                                                                     platformruntime.ScannerKeys
+	unexplainedInflow                                                                providers.UnexplainedInflowReport
+}
+
+const internalDetectionWarning = "native transfers made through contracts are not detected: exchange withdrawals to this chain will not be credited; see deploy/standalone/evm-internal-transfers.md"
+
+// internalDetectionMissing reports a static EVM scanner with a native asset but
+// no way to see internal transfers. The runtime loader reports its own chains.
+func (c scannerConfig) internalDetectionMissing() bool {
+	return c.staticConfig && c.providerKind == "evm-jsonrpc" && c.nativeAssetID != "" && !c.includeInternal && len(c.evmInternalTraceURLs) == 0
+}
+
+func (c scannerConfig) scannerChain() string {
+	if c.staticConfig {
+		return c.chainID
+	}
+	return c.platformKeys.Chain
 }
 
 func loadScannerConfig() (scannerConfig, error) {
@@ -501,6 +531,7 @@ func scannerSource(config scannerConfig) (scanner.Source, error) {
 		if err != nil {
 			return nil, err
 		}
+		filter.WithUnexplainedInflowReport(config.unexplainedInflow)
 		source = filter
 	}
 	if config.addressFiltered {

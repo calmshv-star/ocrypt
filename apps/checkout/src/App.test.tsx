@@ -82,7 +82,7 @@ describe("hosted checkout", () => {
     expect(screen.getByText("1280.00 USD")).toBeInTheDocument();
     expect(screen.getByTestId("payment-fiat-equivalent")).toHaveTextContent("≈ 1280.00 USD");
     expect(screen.getByText("This QR code contains only the receiving address. Enter the amount separately.")).toBeInTheDocument();
-    expect(screen.getByTestId("payment-fee-warning")).toHaveTextContent("wallet or exchange may add or deduct its fee");
+    expect(screen.getByTestId("payment-fee-warning")).toHaveTextContent("Exchanges often deduct their fee from the amount you enter");
     expect(screen.getByTestId("payment-network-warning")).toHaveTextContent("Send only USDT on Tron");
     expect(screen.getByTestId("checkout-disclaimer")).toHaveTextContent("payment software, not the recipient of funds");
     expect(screen.getByText("The payment goes directly to Demo Store.")).toBeInTheDocument();

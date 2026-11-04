@@ -57,3 +57,35 @@ func TestRecoveryAcceptsOnlyOneExactFinalizedNativeEvent(t *testing.T) {
 		t.Fatal("accepted wrong chain identity")
 	}
 }
+
+func TestRecoveryAcceptsAnInternalTransferOnlyThroughTwoTraceEndpoints(t *testing.T) {
+	c, e, heads := fixture()
+	e.Kind, e.Identity.EventIndex = "native_internal", "trace:0,11"
+	if _, err := selectEvent(c, []domain.TransferEvent{e}, heads); err == nil {
+		t.Fatal("accepted an internal transfer without trace verification")
+	}
+	c.traces, c.block = []string{"https://trace-a.example", "https://trace-b.example"}, 100
+	if err := c.validate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := selectEvent(c, []domain.TransferEvent{e}, heads); err != nil {
+		t.Fatal(err)
+	}
+	for _, mutate := range []func(*domain.TransferEvent){func(e *domain.TransferEvent) { e.Identity.EventIndex = "native:0" }, func(e *domain.TransferEvent) { e.Identity.EventIndex = "trace:" }, func(e *domain.TransferEvent) { e.Kind = "native_top_level" }} {
+		bad := e
+		mutate(&bad)
+		if _, err := selectEvent(c, []domain.TransferEvent{bad}, heads); err == nil {
+			t.Fatal("accepted a transfer that does not match the trace mode")
+		}
+	}
+	for _, mutate := range []func(*config){func(c *config) { c.traces = c.traces[:1] }, func(c *config) { c.block = 0 }, func(c *config) { c.traces = nil }} {
+		bad := c
+		mutate(&bad)
+		if bad.traces != nil && bad.validate() == nil {
+			t.Fatalf("accepted unsafe trace config: %+v", bad)
+		}
+		if bad.traces == nil && bad.block != 0 && bad.validate() == nil {
+			t.Fatalf("accepted a block without trace endpoints: %+v", bad)
+		}
+	}
+}
