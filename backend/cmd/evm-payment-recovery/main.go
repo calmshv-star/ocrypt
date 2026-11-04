@@ -33,10 +33,12 @@ type config struct {
 	// endpoints verify its complete call tree, as the scanner does.
 	traces []string
 	block  uint64
+	client *http.Client
+	pace   time.Duration
 }
 
 func main() {
-	var c config
+	c := config{pace: time.Second}
 	flag.StringVar(&c.endpoint, "endpoint", os.Getenv("EVM_RECOVERY_ENDPOINT"), "HTTPS JSON-RPC endpoint")
 	flag.StringVar(&c.chain, "chain", "", "expected canonical eip155 chain ID")
 	flag.StringVar(&c.wallet, "wallet", "", "expected canonical lower-case recipient")
@@ -105,7 +107,7 @@ func run(ctx context.Context, c config) error {
 		headers.Set("X-API-Key", key)
 	}
 	source, err := providers.NewEVMSource(providers.EVMConfig{
-		HTTP:       providers.HTTPConfig{Endpoint: c.endpoint, Headers: headers, Timeout: 20 * time.Second, MinInterval: time.Second},
+		HTTP:       providers.HTTPConfig{Endpoint: c.endpoint, Headers: headers, Timeout: 20 * time.Second, MinInterval: c.pace, Client: c.client},
 		ProviderID: "operator-evm-payment-recovery", ChainID: c.chain, HeadTag: "finalized",
 		NativeAssetID: c.asset, NativeDecimals: 18, WatchedAddresses: []string{c.wallet}, AddressFiltered: true,
 	})
@@ -189,8 +191,8 @@ func recoveryEvents(ctx context.Context, c config, source *providers.EVMSource, 
 	var tracers [2]*providers.EVMSource
 	for index, endpoint := range c.traces {
 		tracer, err := providers.NewEVMSource(providers.EVMConfig{
-			HTTP:       providers.HTTPConfig{Endpoint: strings.TrimSpace(endpoint), Timeout: 20 * time.Second, MinInterval: time.Second},
-			ProviderID: fmt.Sprintf("operator-evm-recovery-trace-%d", index+1), ChainID: c.chain, HeadTag: "finalized", GenesisHash: heads[0].GenesisHash,
+			HTTP:       providers.HTTPConfig{Endpoint: strings.TrimSpace(endpoint), Timeout: 20 * time.Second, MinInterval: c.pace, Client: c.client},
+			ProviderID: fmt.Sprintf("operator-evm-recovery-trace-%d", index+1), ChainID: c.chain, HeadTag: "finalized",
 			NativeAssetID: c.asset, NativeDecimals: 18, IncludeInternal: true, WatchedAddresses: []string{c.wallet}, AddressFiltered: true,
 		})
 		if err != nil {
@@ -198,8 +200,13 @@ func recoveryEvents(ctx context.Context, c config, source *providers.EVMSource, 
 		}
 		tracers[index] = tracer
 	}
+	// Each tracer reads its own genesis, and the filter compares it with the
+	// recovery endpoint's, so a wrong chain cannot pass unnoticed.
 	filter, err := providers.NewEVMInternalFilter(source, tracers[0], tracers[1], c.chain, heads[0].GenesisHash, []string{c.wallet})
 	if err != nil {
+		return nil, err
+	}
+	if err := filter.WithBalanceProbes(source, tracers[0], tracers[1]); err != nil {
 		return nil, err
 	}
 	batch, err := filter.ScanRange(ctx, c.block, c.block)

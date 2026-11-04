@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/platformadmin"
+	"github.com/calmshv-star/ocrypt/backend/internal/providerops"
 	"github.com/calmshv-star/ocrypt/backend/internal/providers"
 )
 
@@ -24,10 +25,20 @@ func (r stateReader) ActiveRuntimeState(_ context.Context, _ platformadmin.Scope
 	if r.err != nil {
 		return platformadmin.RuntimeState{}, r.err
 	}
-	if len(keys) != len(r.state.Snapshots) {
-		return platformadmin.RuntimeState{}, errors.New("unexpected requested set")
+	selected := platformadmin.RuntimeState{Paused: r.state.Paused}
+	for _, key := range keys {
+		found := false
+		for _, snapshot := range r.state.Snapshots {
+			if snapshot.Kind == key.Kind && snapshot.LogicalKey == key.LogicalKey {
+				selected.Snapshots = append(selected.Snapshots, snapshot)
+				found = true
+			}
+		}
+		if !found {
+			return platformadmin.RuntimeState{}, errors.New("unexpected requested set")
+		}
 	}
-	return r.state, nil
+	return selected, nil
 }
 
 func runtimeSnapshot(index int, kind platformadmin.Kind, key, payload string) platformadmin.Snapshot {
@@ -166,53 +177,131 @@ func tracedLoader(state platformadmin.RuntimeState) ScannerLoader {
 	return loader
 }
 
-func TestScannerLoaderAddsInternalDetectionFromAdmittedTraceProviders(t *testing.T) {
+func TestScannerLoaderPlansTheInternalLaneApartFromTheOrdinaryScan(t *testing.T) {
 	keys, state := tracedState()
 	runtime, err := tracedLoader(state).Load(context.Background(), keys, time.Date(2026, 8, 11, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, wrapped := runtime.Source.(*providers.EVMInternalFilter); !wrapped || runtime.InternalDetectionMissing || len(runtime.Evidence) != 9 {
-		t.Fatalf("unexpected runtime: source=%T missing=%v evidence=%d", runtime.Source, runtime.InternalDetectionMissing, len(runtime.Evidence))
+	if _, wrapped := runtime.Internal.Source.(*providers.EVMInternalFilter); !wrapped || !runtime.InternalConfigured || runtime.Internal.Idle || runtime.InternalDetectionMissing || runtime.InternalError != nil {
+		t.Fatalf("unexpected plan: %+v", runtime)
+	}
+	if _, traced := runtime.Source.(*providers.EVMInternalFilter); traced || len(runtime.Evidence) != 7 {
+		t.Fatalf("the ordinary scan must not trace: source=%T evidence=%d", runtime.Source, len(runtime.Evidence))
 	}
 	plainKeys, plain := admittedState()
 	runtime, err = tracedLoader(plain).Load(context.Background(), plainKeys, time.Date(2026, 8, 11, 0, 0, 0, 0, time.UTC))
-	if err != nil || !runtime.InternalDetectionMissing {
-		t.Fatalf("a chain without trace providers must report the gap: %v %v", runtime.InternalDetectionMissing, err)
+	if err != nil || !runtime.InternalDetectionMissing || runtime.InternalConfigured {
+		t.Fatalf("a chain without trace providers must report the gap: %+v %v", runtime, err)
 	}
 }
 
-func TestScannerLoaderRefusesUnfitTraceProviders(t *testing.T) {
+// A wrong trace configuration costs the lane, never the ordinary payments.
+func TestScannerLoaderKeepsScanningWithUnfitTraceProviders(t *testing.T) {
 	replace := func(state platformadmin.RuntimeState, index int, old, new string) {
 		state.Snapshots[index].Payload = json.RawMessage(strings.Replace(string(state.Snapshots[index].Payload), old, new, 1))
 	}
-	cases := map[string]func(*ScannerKeys, platformadmin.RuntimeState){
-		"one provider":         func(keys *ScannerKeys, _ platformadmin.RuntimeState) { keys.TraceProviders = keys.TraceProviders[:1] },
-		"no traces capability": func(_ *ScannerKeys, state platformadmin.RuntimeState) { replace(state, 7, `"traces"`, `"blocks"`) },
-		"another chain": func(_ *ScannerKeys, state platformadmin.RuntimeState) {
-			replace(state, 8, `"chain_ref":"eip155:1"`, `"chain_ref":"eip155:10"`)
+	cases := map[string]func(*ScannerKeys, *platformadmin.RuntimeState){
+		"one provider":         func(keys *ScannerKeys, _ *platformadmin.RuntimeState) { keys.TraceProviders = keys.TraceProviders[:1] },
+		"no traces capability": func(_ *ScannerKeys, state *platformadmin.RuntimeState) { replace(*state, 7, `"traces"`, `"blocks"`) },
+		"another chain": func(_ *ScannerKeys, state *platformadmin.RuntimeState) {
+			replace(*state, 8, `"chain_ref":"eip155:1"`, `"chain_ref":"eip155:10"`)
 		},
-		"same identity": func(_ *ScannerKeys, state platformadmin.RuntimeState) {
-			replace(state, 8, `"provider_id":"rpc/trace-b"`, `"provider_id":"rpc/trace-a"`)
+		"same identity": func(_ *ScannerKeys, state *platformadmin.RuntimeState) {
+			replace(*state, 8, `"provider_id":"rpc/trace-b"`, `"provider_id":"rpc/trace-a"`)
 		},
-		"same host": func(_ *ScannerKeys, state platformadmin.RuntimeState) {
-			replace(state, 8, "trace-b.example", "trace-a.example")
+		"same host": func(_ *ScannerKeys, state *platformadmin.RuntimeState) {
+			replace(*state, 8, "trace-b.example", "trace-a.example")
 		},
-		"not an EVM provider": func(_ *ScannerKeys, state platformadmin.RuntimeState) {
-			replace(state, 7, "evm-jsonrpc", "solana-jsonrpc")
+		"not an EVM provider": func(_ *ScannerKeys, state *platformadmin.RuntimeState) {
+			replace(*state, 7, "evm-jsonrpc", "solana-jsonrpc")
 		},
-		"chain traces every transaction already": func(_ *ScannerKeys, state platformadmin.RuntimeState) {
-			replace(state, 0, `"quorum":2`, `"quorum":2,"include_internal":true`)
+		"chain traces every transaction already": func(_ *ScannerKeys, state *platformadmin.RuntimeState) {
+			replace(*state, 0, `"quorum":2`, `"quorum":2,"include_internal":true`)
 		},
+		"provider not in the platform state": func(_ *ScannerKeys, state *platformadmin.RuntimeState) { state.Snapshots = state.Snapshots[:7] },
 	}
 	for name, change := range cases {
 		t.Run(name, func(t *testing.T) {
 			keys, state := tracedState()
-			change(&keys, state)
-			state.Snapshots = state.Snapshots[:7+len(keys.TraceProviders)]
-			if _, err := tracedLoader(state).Load(context.Background(), keys, time.Date(2026, 8, 11, 0, 0, 0, 0, time.UTC)); err == nil {
-				t.Fatal("unfit trace providers were accepted")
+			change(&keys, &state)
+			runtime, err := tracedLoader(state).Load(context.Background(), keys, time.Date(2026, 8, 11, 0, 0, 0, 0, time.UTC))
+			if err != nil {
+				t.Fatalf("the ordinary scan stopped: %v", err)
+			}
+			if runtime.Source == nil || runtime.InternalError == nil || runtime.Internal.Source != nil || !runtime.InternalDetectionMissing || !runtime.InternalConfigured {
+				t.Fatalf("unexpected runtime: %+v", runtime)
 			}
 		})
+	}
+}
+
+type traceAdmission struct {
+	refuse   bool
+	requests []providerops.AdmissionRequest
+}
+
+func (a *traceAdmission) Admit(_ context.Context, request providerops.AdmissionRequest) (providerops.Admission, error) {
+	a.requests = append(a.requests, request)
+	if a.refuse && strings.HasPrefix(request.ProviderIDs[0], "rpc/trace") {
+		return providerops.Admission{}, providerops.ErrQuorumUnavailable
+	}
+	admission := providerops.Admission{Quorum: request.Quorum}
+	for _, providerID := range request.ProviderIDs {
+		admission.Candidates = append(admission.Candidates, providerops.Candidate{ProviderID: providerID, Policy: developmentPolicy(request.Operation)})
+	}
+	return admission, nil
+}
+
+func TestScannerLoaderAdmitsTraceProvidersThroughTheUsualProcess(t *testing.T) {
+	keys, state := tracedState()
+	admission := &traceAdmission{}
+	loader := tracedLoader(state)
+	loader.ProviderAdmission, loader.UnsafeTestBypass = admission, false
+	if _, err := loader.Load(context.Background(), keys, time.Date(2026, 8, 11, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	last := admission.requests[len(admission.requests)-1]
+	if len(admission.requests) != 3 || last.Quorum != 2 || last.Operation != providerops.OperationRange || last.Kind != providerops.ProviderOnChain || strings.Join(last.ProviderIDs, ",") != "rpc/trace-a,rpc/trace-b" {
+		t.Fatalf("admission requests: %+v", admission.requests)
+	}
+	// Lost admission waits for a range that needs a trace; idle ranges go on.
+	admission.refuse = true
+	runtime, err := loader.Load(context.Background(), keys, time.Date(2026, 8, 11, 0, 0, 0, 0, time.UTC))
+	if err != nil || runtime.Internal.Source == nil || runtime.InternalError != nil {
+		t.Fatalf("unexpected runtime: %+v %v", runtime, err)
+	}
+}
+
+type marginWatchAddresses struct{ now time.Time }
+
+func (m marginWatchAddresses) ScannerWatchAddresses(_ context.Context, _ string, observedAt time.Time) ([]string, error) {
+	if observedAt.Before(m.now) {
+		return []string{"0x3333333333333333333333333333333333333333"}, nil
+	}
+	return nil, nil
+}
+
+func TestScannerLoaderKeepsARouteWatchedWhileTheLaneCatchesUp(t *testing.T) {
+	keys, state := tracedState()
+	now := time.Date(2026, 8, 11, 0, 0, 0, 0, time.UTC)
+	loader := tracedLoader(state)
+	loader.WatchAddresses = marginWatchAddresses{now: now}
+	runtime, err := loader.Load(context.Background(), keys, now)
+	if err != nil || runtime.Internal.Idle || runtime.Internal.Source == nil {
+		t.Fatalf("a route that ended moments ago must stay watched: %+v %v", runtime, err)
+	}
+	loader.WatchAddresses = fixedWatchAddresses{}
+	runtime, err = loader.Load(context.Background(), keys, now)
+	if err != nil || !runtime.Internal.Idle {
+		t.Fatalf("nothing is watched: %+v %v", runtime, err)
+	}
+}
+
+func TestScannerLoaderPausesTheLaneDuringMaintenance(t *testing.T) {
+	keys, state := tracedState()
+	runtime, err := tracedLoader(state).Load(context.Background(), keys, time.Date(2026, 8, 12, 1, 30, 0, 0, time.UTC))
+	if err != nil || !runtime.Paused || !runtime.Internal.Paused {
+		t.Fatalf("unexpected runtime: %+v %v", runtime, err)
 	}
 }

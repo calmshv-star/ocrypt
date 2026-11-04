@@ -503,7 +503,7 @@ export const es = {
   "checkout.qrLabel": "Código QR de pago",
   "checkout.qrAddressOnly": "Este código QR contiene solo la dirección de recepción. Introduce el importe por separado.",
   "checkout.networkFeeTitle": "Comisiones de red y retirada",
-  "checkout.networkFeeHelp": "Las plataformas suelen descontar su comisión del importe que introduces. Asegúrate de que el destinatario reciba el importe mostrado arriba: si llega menos, el pago no se completará automáticamente.",
+  "checkout.networkFeeHelp": "Las plataformas suelen descontar su comisión del importe que introduces. Asegúrate de que el destinatario reciba el importe mostrado arriba: si llega menos, es posible que el pago no se complete automáticamente.",
   "checkout.openExplorer": "Abrir explorador de transacciones",
   "checkout.secureNote": "La plataforma nunca pide tu frase semilla ni la clave privada de tu monedero.",
   "checkout.receiptTitle": "¿Pagaste pero no se acreditó?",

@@ -73,7 +73,8 @@ type Registry struct {
 	scannerGaps          map[string]uint64
 	scannerReorgs        uint64
 	scannerDetectionGap  bool
-	scannerUnexplained   uint64
+	scannerUnattributed  uint64
+	scannerInternalLag   uint64
 	providerProbes       map[providerProbeKey]uint64
 	providerOpenCircuits uint64
 	providerPeerGroups   uint64
@@ -204,9 +205,17 @@ func (registry *Registry) SetScannerInternalDetectionMissing(missing bool) {
 	registry.mu.Unlock()
 }
 
-func (registry *Registry) IncScannerUnexplainedInflow() {
+// AddScannerUnattributed counts new records of money the internal lane could
+// not credit.
+func (registry *Registry) AddScannerUnattributed(count int) {
 	registry.mu.Lock()
-	registry.scannerUnexplained++
+	registry.scannerUnattributed += uint64(count)
+	registry.mu.Unlock()
+}
+
+func (registry *Registry) SetScannerInternalLag(blocks uint64) {
+	registry.mu.Lock()
+	registry.scannerInternalLag = blocks
 	registry.mu.Unlock()
 }
 
@@ -344,9 +353,12 @@ func (registry *Registry) snapshot() string {
 		detectionGap = 1
 	}
 	fmt.Fprintf(&output, "merchant_scanner_internal_detection_missing{service=\"%s\"} %d\n", service, detectionGap)
-	output.WriteString("# HELP merchant_scanner_unexplained_inflow_total Balance increases of watched wallets that agreed traces do not explain.\n")
-	output.WriteString("# TYPE merchant_scanner_unexplained_inflow_total counter\n")
-	fmt.Fprintf(&output, "merchant_scanner_unexplained_inflow_total{service=\"%s\"} %d\n", service, registry.scannerUnexplained)
+	output.WriteString("# HELP merchant_scanner_unattributed_inflows_total New records of money or transactions the internal lane could not credit.\n")
+	output.WriteString("# TYPE merchant_scanner_unattributed_inflows_total counter\n")
+	fmt.Fprintf(&output, "merchant_scanner_unattributed_inflows_total{service=\"%s\"} %d\n", service, registry.scannerUnattributed)
+	output.WriteString("# HELP merchant_scanner_internal_lag_blocks Blocks the internal lane is behind the ordinary scan.\n")
+	output.WriteString("# TYPE merchant_scanner_internal_lag_blocks gauge\n")
+	fmt.Fprintf(&output, "merchant_scanner_internal_lag_blocks{service=\"%s\"} %d\n", service, registry.scannerInternalLag)
 
 	output.WriteString("# HELP merchant_provider_probes_total Provider probes by bounded outcome and error category.\n")
 	output.WriteString("# TYPE merchant_provider_probes_total counter\n")

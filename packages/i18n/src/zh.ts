@@ -503,7 +503,7 @@ export const zhCN = {
   "checkout.qrLabel": "支付二维码",
   "checkout.qrAddressOnly": "此二维码仅包含收款地址，请另行输入转账金额。",
   "checkout.networkFeeTitle": "网络和提现手续费",
-  "checkout.networkFeeHelp": "交易所常从您输入的金额中扣除手续费。请确保收款方实际收到上方显示的金额：如果到账金额不足，付款不会自动完成。",
+  "checkout.networkFeeHelp": "交易所常从您输入的金额中扣除手续费。请确保收款方实际收到上方显示的金额：如果到账金额不足，付款可能不会自动完成。",
   "checkout.openExplorer": "打开交易浏览器",
   "checkout.secureNote": "平台绝不会索要助记词或钱包私钥。",
   "checkout.receiptTitle": "已付款但尚未入账？",

@@ -21,9 +21,17 @@ snapshot with the helper before assigning implementation workers.
 
 ## Evidence
 
-Record command, working directory, revision, dirty state, result, skipped checks,
-and a local evidence reference. Never commit credentials or customer records.
+- 2026-11-04 expected failures: before the fix, `TestEVMInternalFilterCreditsOnlySuccessfulPlainCalls` credited a transfer under a reverted parent, under a reverted root, and delegatecall, callcode and staticcall frames.
+- 2026-11-04 live, read-only, `TestEVMInternalFilterLiveContractWithdrawal` from the local checkout:
+  - Ethereum, `docs-demo.quiknode.pro` + `eth.drpc.org`: passed on a real exchange withdrawal (`trace:11`, 0.025067 ETH). `eth.merkle.io` hit 429 on balance reads.
+  - Base, `docs-demo.base-mainnet.quiknode.pro`: `trace_filter` worked. `base.drpc.org` answered 408; `base.merkle.io` answered `trace_filter` and then 429 on `trace_transaction`. No pair was completed, so Base is not in the catalog.
+  - Optimism, `docs-demo.optimism.quiknode.pro` + `optimism.drpc.org`: both answered `trace_filter` on a current block and returned the same 16-frame `trace_transaction`. No real payment was checked.
+  - The Ethereum check was repeated on the lane version and passed again.
 
 ## Resume / next action
 
-Record completed work, unresolved failures/questions, and the next concrete step.
+The first independent review found stop-the-chain paths, so detection moved to its
+own lane. Remaining limits: customer receipts for internal transfers; health
+probes do not exercise the trace methods; trace and balance calls bypass the
+policy source's rate limits; no public pair for Base, Arbitrum, Polygon,
+Avalanche, BSC or Plasma. Nothing here is deployed.

@@ -13,36 +13,49 @@ agent assumptions. Amend the specification when accepted behavior changes.
    changed; a `delegatecall` frame). The tests reproduced both before the fix.
    Turning detection on without the call tree check would have traded a missed
    payment for a false credit.
-2. **Forced Ether no longer stops the chain.** After agreed traces, a balance
-   increase they do not explain is reported and the scan continues. The old
-   behaviour let one selfdestruct to a merchant wallet stop every payment on
-   the chain for good. The price: if both trace providers ever omit a real
-   transfer, the cursor moves on, and the report is the only signal. Provider
-   errors, disagreement, incomplete trees and over-explained balances still
-   stop the scan.
-3. **"By default" means the shipped configuration, not the binary.** Third-party
-   endpoints are not hard-coded, because detection adds RPC load and a new
-   dependency that can stop a chain, and the handover says not to change
-   providers on the owner's behalf. The catalog names the pairs, the runbook
-   gives the two steps, and a scanner without detection warns and sets
-   `merchant_scanner_internal_detection_missing`. The live server needs the
-   owner's step; it is in the TZ list.
-4. **Production mode goes through admission.** `trace_providers` names admitted
-   RPC snapshots with the `traces` capability, so the four-eyes process stays
-   the only way to add a provider. A trace provider that loses admission stops
-   the scan: moving on would skip transfers only it can see.
-5. **The tree check stands on its own.** Frames are read with
-   `trace_transaction`; the tree builder comes from the unmerged PR #101. Depth
-   is limited to the EVM's 1024 instead of 128, and the 4096 frame limit is
-   gone: both would have let a crafted transaction stop the scanner. The 64 MiB
-   response limit bounds the size.
-6. **Exact recovery only.** The recovery command accepts an internal transfer
-   with two trace endpoints and the block. It refuses an amount that differs
-   from the route, so the 3 November complaint (0.000021 ETH short, if the
-   invoice was 0.025088) still needs a merchant decision.
-7. **Customer receipts are not covered.** The proof worker needs the watched
-   addresses, which a route-watching deployment does not have in its
-   environment. That is its own task; it is recorded in the TZ.
-8. **Fee note.** The checkout already mentioned fees in general; it now says
-   plainly that exchanges often deduct theirs from the amount entered.
-
+2. **A separate lane, after the first review.** The first version filtered inside
+   the ordinary scan. The review showed that one cheap crafted transaction could
+   stop a chain for good (a response over the limit is not retryable), that an
+   overlap rescan repeated the cost every five seconds, and that a replayed
+   event could dead-letter. All of that comes from one cause: a best-effort,
+   third-party dependency sitting in the path of every payment. Tracing now has
+   its own cursor. A failure delays internal transfers only, each block is read
+   once, and there is no overlap to replay.
+3. **Bounded retries.** A failing range retries for 30 minutes, then it is recorded
+   and the lane moves on. The timer is in memory, so a restart restarts it; the
+   bound holds per process. A transaction that makes providers time out can delay
+   internal transfers by that long, and nothing else.
+4. **Findings are rows.** What the lane cannot credit goes to
+   `scanner_unattributed_inflows`, once per finding. If both trace providers ever
+   omit a real transfer, this row is the only signal, so it must be durable.
+5. **A sweep instead of a bisection.** The old filter split a range to single blocks
+   with balance reads, which multiplied with the number of addresses. When a
+   range needs a trace, the lane now sweeps it with `trace_filter`, whose cost
+   does not depend on the number of addresses. The price: an unexplained increase
+   is not reported in a range where the same wallet also sent a transaction.
+6. **"By default" means the shipped configuration, not the binary.** Third-party
+   endpoints are not hard-coded: they receive the receiving addresses, and the
+   handover says not to change providers on the owner's behalf. The catalog names
+   the verified pairs, the runbook gives the steps, and a scanner without
+   detection warns and sets `merchant_scanner_internal_detection_missing`. The
+   live server needs the owner's step; it is in the TZ list.
+7. **Production mode goes through admission.** `trace_providers` names RPC
+   snapshots with the `traces` capability, so the four-eyes process stays the only
+   way to add a provider. They load apart from the scan's atomic state, because a
+   missing trace provider must not stop ordinary payments. Lane commits carry no
+   runtime evidence; each event's own evidence names the trace frame.
+8. **The tree check stands on its own.** The tree builder comes from the unmerged
+   PR #101. Depth is limited to the EVM's 1024 instead of 128, and its 4096 frame
+   limit is gone; a tree over the 64 MiB response limit is recorded, not retried.
+9. **Evidence holds chain facts only.** Provider names in the hashed evidence made
+   an identical event look like a conflict when the answering provider changed.
+10. **Rewind is the recovery path.** Rewinding the lane replays internal transfers
+    without touching the ordinary cursor, and it handles amounts that differ from
+    the route: they go to review. The exact recovery command stays for one payment
+    that matches, with the same proof.
+11. **Customer receipts are not covered.** The proof worker needs the watched
+    addresses, which a route-watching deployment does not have in its environment.
+    That is its own task; it is recorded in the TZ.
+12. **Fee note.** The checkout already mentioned fees in general; it now says plainly
+    that exchanges often deduct theirs. "May not complete" because an
+    underpayment tolerance can still settle a shortfall.

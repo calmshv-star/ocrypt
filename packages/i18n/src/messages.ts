@@ -501,7 +501,7 @@ export const en = {
   "checkout.qrLabel": "Payment QR code",
   "checkout.qrAddressOnly": "This QR code contains only the receiving address. Enter the amount separately.",
   "checkout.networkFeeTitle": "Network and withdrawal fees",
-  "checkout.networkFeeHelp": "Exchanges often deduct their fee from the amount you enter. Make sure the recipient receives the amount shown above: if less arrives, the payment will not complete automatically.",
+  "checkout.networkFeeHelp": "Exchanges often deduct their fee from the amount you enter. Make sure the recipient receives the amount shown above: if less arrives, the payment may not complete automatically.",
   "checkout.openExplorer": "Open transaction explorer",
   "checkout.secureNote": "The platform never asks for your seed phrase or wallet private key.",
   "checkout.receiptTitle": "Paid, but the payment was not credited?",

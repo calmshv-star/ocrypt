@@ -6,6 +6,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/calmshv-star/ocrypt/backend/internal/providers"
 )
 
 func TestLoadScannerConfigMapsDirectProviderSecretsByURL(t *testing.T) {
@@ -187,5 +189,40 @@ func TestCatalogTraceEndpointsAreTwoIndependentHTTPSHosts(t *testing.T) {
 	}
 	if !found["ethereum"] {
 		t.Fatal("Ethereum, where the missed exchange withdrawal happened, has no trace endpoints")
+	}
+}
+
+func TestOrdinaryScanNeverDependsOnTraceProviders(t *testing.T) {
+	values := map[string]string{
+		"SCANNER_UNSAFE_DEVELOPMENT_STATIC_CONFIG": "true", "ENVIRONMENT": "test",
+		"DATABASE_URL": "postgres://example", "WORKER_ID": "scanner-1", "SCANNER_CHAIN_ID": "eip155:1", "SCANNER_GENESIS_HASH": "genesis",
+		"SCANNER_PROVIDER_KIND": "evm-jsonrpc", "SCANNER_PROVIDER_URLS": "https://one.example,https://two.example", "SCANNER_QUORUM": "2",
+		"SCANNER_OVERLAP": "12", "SCANNER_RANGE_SIZE": "100", "SCANNER_NATIVE_ASSET_ID": "eth-ethereum", "SCANNER_NATIVE_DECIMALS": "18", "SCANNER_ADDRESS_FILTERED": "true",
+		"SCANNER_WATCHED_ADDRESSES": "0x000000000000000000000000000000000000dead", "SCANNER_EVM_INTERNAL_TRACE_URLS": "https://trace-a.example,https://trace-b.example",
+	}
+	for key, value := range values {
+		t.Setenv(key, value)
+	}
+	config, err := loadScannerConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources, err := scannerSources(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, traced := sources.ordinary.(*providers.EVMInternalFilter); traced {
+		t.Fatal("the ordinary scan reads through the trace providers")
+	}
+	if _, planned := sources.internal.Source.(*providers.EVMInternalFilter); !planned || sources.internal.Idle {
+		t.Fatalf("the internal lane has no source: %+v", sources.internal)
+	}
+	config.watchedAddresses = nil
+	if sources, err = scannerSources(config); err != nil || !sources.internal.Idle {
+		t.Fatalf("no watched address means an idle lane: %+v %v", sources.internal, err)
+	}
+	config.evmInternalTraceURLs = nil
+	if sources, err = scannerSources(config); err != nil || sources.internal.Source != nil {
+		t.Fatalf("no trace endpoints means no lane: %+v %v", sources.internal, err)
 	}
 }

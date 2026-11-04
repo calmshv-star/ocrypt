@@ -17,7 +17,6 @@
     "genesis_hash": "0xf712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd",
     "native_asset_id": "eth-base",
     "endpoints": ["https://base.gateway.tenderly.co", "https://base-rpc.publicnode.com", "https://mainnet.base.org"],
-    "internal_trace_endpoints": ["https://docs-demo.base-mainnet.quiknode.pro/", "https://base.merkle.io"],
     "tokens": {
       "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913": {"asset_id": "usdc-base", "decimals": 6}
     }

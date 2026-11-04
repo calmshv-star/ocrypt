@@ -32,8 +32,8 @@ type ScannerKeys struct {
 	RPCProviders []string `json:"rpc_providers"`
 	Assets       []string `json:"assets"`
 	Maintenance  []string `json:"maintenance"`
-	// TraceProviders names exactly two admitted RPC snapshots with the
-	// "traces" capability. They find native transfers made through contracts.
+	// TraceProviders names exactly two RPC snapshots with the "traces"
+	// capability. The internal lane uses them; the ordinary scan never does.
 	TraceProviders []string `json:"trace_providers,omitempty"`
 }
 
@@ -48,7 +48,13 @@ type ScannerRuntime struct {
 	// InternalDetectionMissing marks an EVM chain whose native transfers
 	// through contracts stay invisible to this scanner.
 	InternalDetectionMissing bool
-	Evidence                 []scanner.ConfigEvidence
+	// InternalConfigured starts the internal lane; Internal is its plan for
+	// this cycle. InternalError says why a configured lane cannot run, and
+	// never stops the ordinary scan.
+	InternalConfigured bool
+	Internal           scanner.InternalPlan
+	InternalError      error
+	Evidence           []scanner.ConfigEvidence
 }
 
 type ScannerLoader struct {
@@ -58,8 +64,11 @@ type ScannerLoader struct {
 	SecretDir           string
 	ProviderMinInterval time.Duration
 	UnsafeTestBypass    bool
-	UnexplainedInflow   providers.UnexplainedInflowReport
 }
+
+// internalWatchMargin keeps a route watched while the lane catches up with
+// blocks from before its grace ended.
+const internalWatchMargin = 2 * time.Hour
 
 type WatchAddressReader interface {
 	ScannerWatchAddresses(context.Context, string, time.Time) ([]string, error)
@@ -132,17 +141,9 @@ func (l ScannerLoader) Load(ctx context.Context, keys ScannerKeys, now time.Time
 	if l.Reader == nil || keys.Chain == "" || keys.Finality == "" || len(keys.RPCProviders) < 1 || len(keys.RPCProviders) > 16 || len(keys.Assets) < 1 || len(keys.Assets) > 256 {
 		return ScannerRuntime{}, errors.New("scanner runtime configuration is incomplete")
 	}
-	if len(keys.TraceProviders) != 0 && len(keys.TraceProviders) != 2 {
-		return ScannerRuntime{}, errors.New("internal transfer detection requires exactly two trace providers")
-	}
 	requested := []platformadmin.RuntimeSnapshotKey{{Kind: platformadmin.KindChain, LogicalKey: keys.Chain}, {Kind: platformadmin.KindFinalityPolicy, LogicalKey: keys.Finality}}
 	for _, key := range keys.RPCProviders {
 		requested = append(requested, platformadmin.RuntimeSnapshotKey{Kind: platformadmin.KindRPCProvider, LogicalKey: key})
-	}
-	for _, key := range keys.TraceProviders {
-		if !contains(keys.RPCProviders, key) {
-			requested = append(requested, platformadmin.RuntimeSnapshotKey{Kind: platformadmin.KindRPCProvider, LogicalKey: key})
-		}
 	}
 	for _, key := range keys.Assets {
 		requested = append(requested, platformadmin.RuntimeSnapshotKey{Kind: platformadmin.KindAssetContract, LogicalKey: key})
@@ -335,81 +336,97 @@ func (l ScannerLoader) Load(ctx context.Context, keys ScannerKeys, now time.Time
 	})
 	result.ChainID, result.GenesisHash, result.Source = keys.Chain, chain.GenesisHash, quorum
 	result.InternalDetectionMissing = chain.Family == "evm" && nativeAssetID != "" && !chain.IncludeInternal && len(keys.TraceProviders) == 0
-	if len(keys.TraceProviders) == 2 {
-		if chain.Family != "evm" || chain.IncludeInternal || nativeAssetID == "" {
-			return ScannerRuntime{}, errors.New("internal transfer detection needs an EVM chain with a native asset that is not traced per transaction")
-		}
-		tracers, err := l.traceSources(ctx, keys, byKey, chain.GenesisHash, nativeAssetID, nativeDecimals, watchedAddresses, now)
-		if err != nil {
-			return ScannerRuntime{}, err
-		}
-		// With no active route there is nothing to watch this cycle.
-		if len(watchedAddresses) > 0 {
-			filter, err := providers.NewEVMInternalFilter(quorum, tracers[0], tracers[1], keys.Chain, chain.GenesisHash, watchedAddresses)
-			if err != nil {
-				return ScannerRuntime{}, err
-			}
-			if len(balanceProbes) < 2 {
-				return ScannerRuntime{}, errors.New("internal transfer detection requires two ordinary EVM balance providers")
-			}
-			if err := filter.WithBalanceProbes(balanceProbes[0], balanceProbes[1]); err != nil {
-				return ScannerRuntime{}, err
-			}
-			filter.WithUnexplainedInflowReport(l.UnexplainedInflow)
-			result.Source = filter
-		}
+	if len(keys.TraceProviders) != 0 {
+		result.InternalConfigured = true
+		result.Internal, result.InternalError = l.internalPlan(ctx, keys, chain, quorum, nativeAssetID, nativeDecimals, balanceProbes, watchedAddresses, now)
+		result.InternalDetectionMissing = result.InternalError != nil
 	}
+	result.Internal.Paused = result.Paused
 	result.Quorum, result.Overlap, result.RangeSize = chain.Quorum, chain.Overlap, chain.RangeSize
 	result.FinalityDepth, result.MaxHeadAge = finality.Confirmations, time.Duration(chain.MaxHeadAgeSeconds)*time.Second
 	return result, nil
 }
 
-// traceSources builds the two trace providers from admitted snapshots. A trace
-// provider that is not admitted stops the scan like a lost RPC quorum: moving
-// on would skip the transfers only it can see.
-func (l ScannerLoader) traceSources(ctx context.Context, keys ScannerKeys, byKey map[platformadmin.RuntimeSnapshotKey]platformadmin.Snapshot, genesis, nativeAssetID string, nativeDecimals uint8, watched []string, now time.Time) ([2]*providers.EVMSource, error) {
-	var tracers [2]*providers.EVMSource
+// internalPlan prepares the internal lane. Its snapshots load on their own, so a
+// missing trace provider cannot stop the ordinary scan. A trace provider that
+// lost admission does not stop the lane either: balances still prove idle ranges
+// clean, and only a range that needs a trace waits.
+func (l ScannerLoader) internalPlan(ctx context.Context, keys ScannerKeys, chain chainPayload, base scanner.Source, nativeAssetID string, nativeDecimals uint8, probes []*providers.EVMSource, watched []string, now time.Time) (scanner.InternalPlan, error) {
+	var plan scanner.InternalPlan
+	if len(keys.TraceProviders) != 2 {
+		return plan, errors.New("internal transfer detection requires exactly two trace providers")
+	}
+	if chain.Family != "evm" || chain.IncludeInternal || nativeAssetID == "" {
+		return plan, errors.New("internal transfer detection needs an EVM chain with a native asset that is not traced per transaction")
+	}
+	requested := make([]platformadmin.RuntimeSnapshotKey, 0, 2)
+	for _, key := range keys.TraceProviders {
+		requested = append(requested, platformadmin.RuntimeSnapshotKey{Kind: platformadmin.KindRPCProvider, LogicalKey: key})
+	}
+	state, err := l.Reader.ActiveRuntimeState(ctx, platformadmin.Scope{}, requested)
+	if err != nil {
+		return plan, fmt.Errorf("load trace providers: %w", err)
+	}
+	snapshots := make(map[string]platformadmin.Snapshot, len(state.Snapshots))
+	for _, snapshot := range state.Snapshots {
+		snapshots[snapshot.LogicalKey] = snapshot
+	}
 	payloads := make(map[string]rpcPayload, 2)
 	providerIDs := make([]string, 0, 2)
 	for _, key := range keys.TraceProviders {
+		snapshot, found := snapshots[key]
 		var rpc rpcPayload
-		snapshot := byKey[platformadmin.RuntimeSnapshotKey{Kind: platformadmin.KindRPCProvider, LogicalKey: key}]
-		if strictDecode(snapshot.Payload, &rpc) != nil || rpc.ChainRef != keys.Chain || rpc.ProviderID == "" || !contains(rpc.Capabilities, "traces") || rpc.ProviderKind != string(providers.KindEVMJSONRPC) {
-			return tracers, fmt.Errorf("trace snapshot %s lacks required capabilities", key)
+		if !found || snapshot.Kind != platformadmin.KindRPCProvider || strictDecode(snapshot.Payload, &rpc) != nil || rpc.ChainRef != keys.Chain || rpc.ProviderID == "" || !contains(rpc.Capabilities, "traces") || rpc.ProviderKind != string(providers.KindEVMJSONRPC) {
+			return plan, fmt.Errorf("trace snapshot %s lacks required capabilities", key)
 		}
 		if _, duplicate := payloads[rpc.ProviderID]; duplicate {
-			return tracers, errors.New("trace providers must be independent")
+			return plan, errors.New("trace providers must be independent")
 		}
 		payloads[rpc.ProviderID] = rpc
 		providerIDs = append(providerIDs, rpc.ProviderID)
 	}
 	sort.Strings(providerIDs)
-	timeouts := map[string]time.Duration{}
+	timeouts := make(map[string]time.Duration, 2)
+	var unavailable error
 	if l.ProviderAdmission == nil {
 		if !l.UnsafeTestBypass {
-			return tracers, errors.New("provider operations admission is required")
+			return plan, errors.New("provider operations admission is required")
 		}
 		for _, providerID := range providerIDs {
 			timeouts[providerID] = developmentPolicy(providerops.OperationRange).Timeout
 		}
+	} else if admission, admitErr := l.ProviderAdmission.Admit(ctx, providerops.AdmissionRequest{Kind: providerops.ProviderOnChain, ProviderIDs: providerIDs, Operation: providerops.OperationRange, Quorum: 2, Now: now}); admitErr != nil {
+		unavailable = fmt.Errorf("admit trace providers: %w", admitErr)
 	} else {
-		admission, err := l.ProviderAdmission.Admit(ctx, providerops.AdmissionRequest{Kind: providerops.ProviderOnChain, ProviderIDs: providerIDs, Operation: providerops.OperationRange, Quorum: 2, Now: now})
-		if err != nil {
-			return tracers, fmt.Errorf("admit trace providers: %w", err)
-		}
 		for _, candidate := range admission.Candidates {
 			timeouts[candidate.ProviderID] = candidate.Policy.Timeout
 		}
-	}
-	for index, providerID := range providerIDs {
-		timeout, admitted := timeouts[providerID]
-		if !admitted {
-			return tracers, providerops.ErrQuorumUnavailable
+		if len(timeouts) != 2 {
+			unavailable = providerops.ErrQuorumUnavailable
 		}
+	}
+	addresses := append([]string(nil), watched...)
+	if l.WatchAddresses != nil {
+		recent, err := l.WatchAddresses.ScannerWatchAddresses(ctx, keys.Chain, now.Add(-internalWatchMargin))
+		if err != nil {
+			return plan, fmt.Errorf("load recent scanner watch addresses: %w", err)
+		}
+		for _, address := range recent {
+			if !contains(addresses, address) {
+				addresses = append(addresses, address)
+			}
+		}
+	}
+	var tracers [2]*providers.EVMSource
+	for index, providerID := range providerIDs {
 		rpc := payloads[providerID]
 		headers, err := l.readHeaders(rpc.CredentialRef)
 		if err != nil {
-			return tracers, fmt.Errorf("resolve trace credential reference %s: %w", providerID, err)
+			return plan, fmt.Errorf("resolve trace credential reference %s: %w", providerID, err)
+		}
+		timeout := timeouts[providerID]
+		if timeout <= 0 {
+			timeout = developmentPolicy(providerops.OperationRange).Timeout
 		}
 		headTag := rpc.HeadTag
 		if headTag == "" {
@@ -417,15 +434,23 @@ func (l ScannerLoader) traceSources(ctx context.Context, keys ScannerKeys, byKey
 		}
 		tracers[index], err = providers.NewEVMSource(providers.EVMConfig{
 			HTTP:       providers.HTTPConfig{Endpoint: rpc.Endpoint, Headers: headers, Timeout: timeout, MinInterval: l.ProviderMinInterval},
-			ProviderID: rpc.ProviderID, ChainID: keys.Chain, GenesisHash: genesis, HeadTag: headTag,
+			ProviderID: rpc.ProviderID, ChainID: keys.Chain, GenesisHash: chain.GenesisHash, HeadTag: headTag,
 			NativeAssetID: nativeAssetID, NativeDecimals: nativeDecimals,
-			IncludeInternal: true, AddressFiltered: true, WatchedAddresses: watched,
+			IncludeInternal: true, AddressFiltered: true, WatchedAddresses: addresses,
 		})
 		if err != nil {
-			return tracers, fmt.Errorf("initialize trace provider %s: %w", providerID, err)
+			return plan, fmt.Errorf("initialize trace provider %s: %w", providerID, err)
 		}
 	}
-	return tracers, nil
+	filter, err := providers.NewEVMInternalFilter(base, tracers[0], tracers[1], keys.Chain, chain.GenesisHash, addresses)
+	if err != nil {
+		return plan, err
+	}
+	if err := filter.WithBalanceProbes(append(append([]*providers.EVMSource(nil), probes...), tracers[0], tracers[1])...); err != nil {
+		return plan, err
+	}
+	filter.WithTraceUnavailable(unavailable)
+	return scanner.InternalPlan{Source: filter, Idle: len(addresses) == 0}, nil
 }
 
 func developmentPolicy(operation providerops.Operation) providerops.Policy {

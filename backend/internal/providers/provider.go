@@ -42,6 +42,10 @@ const (
 
 // ProviderError is safe to log: it intentionally contains neither request
 // headers nor response bodies, both of which can contain provider secrets.
+// ErrResponseTooLarge marks a response over the size limit. A transaction can be
+// crafted to produce one, so callers that read untrusted traces must handle it.
+var ErrResponseTooLarge = errors.New("response exceeds size limit")
+
 type ProviderError struct {
 	Kind       ErrorKind
 	Operation  string
@@ -219,7 +223,7 @@ func (c *endpointClient) request(ctx context.Context, operation, method string, 
 	}
 	response, err := c.client.Do(request)
 	if err != nil {
-		return &ProviderError{Kind: ErrorTransient, Operation: operation, Cause: err}
+		return &ProviderError{Kind: ErrorTransient, Operation: operation, Cause: withoutURL(err)}
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
@@ -244,7 +248,7 @@ func (c *endpointClient) request(ctx context.Context, operation, method string, 
 		return &ProviderError{Kind: ErrorTransient, Operation: operation, Cause: err}
 	}
 	if len(data) > maxResponseBytes {
-		return &ProviderError{Kind: ErrorMalformed, Operation: operation, Cause: errors.New("response exceeds size limit")}
+		return &ProviderError{Kind: ErrorMalformed, Operation: operation, Cause: ErrResponseTooLarge}
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
@@ -255,6 +259,16 @@ func (c *endpointClient) request(ctx context.Context, operation, method string, 
 		return &ProviderError{Kind: ErrorMalformed, Operation: operation, Cause: errors.New("multiple JSON values")}
 	}
 	return nil
+}
+
+// withoutURL keeps a transport failure's reason: *url.Error quotes the endpoint,
+// and a managed endpoint can carry its API key in the path.
+func withoutURL(err error) error {
+	var transport *url.Error
+	if errors.As(err, &transport) {
+		return transport.Err
+	}
+	return err
 }
 
 func parseRetryAfter(value string, now time.Time) time.Duration {
