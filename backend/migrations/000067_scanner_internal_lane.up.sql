@@ -6,6 +6,11 @@ CREATE TABLE scanner_internal_cursors (
   chain_id text NOT NULL REFERENCES chains(id),
   scanner_shard text NOT NULL,
   cursor_height uint256 NOT NULL,
+  -- Every write raises the version, so a range read before a reorg cannot commit
+  -- after it, even when the reorg left the height where it was.
+  version bigint NOT NULL DEFAULT 1,
+  locked_by text,
+  locked_until timestamptz,
   updated_at timestamptz NOT NULL,
   PRIMARY KEY (chain_id,scanner_shard)
 );

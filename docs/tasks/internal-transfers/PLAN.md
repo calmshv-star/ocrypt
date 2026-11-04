@@ -32,8 +32,10 @@ snapshot with the helper before assigning implementation workers.
 
 The first independent review found stop-the-chain paths, so detection moved to its
 own lane. The second found false credits across a reorg, a stuck give-up, a
-shared limiter and memory exhaustion, all fixed; see DECISIONS.md 13-17. A
-mutation run over 16 of the new guards found two unproved ones, and tests were
-added for both. Remaining limits: customer receipts for internal transfers; the
+shared limiter and memory exhaustion, all fixed; see DECISIONS.md 13-17. The third
+found a silent skip after a reorg, a lane with no lease, slow-path stalls and
+alerts nothing could fire, all fixed; see DECISIONS.md 18-22. Mutation runs over
+the new guards found the tests that proved too little, and tests were added.
+Remaining limits: customer receipts for internal transfers; the
 limits listed at the end of DECISIONS.md; no public pair for Base, Arbitrum,
 Polygon, Avalanche, BSC or Plasma. Nothing here is deployed.

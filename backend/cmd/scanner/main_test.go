@@ -260,13 +260,16 @@ func (laneProgress) InternalProgress(context.Context, string, string) (scanner.I
 	return scanner.InternalProgress{Cursor: 1, Scanned: 2, Started: true, HasScanned: true}, nil
 }
 func (laneProgress) StartInternal(context.Context, string, string, uint64) error { return nil }
+func (laneProgress) ClaimInternal(context.Context, string, string, string, time.Duration) (bool, error) {
+	return true, nil
+}
 func (laneProgress) CommitInternal(context.Context, scanner.InternalCommit) (int, error) {
 	return 0, nil
 }
 
 func TestInternalLaneStepIsBoundedAndCannotPanicTheScanner(t *testing.T) {
 	runner := &internalLaneRunner{}
-	lane := &scanner.InternalLane{ChainID: "eip155:1", Shard: "default", Store: laneProgress{}, RangeSize: 32, GiveUpAfter: time.Minute}
+	lane := &scanner.InternalLane{ChainID: "eip155:1", Shard: "default", Owner: "worker", Store: laneProgress{}, RangeSize: 32, LeaseDuration: time.Minute, GiveUpAfter: time.Minute}
 	if _, err := runner.step(t.Context(), lane); err != nil {
 		t.Fatalf("a lane without a plan must rest: %v", err)
 	}
@@ -278,6 +281,16 @@ func TestInternalLaneStepIsBoundedAndCannotPanicTheScanner(t *testing.T) {
 	probe.panics = true
 	if _, err := runner.step(t.Context(), lane); err == nil {
 		t.Fatal("a lane panic must come back as an error")
+	}
+	runner.hold()
+	if _, err := runner.step(t.Context(), lane); err != nil {
+		t.Fatalf("a held lane must not read anything: %v", err)
+	}
+}
+
+func TestRouteWatchingScannerPublishesNoPlanBeforeItKnowsItsAddresses(t *testing.T) {
+	if publishesInitialPlan(scannerConfig{routeWatchAddresses: true}) || !publishesInitialPlan(scannerConfig{}) {
+		t.Fatal("a route-watching scanner would let the lane pass blocks unread")
 	}
 }
 

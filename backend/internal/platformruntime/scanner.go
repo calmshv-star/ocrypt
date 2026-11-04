@@ -427,58 +427,34 @@ func (l ScannerLoader) internalPlan(ctx context.Context, in internalInputs, now 
 			}
 		}
 	}
-	timeout := developmentPolicy(providerops.OperationRange).Timeout
-	pace := max(l.ProviderMinInterval, scanner.InternalRequestInterval)
-	newSource := func(rpc rpcPayload, tracer bool) (*providers.EVMSource, error) {
+	lane := func(rpc rpcPayload) (providers.InternalLaneProvider, error) {
 		headers, err := l.readHeaders(rpc.CredentialRef)
 		if err != nil {
-			return nil, fmt.Errorf("resolve RPC credential reference of %s: %w", rpc.ProviderID, err)
+			return providers.InternalLaneProvider{}, fmt.Errorf("resolve RPC credential reference of %s: %w", rpc.ProviderID, err)
 		}
-		config := providers.EVMConfig{
-			HTTP:       providers.HTTPConfig{Endpoint: rpc.Endpoint, Headers: headers, Timeout: timeout, MinInterval: pace, Client: l.LaneClient},
-			ProviderID: rpc.ProviderID, ChainID: keys.Chain, GenesisHash: chain.GenesisHash, HeadTag: rpc.HeadTag,
-			NativeAssetID: in.nativeAssetID, NativeDecimals: in.nativeDecimals,
-			AddressFiltered: true, WatchedAddresses: addresses, Overlap: chain.Overlap,
-		}
-		if tracer {
-			config.IncludeInternal, config.HTTP.MaxResponseBytes = true, providers.InternalTraceResponseLimit
-			if config.HeadTag == "" {
-				config.HeadTag = "finalized"
-			}
-		}
-		return providers.NewEVMSource(config)
+		return providers.InternalLaneProvider{Endpoint: rpc.Endpoint, ProviderID: rpc.ProviderID, HeadTag: rpc.HeadTag, Headers: headers}, nil
 	}
-	sources := make([]scanner.Source, 0, len(in.admitted))
-	probes := make([]*providers.EVMSource, 0, len(in.admitted)+2)
+	config := providers.InternalLaneConfig{
+		ChainID: keys.Chain, GenesisHash: chain.GenesisHash, NativeAssetID: in.nativeAssetID, NativeDecimals: in.nativeDecimals,
+		Quorum: chain.Quorum, Addresses: addresses, Overlap: chain.Overlap, Confirmations: in.confirmations,
+		Interval: l.ProviderMinInterval, TraceDown: unavailable, Client: l.LaneClient,
+	}
 	for _, rpc := range in.admitted {
-		source, err := newSource(rpc, false)
+		provider, err := lane(rpc)
 		if err != nil {
 			return plan, err
 		}
-		sources, probes = append(sources, source), append(probes, source)
+		config.Ordinary = append(config.Ordinary, provider)
 	}
-	base, err := providers.NewQuorumSource(sources, chain.Quorum)
-	if err != nil {
-		return plan, err
-	}
-	var tracers [2]*providers.EVMSource
 	for index, providerID := range providerIDs {
-		if tracers[index], err = newSource(payloads[providerID], true); err != nil {
+		if config.Traces[index], err = lane(payloads[providerID]); err != nil {
 			return plan, err
 		}
 	}
-	filter, err := providers.NewEVMInternalFilter(base, tracers[0], tracers[1], keys.Chain, chain.GenesisHash, addresses)
+	filter, err := providers.NewInternalLaneSource(config)
 	if err != nil {
 		return plan, err
 	}
-	if unavailable == nil {
-		probes = append(probes, tracers[0], tracers[1])
-	}
-	if err := filter.WithBalanceProbes(probes...); err != nil {
-		return plan, err
-	}
-	filter.WithTraceUnavailable(unavailable)
-	filter.WithRequiredConfirmations(in.confirmations)
 	return scanner.InternalPlan{Source: filter, Idle: len(addresses) == 0}, nil
 }
 

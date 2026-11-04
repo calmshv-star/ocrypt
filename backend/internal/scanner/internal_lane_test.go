@@ -14,6 +14,11 @@ type laneStore struct {
 	started  []uint64
 	commits  []InternalCommit
 	fail     error
+	denied   bool
+}
+
+func (s *laneStore) ClaimInternal(context.Context, string, string, string, time.Duration) (bool, error) {
+	return !s.denied, nil
 }
 
 func (s *laneStore) InternalProgress(context.Context, string, string) (InternalProgress, error) {
@@ -53,13 +58,16 @@ func (s *laneSource) ScanRange(_ context.Context, from, to uint64) (RangeBatch, 
 type laneObserver struct {
 	lag          uint64
 	unattributed int
+	open         int
 }
+
+func (o *laneObserver) SetScannerUnattributedOpen(count int) { o.open = count }
 
 func (o *laneObserver) SetScannerInternalLag(lag uint64) { o.lag = lag }
 func (o *laneObserver) AddScannerUnattributed(count int) { o.unattributed += count }
 
 func newLane(store InternalStore) *InternalLane {
-	return &InternalLane{ChainID: "eip155:1", Shard: "default", Store: store, RangeSize: 32, GiveUpAfter: 30 * time.Minute}
+	return &InternalLane{ChainID: "eip155:1", Shard: "default", Owner: "worker", Store: store, RangeSize: 32, LeaseDuration: time.Minute, GiveUpAfter: 30 * time.Minute}
 }
 
 func internalEvent(kind string, height uint64) domain.TransferEvent {
@@ -188,6 +196,11 @@ func TestInternalLaneRejectsInvalidConfiguration(t *testing.T) {
 	if _, err := (&InternalLane{}).RunOnce(t.Context(), InternalPlan{}); err == nil {
 		t.Fatal("accepted an empty lane")
 	}
+	lane := newLane(&laneStore{})
+	lane.Owner = ""
+	if _, err := lane.RunOnce(t.Context(), InternalPlan{}); err == nil {
+		t.Fatal("accepted a lane without an owner")
+	}
 }
 
 // A step that ran out of time is exactly the range that needs giving up.
@@ -233,5 +246,76 @@ func TestInternalLaneBudgetBelongsToOneRange(t *testing.T) {
 	now = now.Add(28 * time.Minute)
 	if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source}); err != nil || len(store.commits) != 1 {
 		t.Fatalf("err=%v commits=%+v", err, store.commits)
+	}
+}
+
+func TestInternalLaneRunsOnOneReplicaAtATime(t *testing.T) {
+	store := &laneStore{progress: InternalProgress{Cursor: 100, Scanned: 110, Started: true, HasScanned: true}, denied: true}
+	source := &laneSource{}
+	if more, err := newLane(store).RunOnce(t.Context(), InternalPlan{Source: source}); err != nil || more || len(source.calls) != 0 || len(store.commits) != 0 {
+		t.Fatalf("a replica without the lease worked: more=%v err=%v calls=%v", more, err, source.calls)
+	}
+}
+
+// The version read before the scan is what fences the commit against a reorg.
+func TestInternalLaneCommitsTheVersionItRead(t *testing.T) {
+	store := &laneStore{progress: InternalProgress{Cursor: 100, Scanned: 110, Started: true, HasScanned: true, Version: 7, OpenFindings: 3}}
+	observer := &laneObserver{}
+	lane := newLane(store)
+	lane.Observer = observer
+	if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: &laneSource{}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.commits) != 1 || store.commits[0].Version != 7 || observer.open != 3 {
+		t.Fatalf("commits=%+v open=%d", store.commits, observer.open)
+	}
+}
+
+// A range too slow for one step gets smaller, so one heavy block does not cost
+// the whole range.
+func TestInternalLaneNarrowsARangeThatRunsOutOfTime(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	store := &laneStore{progress: InternalProgress{Cursor: 100, Scanned: 500, Started: true, HasScanned: true}}
+	source := &laneSource{err: context.DeadlineExceeded}
+	lane := newLane(store)
+	lane.Now = func() time.Time { return now }
+	expired, cancel := context.WithCancel(t.Context())
+	cancel()
+	for _, size := range []uint64{32, 16, 8, 4, 2, 1, 1} {
+		source.calls = nil
+		if _, err := lane.RunOnce(expired, InternalPlan{Source: source}); err == nil {
+			t.Fatal("the range must fail")
+		}
+		if source.calls[0] != [2]uint64{101, 100 + size} {
+			t.Fatalf("size %d: scanned %v", size, source.calls)
+		}
+		now = now.Add(time.Minute)
+	}
+	// A failure that is not about time keeps the range.
+	source.err, source.calls = errors.New("provider refused"), nil
+	store.progress.Cursor = 200
+	if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source}); err == nil || source.calls[0] != [2]uint64{201, 232} {
+		t.Fatalf("err=%v calls=%v", err, source.calls)
+	}
+	if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source}); err == nil || source.calls[1] != [2]uint64{201, 232} {
+		t.Fatalf("err=%v calls=%v", err, source.calls)
+	}
+}
+
+func TestInternalLaneDoesNotCountAPauseAsFailing(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	store := &laneStore{progress: InternalProgress{Cursor: 100, Scanned: 110, Started: true, HasScanned: true}}
+	source := &laneSource{err: errors.New("provider refused")}
+	lane := newLane(store)
+	lane.Now = func() time.Time { return now }
+	if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source}); err == nil {
+		t.Fatal("the range must fail")
+	}
+	if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source, Paused: true}); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(2 * time.Hour)
+	if _, err := lane.RunOnce(t.Context(), InternalPlan{Source: source}); err == nil || len(store.commits) != 0 {
+		t.Fatalf("a maintenance window used up the budget: %v %+v", err, store.commits)
 	}
 }

@@ -179,9 +179,10 @@ func (s *ScannerStore) RewindReorg(ctx context.Context, lease scanner.Lease, bat
 		if command.RowsAffected() != 1 {
 			return fmt.Errorf("%w: scanner lease was lost", domain.ErrVersionConflict)
 		}
-		// The internal lane must read the replacement blocks too. Moving its cursor
-		// also makes a commit already in flight for the old blocks lose its race.
-		if _, err := tx.Exec(ctx, `UPDATE scanner_internal_cursors SET cursor_height=LEAST(cursor_height,$1::numeric),updated_at=clock_timestamp() WHERE chain_id=$2 AND scanner_shard=$3`, strconv.FormatUint(rewindHeight, 10), lease.ChainID, lease.Shard); err != nil {
+		// The internal lane must read the replacement blocks too. The version
+		// fences a commit already in flight for the old blocks, even when the lane
+		// sat below the fork and its height does not change.
+		if _, err := tx.Exec(ctx, `UPDATE scanner_internal_cursors SET cursor_height=LEAST(cursor_height,$1::numeric),version=version+1,updated_at=clock_timestamp() WHERE chain_id=$2 AND scanner_shard=$3`, strconv.FormatUint(rewindHeight, 10), lease.ChainID, lease.Shard); err != nil {
 			return err
 		}
 		return nil

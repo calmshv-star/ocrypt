@@ -1,10 +1,12 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -309,7 +311,9 @@ type internalTree struct {
 	code          string
 	receiptHeight string
 	receiptBlock  string
+	receiptDown   bool
 	traceCalls    *int
+	calls         *int
 }
 
 const (
@@ -353,8 +357,21 @@ func internalSourceFor(t *testing.T, endpoint string, state internalTree) *EVMSo
 		status = "0x1"
 	}
 	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		if state.calls != nil {
+			*state.calls++
+		}
 		if state.down {
 			return 500, nil
+		}
+		if state.receiptDown {
+			raw, err := io.ReadAll(request.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Contains(raw, []byte("eth_getTransactionReceipt")) {
+				return 500, nil
+			}
+			request.Body = io.NopCloser(bytes.NewReader(raw))
 		}
 		return 200, rpcResult(t, request, func(method string, params []json.RawMessage) json.RawMessage {
 			switch method {
@@ -848,22 +865,19 @@ func TestEVMInternalFilterRefusesWhatTheChainDoesNotConfirm(t *testing.T) {
 	}
 	t.Run("one receipt is not enough", func(t *testing.T) {
 		filter := internalFilterFor(t, good, good)
-		broken := internalSourceFor(t, "https://broken.example", internalTree{down: true})
-		honest := internalSourceFor(t, "https://honest.example", good)
-		other := internalSourceFor(t, "https://other.example", good)
-		if err := filter.WithBalanceProbes(honest, other); err != nil {
+		failing := good
+		failing.receiptDown = true
+		if err := filter.WithBalanceProbes(internalSourceFor(t, "https://honest.example", good), internalSourceFor(t, "https://failing.example", failing)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := filter.ScanRange(context.Background(), 1, 1); err != nil {
+		if _, err := filter.ScanRange(context.Background(), 1, 1); err == nil {
+			t.Fatal("one provider's receipt was enough")
+		}
+		if err := filter.WithBalanceProbes(internalSourceFor(t, "https://failing.example", failing), internalSourceFor(t, "https://honest.example", good), internalSourceFor(t, "https://other.example", good)); err != nil {
 			t.Fatal(err)
 		}
-		// Balances agree on the first two; only the receipt reaches the broken one.
-		single := internalFilterFor(t, good, good)
-		if err := single.WithBalanceProbes(honest, broken); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := single.ScanRange(context.Background(), 1, 1); err == nil {
-			t.Fatal("one provider's word was enough")
+		if batch, err := filter.ScanRange(context.Background(), 1, 1); err != nil || len(batch.Events) != 1 {
+			t.Fatalf("two other providers must stand in: %+v %v", batch, err)
 		}
 	})
 	t.Run("block outside the canonical scan", func(t *testing.T) {
@@ -998,4 +1012,136 @@ func TestRateLimitWaitDoesNotHoldOtherCallers(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+// A hung provider costs one timeout per range, not one per wallet.
+func TestEVMInternalFilterStopsAskingAFailedProbe(t *testing.T) {
+	addresses := make([]string, 0, maxBalanceWatched)
+	for index := 0; index < maxBalanceWatched; index++ {
+		addresses = append(addresses, fmt.Sprintf("0x%040x", index+1))
+	}
+	calls := 0
+	dead := internalTree{down: true, calls: &calls}
+	idle := internalTree{nonceEnd: "0x0", endBalance: "0x0"}
+	first, second := internalSourceFor(t, "https://trace-a.example", idle), internalSourceFor(t, "https://trace-b.example", idle)
+	filter, err := NewEVMInternalFilter(internalBaseFixture{}, first, second, "eip155:1", internalTestGenesis, addresses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := filter.WithBalanceProbes(internalSourceFor(t, "https://dead.example", dead), first, second); err != nil {
+		t.Fatal(err)
+	}
+	if batch, err := filter.ScanRange(context.Background(), 1, 1); err != nil || batch.To != 1 {
+		t.Fatalf("batch=%+v err=%v", batch, err)
+	}
+	if calls != 1 {
+		t.Fatalf("a dead provider was asked %d times in one range", calls)
+	}
+}
+
+// A few huge frames shrink the page; the rest must not stay at that size.
+func TestEVMInternalFilterPagesShrinkAndGrowBack(t *testing.T) {
+	var counts []int
+	client := fixtureClient(t, func(request *http.Request) (int, json.RawMessage) {
+		return 200, rpcResult(t, request, func(_ string, params []json.RawMessage) json.RawMessage {
+			var filter struct {
+				After, Count int
+			}
+			if err := json.Unmarshal(params[0], &filter); err != nil {
+				t.Fatal(err)
+			}
+			counts = append(counts, filter.Count)
+			if filter.After == 0 && filter.Count > 10 {
+				return json.RawMessage(`"` + strings.Repeat("a", InternalTraceResponseLimit+1) + `"`)
+			}
+			if filter.After >= 12 {
+				return internalJSON(t, []any{})
+			}
+			frames := make([]any, 0, filter.Count)
+			for index := 0; index < min(filter.Count, 2); index++ {
+				frames = append(frames, internalFrame([]int{filter.After + index}, 0, internalTestContract, internalTestWatched, "0x5", "call", ""))
+			}
+			return internalJSON(t, frames)
+		})
+	})
+	source, err := NewEVMSource(EVMConfig{HTTP: HTTPConfig{Endpoint: "https://trace.example", Client: client, MaxResponseBytes: InternalTraceResponseLimit}, ProviderID: "trace", ChainID: "eip155:1", GenesisHash: internalTestGenesis, NativeAssetID: "eth", NativeDecimals: 18, IncludeInternal: true, AddressFiltered: true, WatchedAddresses: []string{internalTestWatched}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, oversized, err := source.filteredInternalTraces(context.Background(), 1, 1, map[string]struct{}{internalTestWatched: {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 12 || len(oversized) != 0 {
+		t.Fatalf("candidates=%d oversized=%v", len(candidates), oversized)
+	}
+	if counts[0] != 1000 || counts[1] != 100 || counts[2] != 10 || counts[3] != 100 || counts[len(counts)-1] != 1000 {
+		t.Fatalf("page sizes %v", counts)
+	}
+}
+
+// Both scanner modes get their bounds from this one constructor.
+func TestInternalLaneSourceAppliesItsBounds(t *testing.T) {
+	config := InternalLaneConfig{
+		ChainID: "eip155:1", GenesisHash: internalTestGenesis, NativeAssetID: "eth", NativeDecimals: 18, Quorum: 2,
+		Ordinary:  []InternalLaneProvider{{Endpoint: "https://one.example", ProviderID: "one"}, {Endpoint: "https://two.example", ProviderID: "two"}},
+		Traces:    [2]InternalLaneProvider{{Endpoint: "https://trace-a.example", ProviderID: "a"}, {Endpoint: "https://trace-b.example", ProviderID: "b"}},
+		Addresses: []string{internalTestWatched}, Confirmations: 12,
+	}
+	filter, err := NewInternalLaneSource(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filter.required != 12 || len(filter.probes) != 4 {
+		t.Fatalf("required=%d probes=%d", filter.required, len(filter.probes))
+	}
+	for _, tracer := range filter.tracers {
+		if tracer.http.maxBytes != InternalTraceResponseLimit || tracer.http.minWait != InternalRequestInterval || tracer.headTag != "finalized" {
+			t.Fatalf("tracer limit=%d pace=%s tag=%q", tracer.http.maxBytes, tracer.http.minWait, tracer.headTag)
+		}
+	}
+	for _, probe := range filter.probes[:2] {
+		if probe.http.minWait != InternalRequestInterval || probe.http.maxBytes != maxResponseBytes {
+			t.Fatalf("probe pace=%s limit=%d", probe.http.minWait, probe.http.maxBytes)
+		}
+	}
+	config.Interval, config.TraceDown = time.Second, errors.New("lost admission")
+	if filter, err = NewInternalLaneSource(config); err != nil {
+		t.Fatal(err)
+	}
+	if len(filter.probes) != 2 || filter.traceDown == nil || filter.tracers[0].http.minWait != time.Second {
+		t.Fatalf("probes=%d down=%v pace=%s", len(filter.probes), filter.traceDown, filter.tracers[0].http.minWait)
+	}
+}
+
+func TestRateLimitKeepsItsSpacingAndReturnsAnAbandonedSlot(t *testing.T) {
+	client, err := newEndpointClient(HTTPConfig{Endpoint: "https://rpc.example", MinInterval: 40 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	for range 3 {
+		if err := client.waitForRateLimit(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if elapsed := time.Since(started); elapsed < 70*time.Millisecond {
+		t.Fatalf("three calls took %s", elapsed)
+	}
+	// A caller that gives up leaves no gap behind.
+	client.postpone(time.Hour)
+	before := client.nextRPC
+	short, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	if err := client.waitForRateLimit(short); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err=%v", err)
+	}
+	if !client.nextRPC.Equal(before) {
+		t.Fatalf("slot not returned: %s then %s", before, client.nextRPC)
+	}
+	cancelled, stop := context.WithCancel(context.Background())
+	stop()
+	if err := client.waitForRateLimit(cancelled); !errors.Is(err, context.Canceled) || !client.nextRPC.Equal(before) {
+		t.Fatalf("a cancelled caller reserved a slot: %v", err)
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/calmshv-star/ocrypt/backend/internal/ids"
 	"github.com/calmshv-star/ocrypt/backend/internal/scanner"
 )
 
@@ -24,10 +25,20 @@ func (r *internalLaneRunner) setPlan(plan scanner.InternalPlan) {
 	r.plan.Store(&plan)
 }
 
+// hold stops the lane after a failed platform read: its last plan may be stale.
+func (r *internalLaneRunner) hold() {
+	r.setPlan(scanner.InternalPlan{Paused: true})
+}
+
 func (r *internalLaneRunner) start(ctx context.Context, store scanner.InternalStore, observer scanner.InternalObserver, config scannerConfig, chainID string, hold uint64) {
 	r.once.Do(func() {
-		lane := &scanner.InternalLane{ChainID: chainID, Shard: config.shard, Store: store, RangeSize: scanner.DefaultInternalRange,
-			Hold: hold, GiveUpAfter: scanner.DefaultInternalGiveUpAfter, Observer: observer}
+		suffix, err := ids.New()
+		if err != nil {
+			slog.Warn("internal transfer lane cannot start", "chain_id", chainID, "error", err)
+			return
+		}
+		lane := &scanner.InternalLane{ChainID: chainID, Shard: config.shard, Owner: config.workerID + "/" + suffix, Store: store, RangeSize: scanner.DefaultInternalRange,
+			LeaseDuration: internalStepTimeout + time.Minute, Hold: hold, GiveUpAfter: scanner.DefaultInternalGiveUpAfter, Observer: observer}
 		go r.run(ctx, lane, config.pollInterval)
 	})
 }

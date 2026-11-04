@@ -20,6 +20,7 @@ import urllib.request
 from urllib.parse import urlparse
 
 LAG_LINE = re.compile(r"^merchant_scanner_head_lag_blocks(?:\{[^}]*\})?\s+(\S+)(?:\s+\d+)?\s*$", re.MULTILINE)
+UNCREDITED_LINE = re.compile(r"^merchant_scanner_unattributed_open(?:\{[^}]*\})?\s+(\S+)(?:\s+\d+)?\s*$", re.MULTILINE)
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 TELEGRAM_TOKEN = re.compile(r"^\d+:[A-Za-z0-9_-]+$")
 CHAT_ID = re.compile(r"^(-?\d+|@[A-Za-z0-9_]{5,})$")
@@ -144,7 +145,15 @@ def http_post(url, payload, timeout):
 
 
 def parse_lag(metrics):
-    match = LAG_LINE.search(metrics)
+    return _parse_gauge(LAG_LINE, metrics)
+
+
+def parse_uncredited(metrics):
+    return _parse_gauge(UNCREDITED_LINE, metrics)
+
+
+def _parse_gauge(line, metrics):
+    match = line.search(metrics)
     if not match:
         return None
     try:
@@ -162,11 +171,12 @@ def probe(target, fetch):
         status, _ = fetch(base + "/readyz", TIMEOUT)
     except Exception:  # noqa: BLE001 - any transport failure means unreachable
         return {"ready": False, "lag": None, "problem": "unreachable"}
-    lag = None
+    lag = uncredited = None
     try:
         metrics_status, metrics = fetch(base + "/metrics", TIMEOUT)
         if metrics_status == 200:
             lag = parse_lag(metrics)
+            uncredited = parse_uncredited(metrics)
     except Exception:  # noqa: BLE001 - lag is optional evidence
         pass
     ready = status == 200
@@ -178,6 +188,8 @@ def probe(target, fetch):
         problem = "lag unknown"
     elif limit is not None and lag > limit:
         problem = "%d blocks behind (limit %d)" % (lag, limit)
+    elif uncredited:
+        problem = "%d internal transfer records wait for an operator" % uncredited
     return {"ready": ready, "lag": lag, "problem": problem}
 
 

@@ -105,9 +105,7 @@ func main() {
 			metrics.SetScannerInternalDetectionMissing(true)
 			slog.Warn(internalDetectionWarning, "chain_id", config.chainID, "reason", sources.internalErr)
 		}
-		// A route-watching scanner learns its addresses on the first cycle, and a
-		// plan without addresses would let the lane pass blocks unread.
-		if !config.routeWatchAddresses {
+		if publishesInitialPlan(config) {
 			internal.setPlan(sources.internal)
 		}
 		if len(config.evmInternalTraceURLs) == 2 {
@@ -190,8 +188,7 @@ func main() {
 		if runtimeLoader != nil {
 			runtime, loadErr := runtimeLoader.Load(ctx, config.platformKeys, time.Now().UTC())
 			if loadErr != nil {
-				// A plan from before the failure may be stale, so the lane waits.
-				internal.setPlan(scanner.InternalPlan{Paused: true})
+				internal.hold()
 				metrics.ObserveCycle("scanner", "failure", 0, time.Since(started))
 				slog.Error("scanner platform runtime admission failed", "chain_id", config.platformKeys.Chain, "error", loadErr)
 				return false
@@ -327,6 +324,13 @@ type scannerConfig struct {
 	addressFiltered, routeWatchAddresses                                             bool
 	platformSecretDir                                                                string
 	platformKeys                                                                     platformruntime.ScannerKeys
+}
+
+// publishesInitialPlan is false for a route-watching scanner: it learns its
+// addresses on the first cycle, and a plan without addresses would let the lane
+// pass blocks unread.
+func publishesInitialPlan(config scannerConfig) bool {
+	return !config.routeWatchAddresses
 }
 
 // internalHold keeps the lane behind the ordinary cursor. A runtime scanner stops
@@ -540,12 +544,13 @@ func scannerSources(config scannerConfig) (scannerSourceSet, error) {
 	return result, nil
 }
 
-// staticInternalPlan builds the internal lane's source with its own paced
-// clients, so it cannot hold the ordinary scan on a shared limiter.
+// staticInternalPlan builds the internal lane's source from two trace endpoints.
 func staticInternalPlan(config scannerConfig) (scanner.InternalPlan, error) {
-	pace := max(config.providerMinInterval, scanner.InternalRequestInterval)
-	sources := make([]scanner.Source, 0, len(config.providerURLs))
-	probes := make([]*providers.EVMSource, 0, len(config.providerURLs)+2)
+	lane := providers.InternalLaneConfig{
+		ChainID: config.chainID, GenesisHash: config.genesisHash, NativeAssetID: config.nativeAssetID, NativeDecimals: config.nativeDecimals,
+		Quorum: config.quorum, Failover: config.providerMode == "failover", Addresses: config.watchedAddresses,
+		Overlap: config.overlap, Confirmations: config.overlap, Interval: config.providerMinInterval,
+	}
 	for index, endpoint := range config.providerURLs {
 		headTag := ""
 		if len(config.providerHeadTags) > 0 {
@@ -555,48 +560,15 @@ func staticInternalPlan(config scannerConfig) (scanner.InternalPlan, error) {
 		if config.providerToken != "" && headers.Get("Authorization") == "" {
 			headers.Set("Authorization", "Bearer "+config.providerToken)
 		}
-		source, err := providers.NewEVMSource(providers.EVMConfig{
-			HTTP:       providers.HTTPConfig{Endpoint: endpoint, Headers: headers, Timeout: 20 * time.Second, MinInterval: pace},
-			ProviderID: fmt.Sprintf("internal-provider-%d", index+1), ChainID: config.chainID, HeadTag: headTag, GenesisHash: config.genesisHash,
-			NativeAssetID: config.nativeAssetID, NativeDecimals: config.nativeDecimals,
-			AddressFiltered: true, WatchedAddresses: config.watchedAddresses, Overlap: config.overlap,
-		})
-		if err != nil {
-			return scanner.InternalPlan{}, fmt.Errorf("initialize internal lane provider %d: %w", index+1, err)
-		}
-		sources, probes = append(sources, source), append(probes, source)
+		lane.Ordinary = append(lane.Ordinary, providers.InternalLaneProvider{Endpoint: endpoint, ProviderID: fmt.Sprintf("internal-provider-%d", index+1), HeadTag: headTag, Headers: headers})
 	}
-	var base scanner.Source
-	var err error
-	if config.providerMode == "failover" {
-		base, err = providers.NewFailoverSource(sources)
-	} else {
-		base, err = providers.NewQuorumSource(sources, config.quorum)
-	}
-	if err != nil {
-		return scanner.InternalPlan{}, err
-	}
-	var tracers [2]*providers.EVMSource
 	for index, endpoint := range config.evmInternalTraceURLs {
-		tracers[index], err = providers.NewEVMSource(providers.EVMConfig{
-			HTTP:       providers.HTTPConfig{Endpoint: endpoint, Timeout: 20 * time.Second, MinInterval: pace, MaxResponseBytes: providers.InternalTraceResponseLimit},
-			ProviderID: fmt.Sprintf("internal-trace-%d", index+1), ChainID: config.chainID,
-			GenesisHash: config.genesisHash, HeadTag: "finalized",
-			NativeAssetID: config.nativeAssetID, NativeDecimals: config.nativeDecimals,
-			IncludeInternal: true, AddressFiltered: true, WatchedAddresses: config.watchedAddresses,
-		})
-		if err != nil {
-			return scanner.InternalPlan{}, fmt.Errorf("initialize independent internal trace provider %d: %w", index+1, err)
-		}
+		lane.Traces[index] = providers.InternalLaneProvider{Endpoint: endpoint, ProviderID: fmt.Sprintf("internal-trace-%d", index+1)}
 	}
-	filter, err := providers.NewEVMInternalFilter(base, tracers[0], tracers[1], config.chainID, config.genesisHash, config.watchedAddresses)
+	filter, err := providers.NewInternalLaneSource(lane)
 	if err != nil {
 		return scanner.InternalPlan{}, err
 	}
-	if err := filter.WithBalanceProbes(append(probes, tracers[0], tracers[1])...); err != nil {
-		return scanner.InternalPlan{}, err
-	}
-	filter.WithRequiredConfirmations(config.overlap)
 	return scanner.InternalPlan{Source: filter, Idle: len(config.watchedAddresses) == 0}, nil
 }
 

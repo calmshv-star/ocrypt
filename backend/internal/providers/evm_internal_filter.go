@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/http"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/calmshv-star/ocrypt/backend/internal/chains"
 	"github.com/calmshv-star/ocrypt/backend/internal/domain"
@@ -39,12 +41,100 @@ const (
 	// with ordinary payments.
 	InternalTraceResponseLimit = 8 << 20
 	// Up to this many wallets the balance check saves traces. Beyond it a
-	// single trace_filter sweep is cheaper than reading every wallet.
-	maxBalanceWatched      = 16
-	maxInternalTraceFrames = 100000
+	// single trace_filter sweep costs less than reading every wallet, and the
+	// lane keeps up with fast chains.
+	maxBalanceWatched = 8
+	// A block that takes more requests than this is recorded instead of read.
+	maxInternalTraceRequests = 64
 	// More transfers to watched wallets in one transaction are not a payment.
 	maxTransfersPerTransaction = 256
+	// InternalRequestInterval paces the lane's own clients: it must not use up a
+	// provider's quota that the ordinary scan shares.
+	InternalRequestInterval = 250 * time.Millisecond
+	internalRequestTimeout  = 20 * time.Second
 )
+
+// InternalLaneProvider is one endpoint of the internal lane.
+type InternalLaneProvider struct {
+	Endpoint, ProviderID, HeadTag string
+	Headers                       http.Header
+}
+
+// InternalLaneConfig describes the lane's source. Every client in it is the
+// lane's own: nothing here shares a limiter with the ordinary scan.
+type InternalLaneConfig struct {
+	ChainID, GenesisHash, NativeAssetID string
+	NativeDecimals                      uint8
+	Ordinary                            []InternalLaneProvider
+	Traces                              [2]InternalLaneProvider
+	Quorum                              int
+	Failover                            bool
+	Addresses                           []string
+	Overlap, Confirmations              uint64
+	Interval                            time.Duration
+	// TraceDown says why the trace providers may not be used now. They then
+	// serve no balances either.
+	TraceDown error
+	Client    *http.Client
+}
+
+// NewInternalLaneSource builds the lane's source, for both scanner modes.
+func NewInternalLaneSource(config InternalLaneConfig) (*EVMInternalFilter, error) {
+	pace := max(config.Interval, InternalRequestInterval)
+	newSource := func(provider InternalLaneProvider, tracer bool) (*EVMSource, error) {
+		settings := EVMConfig{
+			HTTP:       HTTPConfig{Endpoint: provider.Endpoint, Headers: provider.Headers, Timeout: internalRequestTimeout, MinInterval: pace, Client: config.Client},
+			ProviderID: provider.ProviderID, ChainID: config.ChainID, GenesisHash: config.GenesisHash, HeadTag: provider.HeadTag,
+			NativeAssetID: config.NativeAssetID, NativeDecimals: config.NativeDecimals,
+			AddressFiltered: true, WatchedAddresses: config.Addresses, Overlap: config.Overlap,
+		}
+		if tracer {
+			settings.IncludeInternal, settings.HTTP.MaxResponseBytes = true, InternalTraceResponseLimit
+			if settings.HeadTag == "" {
+				settings.HeadTag = "finalized"
+			}
+		}
+		return NewEVMSource(settings)
+	}
+	sources := make([]scanner.Source, 0, len(config.Ordinary))
+	probes := make([]*EVMSource, 0, len(config.Ordinary)+2)
+	for _, provider := range config.Ordinary {
+		source, err := newSource(provider, false)
+		if err != nil {
+			return nil, err
+		}
+		sources, probes = append(sources, source), append(probes, source)
+	}
+	var base scanner.Source
+	var err error
+	if config.Failover {
+		base, err = NewFailoverSource(sources)
+	} else {
+		base, err = NewQuorumSource(sources, config.Quorum)
+	}
+	if err != nil {
+		return nil, err
+	}
+	var tracers [2]*EVMSource
+	for index, provider := range config.Traces {
+		if tracers[index], err = newSource(provider, true); err != nil {
+			return nil, err
+		}
+	}
+	filter, err := NewEVMInternalFilter(base, tracers[0], tracers[1], config.ChainID, config.GenesisHash, config.Addresses)
+	if err != nil {
+		return nil, err
+	}
+	if config.TraceDown == nil {
+		probes = append(probes, tracers[0], tracers[1])
+	}
+	if err := filter.WithBalanceProbes(probes...); err != nil {
+		return nil, err
+	}
+	filter.WithTraceUnavailable(config.TraceDown)
+	filter.WithRequiredConfirmations(config.Confirmations)
+	return filter, nil
+}
 
 func NewEVMInternalFilter(base scanner.Source, first, second *EVMSource, chainID, genesis string, addresses []string) (*EVMInternalFilter, error) {
 	if base == nil || first == nil || second == nil || first == second || first.http.base.Host == second.http.base.Host ||
@@ -109,10 +199,13 @@ func (s *EVMInternalFilter) Heads(ctx context.Context) ([]scanner.ProviderHead, 
 // survive its transaction's complete call tree. An error keeps the lane's cursor.
 func (s *EVMInternalFilter) ScanRange(ctx context.Context, from, to uint64) (scanner.RangeBatch, error) {
 	batch := scanner.RangeBatch{From: from, To: to}
+	// A provider that failed once sits out the rest of the range: a hung one
+	// would otherwise cost a timeout per wallet and use up the step.
+	failed := make(map[*EVMSource]bool, len(s.probes))
 	var windows map[string]evmBalanceWindow
 	if from > 0 && len(s.watched) <= maxBalanceWatched {
 		var err error
-		if windows, err = s.balanceWindows(ctx, from, to); err != nil {
+		if windows, err = s.balanceWindows(ctx, from, to, failed); err != nil {
 			return scanner.RangeBatch{}, err
 		}
 		if !anyMovement(windows) {
@@ -185,7 +278,7 @@ func (s *EVMInternalFilter) ScanRange(ctx context.Context, from, to uint64) (sca
 		}
 		seen[key] = struct{}{}
 		if _, verified := receipts[candidate.TransactionHash]; !verified {
-			if err := s.verifyReceipt(ctx, candidate, block); err != nil {
+			if err := s.verifyReceipt(ctx, candidate, block, failed); err != nil {
 				return scanner.RangeBatch{}, err
 			}
 			receipts[candidate.TransactionHash] = struct{}{}
@@ -285,13 +378,16 @@ func (s *EVMInternalFilter) explained(windows map[string]evmBalanceWindow, event
 
 // verifyReceipt needs two providers to confirm the transaction succeeded in
 // this canonical block. One that fails is replaced by the next.
-func (s *EVMInternalFilter) verifyReceipt(ctx context.Context, candidate internalTraceCandidate, block scanner.Block) error {
+func (s *EVMInternalFilter) verifyReceipt(ctx context.Context, candidate internalTraceCandidate, block scanner.Block, failed map[*EVMSource]bool) error {
 	confirmed := 0
 	var lastErr error
 	for _, source := range s.probes {
+		if failed[source] {
+			continue
+		}
 		var receipt evmReceipt
 		if err := source.http.rpc(ctx, "evm internal transaction receipt", "eth_getTransactionReceipt", []any{candidate.TransactionHash}, &receipt); err != nil {
-			lastErr = err
+			failed[source], lastErr = true, err
 			continue
 		}
 		receiptHeight, parseErr := parseHexUint64(receipt.BlockNumber)
@@ -382,17 +478,14 @@ func nativeInflows(events []domain.TransferEvent, address, nativeAsset string, f
 	return total
 }
 
-func (s *EVMInternalFilter) balanceWindows(ctx context.Context, from, to uint64) (map[string]evmBalanceWindow, error) {
-	if from == 0 {
-		return nil, nil
-	}
+func (s *EVMInternalFilter) balanceWindows(ctx context.Context, from, to uint64, failed map[*EVMSource]bool) (map[string]evmBalanceWindow, error) {
 	windows := make(map[string]evmBalanceWindow, len(s.watched))
 	for address := range s.watched {
-		start, err := s.agreedState(ctx, address, from-1)
+		start, err := s.agreedState(ctx, address, from-1, failed)
 		if err != nil {
 			return nil, fmt.Errorf("balance before the range: %w", err)
 		}
-		end, err := s.agreedState(ctx, address, to)
+		end, err := s.agreedState(ctx, address, to, failed)
 		if err != nil {
 			return nil, fmt.Errorf("balance after the range: %w", err)
 		}
@@ -406,13 +499,16 @@ func (s *EVMInternalFilter) balanceWindows(ctx context.Context, from, to uint64)
 }
 
 // agreedState takes the first two providers that report the same account.
-func (s *EVMInternalFilter) agreedState(ctx context.Context, address string, height uint64) (evmAccountState, error) {
+func (s *EVMInternalFilter) agreedState(ctx context.Context, address string, height uint64, failed map[*EVMSource]bool) (evmAccountState, error) {
 	seen := make([]evmAccountState, 0, len(s.probes))
 	var lastErr error
 	for _, source := range s.probes {
+		if failed[source] {
+			continue
+		}
 		state, err := source.accountState(ctx, address, height)
 		if err != nil {
-			lastErr = err
+			failed[source], lastErr = true, err
 			continue
 		}
 		for _, other := range seen {
@@ -460,9 +556,9 @@ type filteredEVMTrace struct {
 	Type            string   `json:"type"`
 }
 
-// trace_filter is bounded to four blocks per call. A response over the limit
-// retries with smaller pages, then block by block, so a crafted transaction costs
-// at most its own block, which comes back as oversized without its candidates.
+// trace_filter is bounded to four blocks per call. A span that stays over the
+// limits is read block by block, so a crafted transaction costs at most its own
+// block, which comes back as oversized without its candidates.
 func (s *EVMSource) filteredInternalTraces(ctx context.Context, from, to uint64, watched map[string]struct{}) ([]internalTraceCandidate, []internalTraceSpan, error) {
 	if to < from {
 		return nil, nil, errors.New("invalid internal trace range")
@@ -502,11 +598,14 @@ func (s *EVMSource) filteredInternalTraces(ctx context.Context, from, to uint64,
 }
 
 // internalTraceSpan reads until an empty page: a provider may cap a page below
-// the count it was asked for, so a short page does not prove the end.
+// the count it was asked for, so a short page does not prove the end. A page over
+// the limit retries smaller, and a good page grows back, so a few huge frames do
+// not slow down the rest. Requests are budgeted, because pages of one frame could
+// otherwise use up a whole step.
 func (s *EVMSource) internalTraceSpan(ctx context.Context, start, end uint64, addresses []string, watched map[string]struct{}) ([]internalTraceCandidate, []internalTraceSpan, error) {
 	var found []internalTraceCandidate
-	count := 1000
-	for offset := 0; ; {
+	count, offset := 1000, 0
+	for requests := 0; requests < maxInternalTraceRequests; requests++ {
 		filter := map[string]any{
 			"fromBlock": hexQuantity(start), "toBlock": hexQuantity(end),
 			"toAddress": addresses, "after": offset, "count": count,
@@ -516,11 +615,11 @@ func (s *EVMSource) internalTraceSpan(ctx context.Context, start, end uint64, ad
 			if !errors.Is(err, ErrResponseTooLarge) {
 				return nil, nil, err
 			}
-			if count > 1 {
-				count /= 10
-				continue
+			if count == 1 {
+				break
 			}
-			return s.narrowInternalTraceSpan(ctx, start, end, addresses, watched)
+			count /= 10
+			continue
 		}
 		if len(page) == 0 {
 			return found, nil, nil
@@ -534,10 +633,10 @@ func (s *EVMSource) internalTraceSpan(ctx context.Context, start, end uint64, ad
 				found = append(found, candidate)
 			}
 		}
-		if offset += len(page); offset >= maxInternalTraceFrames {
-			return s.narrowInternalTraceSpan(ctx, start, end, addresses, watched)
-		}
+		offset += len(page)
+		count = min(count*10, 1000)
 	}
+	return s.narrowInternalTraceSpan(ctx, start, end, addresses, watched)
 }
 
 func (s *EVMSource) narrowInternalTraceSpan(ctx context.Context, start, end uint64, addresses []string, watched map[string]struct{}) ([]internalTraceCandidate, []internalTraceSpan, error) {

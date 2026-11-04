@@ -182,8 +182,11 @@ func enqueueTransfer(ctx context.Context, tx pgx.Tx, chainID string, event domai
 func (s *ScannerStore) InternalProgress(ctx context.Context, chainID, shard string) (scanner.InternalProgress, error) {
 	var progress scanner.InternalProgress
 	var scanned, cursor *string
+	var version *int64
 	err := s.pool.QueryRow(ctx, `SELECT (SELECT cursor_height::text FROM scanner_cursors WHERE chain_id=$1 AND scanner_shard=$2 AND capability=$3 AND cursor_hash IS NOT NULL),
-(SELECT cursor_height::text FROM scanner_internal_cursors WHERE chain_id=$1 AND scanner_shard=$2)`, chainID, shard, s.capability).Scan(&scanned, &cursor)
+lane.cursor_height::text,lane.version,
+(SELECT count(*) FROM scanner_unattributed_inflows WHERE chain_id=$1 AND status='open')
+FROM (SELECT 1) AS one LEFT JOIN scanner_internal_cursors lane ON lane.chain_id=$1 AND lane.scanner_shard=$2`, chainID, shard, s.capability).Scan(&scanned, &cursor, &version, &progress.OpenFindings)
 	if err != nil {
 		return progress, err
 	}
@@ -193,13 +196,23 @@ func (s *ScannerStore) InternalProgress(ctx context.Context, chainID, shard stri
 		}
 		progress.HasScanned = true
 	}
-	if cursor != nil {
+	if cursor != nil && version != nil {
 		if progress.Cursor, err = strconv.ParseUint(*cursor, 10, 64); err != nil {
 			return progress, err
 		}
-		progress.Started = true
+		progress.Version, progress.Started = *version, true
 	}
 	return progress, nil
+}
+
+// ClaimInternal gives one replica the lane until the lease runs out, so replicas
+// do not each spend the same providers' quota.
+func (s *ScannerStore) ClaimInternal(ctx context.Context, chainID, shard, owner string, duration time.Duration) (bool, error) {
+	command, err := s.pool.Exec(ctx, `UPDATE scanner_internal_cursors SET locked_by=$3,locked_until=clock_timestamp()+$4::interval WHERE chain_id=$1 AND scanner_shard=$2 AND (locked_by IS NULL OR locked_by=$3 OR locked_until<=clock_timestamp())`, chainID, shard, owner, duration.String())
+	if err != nil {
+		return false, err
+	}
+	return command.RowsAffected() == 1, nil
 }
 
 func (s *ScannerStore) StartInternal(ctx context.Context, chainID, shard string, height uint64) error {
@@ -224,7 +237,7 @@ func (s *ScannerStore) CommitInternal(ctx context.Context, commit scanner.Intern
 	write := func() error {
 		recorded = 0
 		return pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.Serializable}, func(tx pgx.Tx) error {
-			command, err := tx.Exec(ctx, `UPDATE scanner_internal_cursors SET cursor_height=$1::numeric,updated_at=clock_timestamp() WHERE chain_id=$2 AND scanner_shard=$3 AND cursor_height=$4::numeric`, strconv.FormatUint(commit.To, 10), commit.ChainID, commit.Shard, strconv.FormatUint(commit.From-1, 10))
+			command, err := tx.Exec(ctx, `UPDATE scanner_internal_cursors SET cursor_height=$1::numeric,version=version+1,updated_at=clock_timestamp() WHERE chain_id=$2 AND scanner_shard=$3 AND cursor_height=$4::numeric AND version=$5`, strconv.FormatUint(commit.To, 10), commit.ChainID, commit.Shard, strconv.FormatUint(commit.From-1, 10), commit.Version)
 			if err != nil {
 				return err
 			}

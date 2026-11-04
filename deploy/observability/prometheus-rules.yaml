@@ -55,7 +55,7 @@ spec:
             summary: Internal transfer detection is falling behind the ordinary scan; those payments are delayed
             runbook: deploy/standalone/evm-internal-transfers.md
         - alert: MerchantInternalTransferUncredited
-          expr: increase(merchant_scanner_unattributed_inflows_total[1h]) > 0
+          expr: max by (service) (merchant_scanner_unattributed_open) > 0
           labels:
             severity: warning
           annotations:

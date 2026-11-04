@@ -176,23 +176,33 @@ func newEndpointClient(config HTTPConfig) (*endpointClient, error) {
 }
 
 // waitForRateLimit reserves the next slot and sleeps without holding the mutex:
-// a caller with a long deadline must not hold up one with a short deadline.
+// a caller with a long deadline must not hold up one with a short deadline. A
+// caller that gives up returns its slot if nobody reserved after it.
 func (c *endpointClient) waitForRateLimit(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	c.rateMu.Lock()
 	slot := time.Now()
 	if c.nextRPC.After(slot) {
 		slot = c.nextRPC
 	}
-	c.nextRPC = slot.Add(c.minWait)
+	reserved := slot.Add(c.minWait)
+	c.nextRPC = reserved
 	c.rateMu.Unlock()
 	wait := time.Until(slot)
 	if wait <= 0 {
-		return ctx.Err()
+		return nil
 	}
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
+		c.rateMu.Lock()
+		if c.nextRPC.Equal(reserved) {
+			c.nextRPC = slot
+		}
+		c.rateMu.Unlock()
 		return ctx.Err()
 	case <-timer.C:
 		return nil

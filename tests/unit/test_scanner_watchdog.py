@@ -46,6 +46,18 @@ def test_parse_lag_reads_only_the_scanner_lag_gauge():
     assert module.parse_lag("merchant_scanner_head_lag_blocks{service=\"scanner\"} not-a-number\n") is None
 
 
+def test_probe_reports_uncredited_internal_transfers_on_a_healthy_scanner():
+    target = {"name": "ethereum", "url": "http://scanner-ethereum:9091", "max_lag_blocks": None}
+    metrics = 'merchant_scanner_head_lag_blocks{service="scanner"} 5\nmerchant_scanner_unattributed_open{service="scanner"} 2\n'
+    fetch = fake_fetch({target["url"] + "/readyz": (200, ""), target["url"] + "/metrics": (200, metrics)})
+    observation = module.probe(target, fetch)
+    assert observation["ready"] is True
+    assert observation["problem"] == "2 internal transfer records wait for an operator"
+    clean = metrics.replace("} 2", "} 0")
+    fetch = fake_fetch({target["url"] + "/readyz": (200, ""), target["url"] + "/metrics": (200, clean)})
+    assert module.probe(target, fetch)["problem"] is None
+
+
 def test_probe_classifies_ready_not_ready_and_unreachable():
     target = {"name": "bsc", "url": "http://scanner-bsc:9091", "max_lag_blocks": 1000}
     ready = module.probe(target, fake_fetch({"http://scanner-bsc:9091/readyz": (200, "ok"), "http://scanner-bsc:9091/metrics": (200, METRICS.replace("373925", "12"))}))

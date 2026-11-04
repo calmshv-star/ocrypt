@@ -34,8 +34,9 @@ Facts found in the code:
 1. Detection runs in an internal lane with its own cursor and its own paced
    clients, behind the ordinary scan. Nothing in the lane can hold the ordinary
    cursor or wait on its limiter. A reorg rewinds both cursors together, and the
-   lane cannot commit a range the ordinary scan has not reached or a transfer
-   from a replaced block.
+   lane cannot commit a range read before that reorg, a range the ordinary scan
+   has not reached, or a transfer from a replaced block. Replicas share the lane
+   through a lease.
 2. An internal transfer is credited only when both trace providers agree and
    the complete `trace_transaction` call tree shows that the frame and all its
    ancestors succeeded, the frame is a plain `CALL` to a watched address, and
@@ -51,11 +52,12 @@ Facts found in the code:
    moves on. More credited money than the balance shows, on an EOA with an
    unchanged nonce, keeps the cursor. What only one provider cannot read keeps
    the cursor too.
-6. Each block is read once. Up to 16 wallets, an idle wallet costs balance reads
+6. Each block is read once. Up to 8 wallets, an idle wallet costs balance reads
    only, through any two providers that agree. Above that the lane sweeps every
    range. A range waits until the trace providers pass the required confirmations.
 7. Every EVM scanner reports whether internal detection is on, and warns when
-   it is off. A wrong trace configuration never stops the ordinary scan.
+   it is off. A wrong trace configuration keeps the lane off and the ordinary scan
+   running, except a malformed static variable, which fails at start.
 8. A production scanner gets two trace providers from admitted platform
    configuration (`trace_providers`); a static scanner keeps its two URLs.
 9. The shipped network catalog carries two trace endpoints per network where
@@ -90,7 +92,10 @@ Facts found in the code:
 | Lane follows the ordinary cursor, gives up after its budget, idle, paused | `scanner/internal_lane_test.go` |
 | Lane storage under the production role, replay, cursor race, no ordinary cursor change | live S9 |
 | Reorg lowers the lane cursor, marks queued rows, refuses replaced blocks at commit and settlement | live S9 |
-| Commit survives a timed-out step; budget belongs to one range | `scanner/internal_lane_test.go` |
+| A read from before a reorg cannot commit, even below the fork; lease | live S9 |
+| Commit survives a timed-out step; budget belongs to one range; a slow range narrows | `scanner/internal_lane_test.go` |
+| A failed probe sits out the range; pages shrink and grow back; bounds in one constructor | `evm_internal_filter_test.go` |
+| Open findings reach the watchdog | `tests/unit/test_scanner_watchdog.py` |
 | Limiter does not hold a short deadline; confirmations from the slower provider | `evm_internal_filter_test.go` |
 | Ordinary scan never reads through trace providers | `cmd/scanner/main_test.go` |
 | Detection state reported and warned | `cmd/scanner/main_test.go` |

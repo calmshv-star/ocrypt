@@ -2,8 +2,10 @@
 
 `scripts/scanner_watchdog.py` alerts the operator when a scanner stays unready,
 unreachable or too far behind for five minutes, repeats hourly while it stays
-bad, and reports recovery. It reads only each scanner's `/readyz` and
-`merchant_scanner_head_lag_blocks`; it never touches the database, providers,
+bad, and reports recovery. It also alerts while internal transfer records wait
+for an operator. It reads only each scanner's `/readyz`,
+`merchant_scanner_head_lag_blocks` and `merchant_scanner_unattributed_open`; it
+never touches the database, providers,
 cursors or containers. It also writes a secret-free, world-readable
 `status.json` for a status page. Each channel (Telegram, webhook) keeps its own
 outbox, so a failing channel is retried without silencing or spamming the

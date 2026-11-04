@@ -74,6 +74,7 @@ type Registry struct {
 	scannerReorgs        uint64
 	scannerDetectionGap  bool
 	scannerUnattributed  uint64
+	scannerUnattrOpen    int
 	scannerInternalLag   uint64
 	providerProbes       map[providerProbeKey]uint64
 	providerOpenCircuits uint64
@@ -210,6 +211,13 @@ func (registry *Registry) SetScannerInternalDetectionMissing(missing bool) {
 func (registry *Registry) AddScannerUnattributed(count int) {
 	registry.mu.Lock()
 	registry.scannerUnattributed += uint64(count)
+	registry.mu.Unlock()
+}
+
+// SetScannerUnattributedOpen reports the records still waiting for an operator.
+func (registry *Registry) SetScannerUnattributedOpen(count int) {
+	registry.mu.Lock()
+	registry.scannerUnattrOpen = count
 	registry.mu.Unlock()
 }
 
@@ -356,6 +364,9 @@ func (registry *Registry) snapshot() string {
 	output.WriteString("# HELP merchant_scanner_unattributed_inflows_total New records of money or transactions the internal lane could not credit.\n")
 	output.WriteString("# TYPE merchant_scanner_unattributed_inflows_total counter\n")
 	fmt.Fprintf(&output, "merchant_scanner_unattributed_inflows_total{service=\"%s\"} %d\n", service, registry.scannerUnattributed)
+	output.WriteString("# HELP merchant_scanner_unattributed_open Records of uncredited money still waiting for an operator.\n")
+	output.WriteString("# TYPE merchant_scanner_unattributed_open gauge\n")
+	fmt.Fprintf(&output, "merchant_scanner_unattributed_open{service=\"%s\"} %d\n", service, registry.scannerUnattrOpen)
 	output.WriteString("# HELP merchant_scanner_internal_lag_blocks Blocks the internal lane is behind the ordinary scan.\n")
 	output.WriteString("# TYPE merchant_scanner_internal_lag_blocks gauge\n")
 	fmt.Fprintf(&output, "merchant_scanner_internal_lag_blocks{service=\"%s\"} %d\n", service, registry.scannerInternalLag)

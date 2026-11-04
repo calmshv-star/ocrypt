@@ -31,9 +31,9 @@ agent assumptions. Amend the specification when accepted behavior changes.
 5. **A sweep instead of a bisection.** The old filter split a range to single blocks
    with balance reads, which multiplied with the number of addresses. When a
    range needs a trace, the lane now sweeps it with `trace_filter`, whose cost
-   does not depend on the number of addresses. Above 16 wallets balance reads are
+   does not depend on the number of addresses. Above 8 wallets balance reads are
    skipped altogether. The price: an unexplained increase is not reported in a
-   range where the same wallet also sent a transaction, nor above 16 wallets.
+   range where the same wallet also sent a transaction, nor above 8 wallets.
 6. **"By default" means the shipped configuration, not the binary.** Third-party
    endpoints are not hard-coded: they receive the receiving addresses, and the
    handover says not to change providers on the owner's behalf. The catalog names
@@ -47,7 +47,8 @@ agent assumptions. Amend the specification when accepted behavior changes.
    runtime evidence; each event's own evidence names the trace frame.
 8. **The tree check stands on its own.** The tree builder comes from the unmerged
    PR #101. Depth is limited to the EVM's 1024 instead of 128, and its 4096 frame
-   limit is gone; a tree over the 64 MiB response limit is recorded, not retried.
+   limit is gone; a tree over the trace response limit on both providers is
+   recorded, not retried.
 9. **Evidence holds chain facts only.** Provider names in the hashed evidence made
    an identical event look like a conflict when the answering provider changed.
 10. **Rewind is the recovery path.** Rewinding the lane replays internal transfers
@@ -84,6 +85,27 @@ agent assumptions. Amend the specification when accepted behavior changes.
     that alone cannot read something is retried, because a crafted transaction
     fails on both.
 17. **A failed platform read holds the lane.** Its last plan may be stale.
+
+## 2026-11-04 — after the third review
+
+18. **A version fences the lane's commit.** Height alone cannot: a lane below the
+    fork keeps its height through a reorg, so a read of the old fork passed. Every
+    write now raises `version`, a commit carries the version it read, and a rewind
+    by hand must raise it too.
+19. **A lease, not one lane per replica.** The chart runs two scanner replicas, and
+    each would spend the same providers' quota. Double credit was never possible;
+    the version and the event identity already prevent it.
+20. **Failure costs one range, one provider.** A provider that failed sits out the
+    rest of the range, so a hung one cannot use up a step at one timeout per
+    wallet. Pages grow back after a shrink and a block has a request budget, so
+    frames over the limit cannot pace the lane at one frame per request. A range
+    that runs out of time halves, so one heavy block does not cost 32.
+21. **Balance reads stop at 8 wallets**, not 16: at 16 a range costs over 200
+    requests and a fast chain outruns it.
+22. **Alerts must reach someone.** No shipped configuration scraped the scanner.
+    The local Prometheus now does, the standalone watchdog reads the open-rows
+    gauge, and the alert is on that gauge, because a counter's increase clears
+    while the row stays open. A Kubernetes install has to add the scrape.
 
 Known limits, recorded for the owner: a route's `required_finality` above the
 chain's current policy can leave a lane transfer unsettled until a rewind; whether

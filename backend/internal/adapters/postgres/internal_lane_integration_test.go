@@ -50,7 +50,7 @@ func (f *faultDatabase) internalLane(t *testing.T) {
 		Status:        domain.TransferFinalized,
 	}
 	inflow := scanner.UnattributedInflow{Address: "0xwallet", FromHeight: 901, ToHeight: 932, Amount: "7", Reason: scanner.UnattributedBalance}
-	commit := scanner.InternalCommit{ChainID: chain, Shard: shard, From: 901, To: 932, Events: []domain.TransferEvent{event}, Unattributed: []scanner.UnattributedInflow{inflow}}
+	commit := scanner.InternalCommit{ChainID: chain, Shard: shard, From: 901, To: 932, Version: progress.Version, Events: []domain.TransferEvent{event}, Unattributed: []scanner.UnattributedInflow{inflow}}
 	recorded, err := store.CommitInternal(f.ctx, commit)
 	if err != nil || recorded != 1 {
 		t.Fatalf("recorded=%d err=%v", recorded, err)
@@ -66,7 +66,16 @@ func (f *faultDatabase) internalLane(t *testing.T) {
 		t.Fatalf("a replay of the same range must lose the cursor race: %v", err)
 	}
 	// A deliberate rewind replays the range: nothing is queued twice.
-	faultExec(t, f.ctx, f.admin, `UPDATE scanner_internal_cursors SET cursor_height=900 WHERE chain_id=$1`, chain)
+	faultExec(t, f.ctx, f.admin, `UPDATE scanner_internal_cursors SET cursor_height=900,version=version+1 WHERE chain_id=$1`, chain)
+	current := func() int64 {
+		t.Helper()
+		progress, err := store.InternalProgress(f.ctx, chain, shard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return progress.Version
+	}
+	commit.Version = current()
 	recorded, err = store.CommitInternal(f.ctx, commit)
 	if err != nil || recorded != 0 {
 		t.Fatalf("recorded=%d err=%v", recorded, err)
@@ -78,14 +87,14 @@ func (f *faultDatabase) internalLane(t *testing.T) {
 		t.Fatalf("a replay wrote %d findings", n)
 	}
 	// A range given up with no address, transaction or amount.
-	recorded, err = store.CommitInternal(f.ctx, scanner.InternalCommit{ChainID: chain, Shard: shard, From: 933, To: 964, Unattributed: []scanner.UnattributedInflow{{FromHeight: 933, ToHeight: 964, Reason: scanner.UnattributedGaveUp}}})
+	recorded, err = store.CommitInternal(f.ctx, scanner.InternalCommit{ChainID: chain, Shard: shard, From: 933, To: 964, Version: current(), Unattributed: []scanner.UnattributedInflow{{FromHeight: 933, ToHeight: 964, Reason: scanner.UnattributedGaveUp}}})
 	if err != nil || recorded != 1 {
 		t.Fatalf("recorded=%d err=%v", recorded, err)
 	}
 	if n := f.count(t, `SELECT count(*) FROM scanner_internal_cursors WHERE chain_id=$1 AND cursor_height=964`, chain); n != 1 {
 		t.Fatal("the lane cursor did not follow the commit")
 	}
-	if _, err := store.CommitInternal(f.ctx, scanner.InternalCommit{ChainID: chain, Shard: shard, From: 965, To: 970, Events: []domain.TransferEvent{event}}); !errors.Is(err, domain.ErrInvariantViolation) {
+	if _, err := store.CommitInternal(f.ctx, scanner.InternalCommit{ChainID: chain, Shard: shard, From: 965, To: 970, Version: current(), Events: []domain.TransferEvent{event}}); !errors.Is(err, domain.ErrInvariantViolation) {
 		t.Fatalf("a transfer outside the range was accepted: %v", err)
 	}
 	if n := f.count(t, `SELECT count(*) FROM scanner_cursors WHERE chain_id=$1 AND cursor_height=1000`, chain); n != 1 {
@@ -93,7 +102,7 @@ func (f *faultDatabase) internalLane(t *testing.T) {
 	}
 
 	// A range ahead of the ordinary scan cannot be committed.
-	if _, err := store.CommitInternal(f.ctx, scanner.InternalCommit{ChainID: chain, Shard: shard, From: 965, To: 1001}); !errors.Is(err, domain.ErrVersionConflict) {
+	if _, err := store.CommitInternal(f.ctx, scanner.InternalCommit{ChainID: chain, Shard: shard, From: 965, To: 1001, Version: current()}); !errors.Is(err, domain.ErrVersionConflict) {
 		t.Fatalf("a range ahead of the ordinary scan was accepted: %v", err)
 	}
 	// A block the scan replaced gives no transfer, by its hash or by its height.
@@ -101,7 +110,7 @@ func (f *faultDatabase) internalLane(t *testing.T) {
 	for height, hash := range map[uint64]string{966: "0xorphan", 967: "0xother"} {
 		orphaned := event
 		orphaned.ID, orphaned.Identity.TransactionID, orphaned.BlockHeight, orphaned.BlockHash = faultID(t), "0xorphaned"+hash, height, hash
-		if _, err := store.CommitInternal(f.ctx, scanner.InternalCommit{ChainID: chain, Shard: shard, From: 965, To: 970, Events: []domain.TransferEvent{orphaned}}); !errors.Is(err, domain.ErrStateConflict) {
+		if _, err := store.CommitInternal(f.ctx, scanner.InternalCommit{ChainID: chain, Shard: shard, From: 965, To: 970, Version: current(), Events: []domain.TransferEvent{orphaned}}); !errors.Is(err, domain.ErrStateConflict) {
 			t.Fatalf("a transfer from a replaced block was accepted: %v", err)
 		}
 	}
@@ -126,7 +135,7 @@ func (f *faultDatabase) internalLane(t *testing.T) {
 	faultExec(t, f.ctx, f.admin, `INSERT INTO chain_blocks(chain_id,height,block_hash,block_time,canonical_status,first_observed_at,last_observed_at) VALUES($1,900,'0xancestor',$2,'safe',$2,$2),($1,1000,'0xtip',$2,'safe',$2,$2)`, chain, now)
 	queued := event
 	queued.ID, queued.Identity.TransactionID, queued.BlockHeight, queued.BlockHash = faultID(t), "0xqueued", 1000, "0xtip"
-	if _, err := store.CommitInternal(f.ctx, scanner.InternalCommit{ChainID: chain, Shard: shard, From: 965, To: 1000, Events: []domain.TransferEvent{queued}}); err != nil {
+	if _, err := store.CommitInternal(f.ctx, scanner.InternalCommit{ChainID: chain, Shard: shard, From: 965, To: 1000, Version: current(), Events: []domain.TransferEvent{queued}}); err != nil {
 		t.Fatal(err)
 	}
 	lease, err := store.Acquire(f.ctx, chain, shard, owner, time.Minute)
@@ -142,5 +151,46 @@ func (f *faultDatabase) internalLane(t *testing.T) {
 	}
 	if n := f.count(t, `SELECT count(*) FROM scanner_internal_cursors WHERE chain_id=$1 AND cursor_height=900`, chain); n != 1 {
 		t.Fatal("the lane stayed ahead of a rewound scan and would skip the new blocks")
+	}
+
+	// A lane sitting below the fork keeps its height, and a read from before the
+	// reorg must still lose: the scan may be past the range again by then.
+	faultExec(t, f.ctx, f.admin, `UPDATE scanner_cursors SET cursor_height=1000,cursor_hash='0xtip2',locked_by=NULL,locked_until=NULL WHERE chain_id=$1`, chain)
+	faultExec(t, f.ctx, f.admin, `INSERT INTO chain_blocks(chain_id,height,block_hash,block_time,canonical_status,first_observed_at,last_observed_at) VALUES($1,950,'0xfork',$2,'safe',$2,$2),($1,1000,'0xtip2',$2,'safe',$2,$2) ON CONFLICT DO NOTHING`, chain, now)
+	stale := scanner.InternalCommit{ChainID: chain, Shard: shard, From: 901, To: 932, Version: current()}
+	lease, err = store.Acquire(f.ctx, chain, shard, owner, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch = scanner.RangeBatch{From: 950, To: 1000, Blocks: []scanner.Block{{Height: 950, Hash: "0xfork", Time: now}, {Height: 1000, Hash: "0xnewtip2", Time: now}}}
+	if err := store.RewindReorg(f.ctx, lease, batch, scanner.ReorgError{Height: 1000, CommittedHash: "0xtip2", NewHash: "0xnewtip2"}); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.count(t, `SELECT count(*) FROM scanner_internal_cursors WHERE chain_id=$1 AND cursor_height=900`, chain); n != 1 {
+		t.Fatal("a lane below the fork must keep its height")
+	}
+	faultExec(t, f.ctx, f.admin, `UPDATE scanner_cursors SET cursor_height=1000 WHERE chain_id=$1`, chain)
+	if _, err := store.CommitInternal(f.ctx, stale); !errors.Is(err, domain.ErrVersionConflict) {
+		t.Fatalf("a read from before the reorg committed and would skip the replacement blocks: %v", err)
+	}
+
+	// One replica holds the lane until its lease runs out.
+	claimed, err := store.ClaimInternal(f.ctx, chain, shard, "replica-a", time.Minute)
+	if err != nil || !claimed {
+		t.Fatalf("claimed=%v err=%v", claimed, err)
+	}
+	if claimed, err = store.ClaimInternal(f.ctx, chain, shard, "replica-b", time.Minute); err != nil || claimed {
+		t.Fatalf("a second replica took a live lease: %v %v", claimed, err)
+	}
+	if claimed, err = store.ClaimInternal(f.ctx, chain, shard, "replica-a", time.Minute); err != nil || !claimed {
+		t.Fatalf("the owner lost its own lease: %v %v", claimed, err)
+	}
+	faultExec(t, f.ctx, f.admin, `UPDATE scanner_internal_cursors SET locked_until=clock_timestamp()-interval '1 second' WHERE chain_id=$1`, chain)
+	if claimed, err = store.ClaimInternal(f.ctx, chain, shard, "replica-b", time.Minute); err != nil || !claimed {
+		t.Fatalf("an expired lease was not taken over: %v %v", claimed, err)
+	}
+	progress, err = store.InternalProgress(f.ctx, chain, shard)
+	if err != nil || progress.OpenFindings != 2 {
+		t.Fatalf("open findings %d: %v", progress.OpenFindings, err)
 	}
 }

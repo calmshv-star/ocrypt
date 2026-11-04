@@ -13,6 +13,11 @@ import (
 type InternalProgress struct {
 	Cursor, Scanned     uint64
 	Started, HasScanned bool
+	// Version changes with every write to the lane's cursor, including a reorg
+	// that left its height alone. A commit must carry the version it read.
+	Version int64
+	// OpenFindings counts what still waits for an operator.
+	OpenFindings int
 }
 
 // InternalCommit stores one range of the lane: its events enter the same queue
@@ -20,6 +25,7 @@ type InternalProgress struct {
 type InternalCommit struct {
 	ChainID, Shard string
 	From, To       uint64
+	Version        int64
 	Events         []domain.TransferEvent
 	Unattributed   []UnattributedInflow
 }
@@ -27,12 +33,14 @@ type InternalCommit struct {
 type InternalStore interface {
 	InternalProgress(ctx context.Context, chainID, shard string) (InternalProgress, error)
 	StartInternal(ctx context.Context, chainID, shard string, height uint64) error
+	ClaimInternal(ctx context.Context, chainID, shard, owner string, duration time.Duration) (bool, error)
 	CommitInternal(ctx context.Context, commit InternalCommit) (int, error)
 }
 
 type InternalObserver interface {
 	SetScannerInternalLag(uint64)
 	AddScannerUnattributed(int)
+	SetScannerUnattributedOpen(int)
 }
 
 // InternalPlan is what the lane may do right now. Source is nil until a scanner
@@ -49,8 +57,11 @@ type InternalPlan struct {
 // the ordinary cursor: a failure delays internal transfers only.
 type InternalLane struct {
 	ChainID, Shard string
-	Store          InternalStore
-	RangeSize      uint64
+	// Owner identifies this process for the lease replicas share.
+	Owner         string
+	Store         InternalStore
+	RangeSize     uint64
+	LeaseDuration time.Duration
 	// Hold keeps the lane behind the ordinary cursor. A scanner that stops at a
 	// finality depth is confirmed enough already; one that relies on overlap
 	// rescans to raise confirmations must wait for the overlap to pass.
@@ -64,29 +75,35 @@ type InternalLane struct {
 
 	failingFrom  uint64
 	failingSince time.Time
+	narrowed     uint64
 }
 
 const (
 	// DefaultInternalRange is about one Ethereum finality epoch.
 	DefaultInternalRange       = uint64(32)
 	DefaultInternalGiveUpAfter = 30 * time.Minute
-	// InternalRequestInterval paces the lane's own clients, so it cannot use up
-	// a provider's quota that the ordinary scan shares.
-	InternalRequestInterval = 250 * time.Millisecond
-	internalCommitTimeout   = 30 * time.Second
+	internalCommitTimeout      = 30 * time.Second
 )
 
 // RunOnce handles one range and says whether more work may be waiting.
 func (l *InternalLane) RunOnce(ctx context.Context, plan InternalPlan) (bool, error) {
-	if l.Store == nil || l.RangeSize == 0 || l.GiveUpAfter <= 0 {
+	if l.Store == nil || l.RangeSize == 0 || l.GiveUpAfter <= 0 || l.Owner == "" || l.LeaseDuration <= 0 {
 		return false, errors.New("invalid internal lane configuration")
 	}
-	if plan.Paused || (plan.Source == nil && !plan.Idle) {
+	if plan.Paused {
+		// Time spent paused is not time spent failing.
+		l.failingSince = time.Time{}
+		return false, nil
+	}
+	if plan.Source == nil && !plan.Idle {
 		return false, nil
 	}
 	progress, err := l.Store.InternalProgress(ctx, l.ChainID, l.Shard)
 	if err != nil {
 		return false, err
+	}
+	if l.Observer != nil {
+		l.Observer.SetScannerUnattributedOpen(progress.OpenFindings)
 	}
 	if !progress.HasScanned || progress.Scanned < l.Hold {
 		return false, nil
@@ -102,12 +119,24 @@ func (l *InternalLane) RunOnce(ctx context.Context, plan InternalPlan) (bool, er
 		return false, nil
 	}
 	l.observeLag(upper - progress.Cursor)
-	from, to := progress.Cursor+1, min(progress.Cursor+l.RangeSize, upper)
-	commit := InternalCommit{ChainID: l.ChainID, Shard: l.Shard, From: from, To: to}
+	claimed, err := l.Store.ClaimInternal(ctx, l.ChainID, l.Shard, l.Owner, l.LeaseDuration)
+	if err != nil || !claimed {
+		return false, err
+	}
+	from, size := progress.Cursor+1, l.RangeSize
+	if l.narrowed > 0 && l.failingFrom == from {
+		size = l.narrowed
+	}
+	to := min(progress.Cursor+size, upper)
+	commit := InternalCommit{ChainID: l.ChainID, Shard: l.Shard, From: from, To: to, Version: progress.Version}
 	if !plan.Idle {
 		batch, scanErr := plan.Source.ScanRange(ctx, from, to)
 		if scanErr != nil {
 			if !l.exhausted(from) {
+				// A range too slow for one step may fit in a smaller one.
+				if ctx.Err() != nil {
+					l.narrowed = max(1, size/2)
+				}
 				return false, scanErr
 			}
 			commit.Unattributed = []UnattributedInflow{{FromHeight: from, ToHeight: to, Reason: UnattributedGaveUp}}
@@ -132,7 +161,7 @@ func (l *InternalLane) RunOnce(ctx context.Context, plan InternalPlan) (bool, er
 	if err != nil {
 		return false, err
 	}
-	l.failingSince = time.Time{}
+	l.failingSince, l.narrowed = time.Time{}, 0
 	if l.Observer != nil && recorded > 0 {
 		l.Observer.AddScannerUnattributed(recorded)
 	}
@@ -146,7 +175,7 @@ func (l *InternalLane) exhausted(from uint64) bool {
 		now = l.Now().UTC()
 	}
 	if l.failingSince.IsZero() || l.failingFrom != from {
-		l.failingFrom, l.failingSince = from, now
+		l.failingFrom, l.failingSince, l.narrowed = from, now, 0
 	}
 	return now.Sub(l.failingSince) >= l.GiveUpAfter
 }
