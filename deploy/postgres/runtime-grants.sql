@@ -414,7 +414,7 @@ REVOKE UPDATE,DELETE,TRUNCATE ON rate_runtime_pair_bindings,rate_source_observat
 -- Scanner reorg compensation is itself a financial transaction boundary. It
 -- can reverse posted rows and enqueue replacement work, but cannot delete any
 -- immutable ledger/event evidence.
-GRANT SELECT,INSERT,UPDATE ON scanner_cursors,scanner_gaps,scanner_transfer_queue,chain_blocks TO merchant_scanner_worker;
+GRANT SELECT,INSERT,UPDATE ON scanner_cursors,scanner_gaps,scanner_transfer_queue,chain_blocks,scanner_internal_cursors,scanner_unattributed_inflows TO merchant_scanner_worker;
 GRANT DELETE ON chain_blocks,scanner_gaps TO merchant_scanner_worker;
 GRANT SELECT,UPDATE ON
   transfer_events,payment_matches,payment_intents,

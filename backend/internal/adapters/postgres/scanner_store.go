@@ -107,16 +107,7 @@ func (s *ScannerStore) Commit(ctx context.Context, lease scanner.Lease, batch sc
 				if event.Identity.ChainID != lease.ChainID {
 					return fmt.Errorf("%w: queued transfer belongs to another chain", domain.ErrInvariantViolation)
 				}
-				identityKey, err := event.Identity.Key()
-				if err != nil {
-					return err
-				}
-				payload, err := json.Marshal(event)
-				if err != nil {
-					return err
-				}
-				_, err = tx.Exec(ctx, `INSERT INTO scanner_transfer_queue (event_id,chain_id,identity_key,canonical_event,status,attempt_count,next_attempt_at,created_at,updated_at) VALUES ($1,$2,$3,$4::jsonb,'pending',0,clock_timestamp(),clock_timestamp(),clock_timestamp()) ON CONFLICT (chain_id,identity_key) DO UPDATE SET canonical_event=EXCLUDED.canonical_event,status='pending',attempt_count=0,next_attempt_at=clock_timestamp(),locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error=NULL,updated_at=clock_timestamp() WHERE scanner_transfer_queue.status='reorged'`, event.ID, lease.ChainID, identityKey, payload)
-				if err != nil {
+				if err := enqueueTransfer(ctx, tx, lease.ChainID, event); err != nil {
 					return err
 				}
 			}
@@ -171,6 +162,145 @@ func (s *ScannerStore) Commit(ctx context.Context, lease scanner.Lease, batch sc
 		}
 	}
 	return errors.New("unreachable scanner transaction retry state")
+}
+
+func enqueueTransfer(ctx context.Context, tx pgx.Tx, chainID string, event domain.TransferEvent) error {
+	identityKey, err := event.Identity.Key()
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO scanner_transfer_queue (event_id,chain_id,identity_key,canonical_event,status,attempt_count,next_attempt_at,created_at,updated_at) VALUES ($1,$2,$3,$4::jsonb,'pending',0,clock_timestamp(),clock_timestamp(),clock_timestamp()) ON CONFLICT (chain_id,identity_key) DO UPDATE SET canonical_event=EXCLUDED.canonical_event,status='pending',attempt_count=0,next_attempt_at=clock_timestamp(),locked_by=NULL,locked_until=NULL,lease_token=NULL,last_error=NULL,updated_at=clock_timestamp() WHERE scanner_transfer_queue.status='reorged'`, event.ID, chainID, identityKey, payload)
+	return err
+}
+
+// InternalProgress reads the internal lane's cursor and the ordinary cursor it
+// follows. The lane never reads ahead of a range the ordinary scan committed.
+func (s *ScannerStore) InternalProgress(ctx context.Context, chainID, shard string) (scanner.InternalProgress, error) {
+	var progress scanner.InternalProgress
+	var scanned, cursor *string
+	var version *int64
+	err := s.pool.QueryRow(ctx, `SELECT (SELECT cursor_height::text FROM scanner_cursors WHERE chain_id=$1 AND scanner_shard=$2 AND capability=$3 AND cursor_hash IS NOT NULL),
+lane.cursor_height::text,lane.version,
+(SELECT count(*) FROM scanner_unattributed_inflows WHERE chain_id=$1 AND status='open')
+FROM (SELECT 1) AS one LEFT JOIN scanner_internal_cursors lane ON lane.chain_id=$1 AND lane.scanner_shard=$2`, chainID, shard, s.capability).Scan(&scanned, &cursor, &version, &progress.OpenFindings)
+	if err != nil {
+		return progress, err
+	}
+	if scanned != nil {
+		if progress.Scanned, err = strconv.ParseUint(*scanned, 10, 64); err != nil {
+			return progress, err
+		}
+		progress.HasScanned = true
+	}
+	if cursor != nil && version != nil {
+		if progress.Cursor, err = strconv.ParseUint(*cursor, 10, 64); err != nil {
+			return progress, err
+		}
+		progress.Version, progress.Started = *version, true
+	}
+	return progress, nil
+}
+
+// ClaimInternal gives one replica the lane until the lease runs out, so replicas
+// do not each spend the same providers' quota.
+func (s *ScannerStore) ClaimInternal(ctx context.Context, chainID, shard, owner string, duration time.Duration) (bool, error) {
+	command, err := s.pool.Exec(ctx, `UPDATE scanner_internal_cursors SET locked_by=$3,locked_until=clock_timestamp()+$4::interval WHERE chain_id=$1 AND scanner_shard=$2 AND (locked_by IS NULL OR locked_by=$3 OR locked_until<=clock_timestamp())`, chainID, shard, owner, duration.String())
+	if err != nil {
+		return false, err
+	}
+	return command.RowsAffected() == 1, nil
+}
+
+func (s *ScannerStore) StartInternal(ctx context.Context, chainID, shard string, height uint64) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO scanner_internal_cursors(chain_id,scanner_shard,cursor_height,updated_at) VALUES($1,$2,$3::numeric,clock_timestamp()) ON CONFLICT DO NOTHING`, chainID, shard, strconv.FormatUint(height, 10))
+	return err
+}
+
+// CommitInternal moves the lane's cursor together with what the range found, and
+// returns how many records of uncredited money are new. Events reach the
+// queue that scanned transfers use, so they settle the same way, and a replayed
+// range changes nothing.
+func (s *ScannerStore) CommitInternal(ctx context.Context, commit scanner.InternalCommit) (int, error) {
+	if commit.ChainID == "" || commit.Shard == "" || commit.From == 0 || commit.To < commit.From {
+		return 0, errors.New("invalid internal lane commit")
+	}
+	for _, event := range commit.Events {
+		if event.Identity.ChainID != commit.ChainID || event.BlockHeight < commit.From || event.BlockHeight > commit.To {
+			return 0, fmt.Errorf("%w: internal transfer is not bound to the committed range", domain.ErrInvariantViolation)
+		}
+	}
+	recorded := 0
+	write := func() error {
+		recorded = 0
+		return pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.Serializable}, func(tx pgx.Tx) error {
+			command, err := tx.Exec(ctx, `UPDATE scanner_internal_cursors SET cursor_height=$1::numeric,version=version+1,updated_at=clock_timestamp() WHERE chain_id=$2 AND scanner_shard=$3 AND cursor_height=$4::numeric AND version=$5`, strconv.FormatUint(commit.To, 10), commit.ChainID, commit.Shard, strconv.FormatUint(commit.From-1, 10), commit.Version)
+			if err != nil {
+				return err
+			}
+			if command.RowsAffected() != 1 {
+				return fmt.Errorf("%w: internal lane cursor moved", domain.ErrVersionConflict)
+			}
+			// The ordinary cursor is the only proof a range is still canonical: a
+			// reorg may have rewound it while the lane was reading.
+			var scanned bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM scanner_cursors WHERE chain_id=$1 AND scanner_shard=$2 AND capability=$3 AND cursor_height>=$4::numeric)`, commit.ChainID, commit.Shard, s.capability, strconv.FormatUint(commit.To, 10)).Scan(&scanned); err != nil {
+				return err
+			}
+			if !scanned {
+				return fmt.Errorf("%w: internal lane range is ahead of the ordinary scan", domain.ErrVersionConflict)
+			}
+			for _, event := range commit.Events {
+				// History older than the scanner keeps has no rows to contradict it.
+				var replaced bool
+				err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM chain_blocks WHERE chain_id=$1 AND ((block_hash=$2 AND canonical_status='reorged') OR (height=$3::numeric AND block_hash<>$2 AND canonical_status<>'reorged')))`, commit.ChainID, event.BlockHash, strconv.FormatUint(event.BlockHeight, 10)).Scan(&replaced)
+				if err != nil {
+					return err
+				}
+				if replaced {
+					return fmt.Errorf("%w: internal transfer belongs to a replaced block", domain.ErrStateConflict)
+				}
+				if err := enqueueTransfer(ctx, tx, commit.ChainID, event); err != nil {
+					return err
+				}
+			}
+			for _, inflow := range commit.Unattributed {
+				id, err := ids.New()
+				if err != nil {
+					return err
+				}
+				var created bool
+				err = tx.QueryRow(ctx, `INSERT INTO scanner_unattributed_inflows(id,chain_id,address,transaction_id,from_height,to_height,amount_atomic,reason,status,first_seen_at,last_seen_at)
+VALUES($1,$2,$3,$4,$5::numeric,$6::numeric,NULLIF($7,'')::numeric,$8,'open',clock_timestamp(),clock_timestamp())
+ON CONFLICT (chain_id,reason,address,transaction_id,from_height,to_height) DO UPDATE SET last_seen_at=clock_timestamp() RETURNING xmax=0`,
+					id, commit.ChainID, inflow.Address, inflow.TransactionID, strconv.FormatUint(inflow.FromHeight, 10), strconv.FormatUint(inflow.ToHeight, 10), inflow.Amount, inflow.Reason).Scan(&created)
+				if err != nil {
+					return err
+				}
+				if created {
+					recorded++
+				}
+			}
+			return nil
+		})
+	}
+	for attempt := 0; attempt < 3; attempt++ {
+		err := write()
+		if !isSerializationFailure(err) || attempt == 2 {
+			return recorded, err
+		}
+		timer := time.NewTimer(time.Duration(5*(1<<attempt)) * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return 0, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return 0, errors.New("unreachable internal lane transaction retry state")
 }
 
 func (s *ScannerStore) Release(ctx context.Context, lease scanner.Lease) error {

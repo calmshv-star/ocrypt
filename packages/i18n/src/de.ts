@@ -503,7 +503,7 @@ export const de = {
   "checkout.qrLabel": "Zahlungs-QR-Code",
   "checkout.qrAddressOnly": "Dieser QR-Code enthält nur die Empfangsadresse. Geben Sie den Betrag separat ein.",
   "checkout.networkFeeTitle": "Netzwerk- und Auszahlungsgebühren",
-  "checkout.networkFeeHelp": "Gebühren werden separat bezahlt. Stellen Sie sicher, dass der oben angezeigte Betrag beim Empfänger ankommt; Wallet oder Börse können eine Gebühr hinzufügen oder abziehen.",
+  "checkout.networkFeeHelp": "Börsen ziehen ihre Gebühr oft vom eingegebenen Betrag ab. Stellen Sie sicher, dass der oben angezeigte Betrag beim Empfänger ankommt: Kommt weniger an, wird die Zahlung möglicherweise nicht automatisch abgeschlossen.",
   "checkout.openExplorer": "Transaktion im Explorer öffnen",
   "checkout.secureNote": "Die Plattform fragt nie nach Seed-Phrase oder privatem Wallet-Schlüssel.",
   "checkout.receiptTitle": "Bezahlt, aber noch nicht gutgeschrieben?",

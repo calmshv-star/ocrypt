@@ -85,14 +85,31 @@ func main() {
 		slog.Error("scanner store initialization failed", "error", err)
 		os.Exit(1)
 	}
+	metrics := telemetry.New("scanner")
+	metrics.SetScannerInternalDetectionMissing(config.internalDetectionMissing())
+	if config.internalDetectionMissing() {
+		slog.Warn(internalDetectionWarning, "chain_id", config.chainID)
+	}
 	var source scanner.Source
 	var runtimeLoader *platformruntime.ScannerLoader
 	var staticWatchAddresses platformruntime.WatchAddressReader
+	internal := &internalLaneRunner{}
 	if config.staticConfig {
-		source, err = scannerSource(config)
-		if err != nil {
-			slog.Error("scanner source initialization failed", "provider_kind", config.providerKind, "error", err)
+		sources, sourceErr := scannerSources(config)
+		if sourceErr != nil {
+			slog.Error("scanner source initialization failed", "provider_kind", config.providerKind, "error", sourceErr)
 			os.Exit(1)
+		}
+		source = sources.ordinary
+		if sources.internalErr != nil {
+			metrics.SetScannerInternalDetectionMissing(true)
+			slog.Warn(internalDetectionWarning, "chain_id", config.chainID, "reason", sources.internalErr)
+		}
+		if publishesInitialPlan(config) {
+			internal.setPlan(sources.internal)
+		}
+		if len(config.evmInternalTraceURLs) == 2 {
+			internal.start(ctx, store, metrics, config, config.chainID, internalHold(config))
 		}
 		if config.routeWatchAddresses {
 			platformRepository, createErr := platformadmin.NewPostgresRepository(pool)
@@ -124,7 +141,6 @@ func main() {
 		}
 		runtimeLoader = &platformruntime.ScannerLoader{Reader: platformRepository, ProviderAdmission: providerService, WatchAddresses: platformRepository, SecretDir: config.platformSecretDir, ProviderMinInterval: config.providerMinInterval}
 	}
-	metrics := telemetry.New("scanner")
 	health := &scanHealth{}
 	worker := scanner.Worker{
 		ChainID: config.chainID, GenesisHash: config.genesisHash, Shard: config.shard, Owner: config.workerID,
@@ -141,6 +157,7 @@ func main() {
 
 	staticWatchKey := ""
 	staticWatchSourceReady := false
+	warnedDetection := false
 	run := func() bool {
 		started := time.Now()
 		health.paused.Store(false)
@@ -156,13 +173,14 @@ func main() {
 				cycleConfig := config
 				cycleConfig.watchedAddresses = addresses
 				cycleConfig.addressFiltered = true
-				cycleSource, createErr := scannerSource(cycleConfig)
+				cycleSources, createErr := scannerSources(cycleConfig)
 				if createErr != nil {
 					metrics.ObserveCycle("scanner", "failure", 0, time.Since(started))
 					slog.Error("scanner route watch source refresh failed", "chain_id", config.chainID, "error", createErr)
 					return false
 				}
-				worker.Source = cycleSource
+				worker.Source = cycleSources.ordinary
+				internal.setPlan(cycleSources.internal)
 				staticWatchKey = addressKey
 				staticWatchSourceReady = true
 			}
@@ -170,15 +188,25 @@ func main() {
 		if runtimeLoader != nil {
 			runtime, loadErr := runtimeLoader.Load(ctx, config.platformKeys, time.Now().UTC())
 			if loadErr != nil {
+				internal.hold()
 				metrics.ObserveCycle("scanner", "failure", 0, time.Since(started))
 				slog.Error("scanner platform runtime admission failed", "chain_id", config.platformKeys.Chain, "error", loadErr)
 				return false
+			}
+			if runtime.InternalConfigured {
+				internal.setPlan(runtime.Internal)
+				internal.start(ctx, store, metrics, config, runtime.ChainID, internalHold(config))
 			}
 			if runtime.Paused {
 				health.paused.Store(true)
 				health.lastSuccess.Store(time.Now().UTC().Unix())
 				metrics.ObserveCycle("scanner", "idle", 0, time.Since(started))
 				return true
+			}
+			metrics.SetScannerInternalDetectionMissing(runtime.InternalDetectionMissing)
+			if runtime.InternalDetectionMissing && !warnedDetection {
+				warnedDetection = true
+				slog.Warn(internalDetectionWarning, "chain_id", runtime.ChainID, "reason", runtime.InternalError)
 			}
 			worker.ChainID, worker.GenesisHash, worker.Source = runtime.ChainID, runtime.GenesisHash, runtime.Source
 			worker.Quorum, worker.Overlap, worker.RangeSize = runtime.Quorum, runtime.Overlap, runtime.RangeSize
@@ -296,6 +324,31 @@ type scannerConfig struct {
 	addressFiltered, routeWatchAddresses                                             bool
 	platformSecretDir                                                                string
 	platformKeys                                                                     platformruntime.ScannerKeys
+}
+
+// publishesInitialPlan is false for a route-watching scanner: it learns its
+// addresses on the first cycle, and a plan without addresses would let the lane
+// pass blocks unread.
+func publishesInitialPlan(config scannerConfig) bool {
+	return !config.routeWatchAddresses
+}
+
+// internalHold keeps the lane behind the ordinary cursor. A runtime scanner stops
+// at its finality depth, so its cursor is confirmed enough. A static one relies
+// on overlap rescans to raise confirmations.
+func internalHold(config scannerConfig) uint64 {
+	if config.staticConfig {
+		return config.overlap
+	}
+	return 0
+}
+
+const internalDetectionWarning = "native transfers made through contracts are not detected: exchange withdrawals to this chain will not be credited; see deploy/standalone/evm-internal-transfers.md"
+
+// internalDetectionMissing reports a static EVM scanner with a native asset but
+// no way to see internal transfers. The runtime loader reports its own chains.
+func (c scannerConfig) internalDetectionMissing() bool {
+	return c.staticConfig && c.providerKind == "evm-jsonrpc" && c.nativeAssetID != "" && !c.includeInternal && len(c.evmInternalTraceURLs) == 0
 }
 
 func loadScannerConfig() (scannerConfig, error) {
@@ -419,12 +472,19 @@ func loadScannerConfig() (scannerConfig, error) {
 	return config, nil
 }
 
-func scannerSource(config scannerConfig) (scanner.Source, error) {
+type scannerSourceSet struct {
+	ordinary    scanner.Source
+	internal    scanner.InternalPlan
+	internalErr error
+}
+
+func scannerSources(config scannerConfig) (scannerSourceSet, error) {
 	if config.providerKind == "normalized-gateway" {
 		if config.providerMode != "quorum" {
-			return nil, errors.New("normalized gateway supports quorum mode only")
+			return scannerSourceSet{}, errors.New("normalized gateway supports quorum mode only")
 		}
-		return scanner.NewQuorumHTTPSource(config.chainID, config.providerURLs, config.quorum, config.providerToken, nil)
+		source, err := scanner.NewQuorumHTTPSource(config.chainID, config.providerURLs, config.quorum, config.providerToken, nil)
+		return scannerSourceSet{ordinary: source}, err
 	}
 	sources := make([]scanner.Source, 0, len(config.providerURLs))
 	var solanaAddressIndex *providers.SolanaAddressIndex
@@ -432,7 +492,7 @@ func scannerSource(config scannerConfig) (scanner.Source, error) {
 		var indexErr error
 		solanaAddressIndex, indexErr = providers.NewSolanaAddressIndex(config.watchedAddresses)
 		if indexErr != nil {
-			return nil, indexErr
+			return scannerSourceSet{}, indexErr
 		}
 	}
 	for index, endpoint := range config.providerURLs {
@@ -457,7 +517,7 @@ func scannerSource(config scannerConfig) (scanner.Source, error) {
 			EVMBlockBatchSize:  config.evmBlockBatchSize,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("initialize %s: %w", providerID, err)
+			return scannerSourceSet{}, fmt.Errorf("initialize %s: %w", providerID, err)
 		}
 		sources = append(sources, source)
 	}
@@ -469,44 +529,47 @@ func scannerSource(config scannerConfig) (scanner.Source, error) {
 		source, err = providers.NewQuorumSource(sources, config.quorum)
 	}
 	if err != nil {
-		return nil, err
+		return scannerSourceSet{}, err
 	}
-	if len(config.evmInternalTraceURLs) == 2 && len(config.watchedAddresses) > 0 {
-		var traceSources [2]*providers.EVMSource
-		for index, endpoint := range config.evmInternalTraceURLs {
-			traceSources[index], err = providers.NewEVMSource(providers.EVMConfig{
-				HTTP:       providers.HTTPConfig{Endpoint: endpoint, Timeout: 20 * time.Second, MinInterval: config.providerMinInterval},
-				ProviderID: fmt.Sprintf("internal-trace-%d", index+1), ChainID: config.chainID,
-				GenesisHash: config.genesisHash, HeadTag: "finalized",
-				NativeAssetID: config.nativeAssetID, NativeDecimals: config.nativeDecimals,
-				IncludeInternal: true, AddressFiltered: true, WatchedAddresses: config.watchedAddresses,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("initialize independent internal trace provider %d: %w", index+1, err)
-			}
-		}
-		filter, filterErr := providers.NewEVMInternalFilter(source, traceSources[0], traceSources[1], config.chainID, config.genesisHash, config.watchedAddresses)
-		if filterErr != nil {
-			return nil, filterErr
-		}
-		if len(sources) < 2 {
-			return nil, errors.New("internal transfer detection requires two ordinary EVM balance providers")
-		}
-		firstProbe, firstOK := sources[0].(*providers.EVMSource)
-		secondProbe, secondOK := sources[1].(*providers.EVMSource)
-		if !firstOK || !secondOK {
-			return nil, errors.New("internal transfer balance providers are not EVM sources")
-		}
-		err = filter.WithBalanceProbes(firstProbe, secondProbe)
-		if err != nil {
-			return nil, err
-		}
-		source = filter
+	result := scannerSourceSet{ordinary: source}
+	if len(config.evmInternalTraceURLs) == 2 {
+		// A wrong trace endpoint costs the lane, never the ordinary scan.
+		result.internal, result.internalErr = staticInternalPlan(config)
 	}
 	if config.addressFiltered {
-		return providers.NewDestinationFilterSource(source, config.watchedAddresses)
+		if result.ordinary, err = providers.NewDestinationFilterSource(source, config.watchedAddresses); err != nil {
+			return scannerSourceSet{}, err
+		}
 	}
-	return source, nil
+	return result, nil
+}
+
+// staticInternalPlan builds the internal lane's source from two trace endpoints.
+func staticInternalPlan(config scannerConfig) (scanner.InternalPlan, error) {
+	lane := providers.InternalLaneConfig{
+		ChainID: config.chainID, GenesisHash: config.genesisHash, NativeAssetID: config.nativeAssetID, NativeDecimals: config.nativeDecimals,
+		Quorum: config.quorum, Failover: config.providerMode == "failover", Addresses: config.watchedAddresses,
+		Overlap: config.overlap, Confirmations: config.overlap, Interval: config.providerMinInterval,
+	}
+	for index, endpoint := range config.providerURLs {
+		headTag := ""
+		if len(config.providerHeadTags) > 0 {
+			headTag = config.providerHeadTags[index]
+		}
+		headers := config.providerHeaders[index].Clone()
+		if config.providerToken != "" && headers.Get("Authorization") == "" {
+			headers.Set("Authorization", "Bearer "+config.providerToken)
+		}
+		lane.Ordinary = append(lane.Ordinary, providers.InternalLaneProvider{Endpoint: endpoint, ProviderID: fmt.Sprintf("internal-provider-%d", index+1), HeadTag: headTag, Headers: headers})
+	}
+	for index, endpoint := range config.evmInternalTraceURLs {
+		lane.Traces[index] = providers.InternalLaneProvider{Endpoint: endpoint, ProviderID: fmt.Sprintf("internal-trace-%d", index+1)}
+	}
+	filter, err := providers.NewInternalLaneSource(lane)
+	if err != nil {
+		return scanner.InternalPlan{}, err
+	}
+	return scanner.InternalPlan{Source: filter, Idle: len(config.watchedAddresses) == 0}, nil
 }
 
 func parseProviderHeaders(raw string, providerCount int) ([]http.Header, error) {

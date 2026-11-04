@@ -42,6 +42,10 @@ const (
 
 // ProviderError is safe to log: it intentionally contains neither request
 // headers nor response bodies, both of which can contain provider secrets.
+// ErrResponseTooLarge marks a response over the size limit. A transaction can be
+// crafted to produce one, so callers that read untrusted traces must handle it.
+var ErrResponseTooLarge = errors.New("response exceeds size limit")
+
 type ProviderError struct {
 	Kind       ErrorKind
 	Operation  string
@@ -104,6 +108,11 @@ type endpointClient struct {
 	rateMu  sync.Mutex
 	nextRPC time.Time
 	minWait time.Duration
+	// postponed is the earliest time a provider asked to be called again. A
+	// returned slot must not fall below it.
+	postponed time.Time
+	// maxBytes bounds one response body.
+	maxBytes int64
 }
 
 type HTTPConfig struct {
@@ -115,6 +124,9 @@ type HTTPConfig struct {
 	// MinInterval spaces requests to the same public provider. It is useful for
 	// free RPC nodes that enforce requests-per-second limits on short bursts.
 	MinInterval time.Duration
+	// MaxResponseBytes overrides the response limit. A provider that returns
+	// what a stranger's transaction decides needs a much lower one.
+	MaxResponseBytes int64
 }
 
 func newEndpointClient(config HTTPConfig) (*endpointClient, error) {
@@ -159,23 +171,48 @@ func newEndpointClient(config HTTPConfig) (*endpointClient, error) {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	return &endpointClient{base: parsed, client: client, headers: headers, now: now, minWait: config.MinInterval}, nil
+	maxBytes := config.MaxResponseBytes
+	if maxBytes <= 0 {
+		maxBytes = maxResponseBytes
+	}
+	return &endpointClient{base: parsed, client: client, headers: headers, now: now, minWait: config.MinInterval, maxBytes: maxBytes}, nil
 }
 
+// waitForRateLimit reserves the next slot and sleeps without holding the mutex:
+// a caller with a long deadline must not hold up one with a short deadline. A
+// caller that gives up returns its slot if nobody reserved after it.
 func (c *endpointClient) waitForRateLimit(ctx context.Context) error {
-	c.rateMu.Lock()
-	defer c.rateMu.Unlock()
-	if wait := time.Until(c.nextRPC); wait > 0 {
-		timer := time.NewTimer(wait)
-		defer timer.Stop()
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timer.C:
-		}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	c.nextRPC = time.Now().Add(c.minWait)
-	return nil
+	c.rateMu.Lock()
+	slot := time.Now()
+	if c.nextRPC.After(slot) {
+		slot = c.nextRPC
+	}
+	reserved := slot.Add(c.minWait)
+	c.nextRPC = reserved
+	c.rateMu.Unlock()
+	wait := time.Until(slot)
+	if wait <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		c.rateMu.Lock()
+		if c.nextRPC.Equal(reserved) {
+			c.nextRPC = slot
+			if c.postponed.After(slot) {
+				c.nextRPC = c.postponed
+			}
+		}
+		c.rateMu.Unlock()
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (c *endpointClient) postpone(delay time.Duration) {
@@ -184,6 +221,9 @@ func (c *endpointClient) postpone(delay time.Duration) {
 	}
 	deadline := time.Now().Add(delay)
 	c.rateMu.Lock()
+	if deadline.After(c.postponed) {
+		c.postponed = deadline
+	}
 	if deadline.After(c.nextRPC) {
 		c.nextRPC = deadline
 	}
@@ -219,7 +259,7 @@ func (c *endpointClient) request(ctx context.Context, operation, method string, 
 	}
 	response, err := c.client.Do(request)
 	if err != nil {
-		return &ProviderError{Kind: ErrorTransient, Operation: operation, Cause: err}
+		return &ProviderError{Kind: ErrorTransient, Operation: operation, Cause: withoutURL(err)}
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
@@ -239,12 +279,12 @@ func (c *endpointClient) request(ctx context.Context, operation, method string, 
 		}
 		return &ProviderError{Kind: kind, Operation: operation, StatusCode: response.StatusCode, RetryAfter: retryAfter}
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
+	data, err := io.ReadAll(io.LimitReader(response.Body, c.maxBytes+1))
 	if err != nil {
 		return &ProviderError{Kind: ErrorTransient, Operation: operation, Cause: err}
 	}
-	if len(data) > maxResponseBytes {
-		return &ProviderError{Kind: ErrorMalformed, Operation: operation, Cause: errors.New("response exceeds size limit")}
+	if int64(len(data)) > c.maxBytes {
+		return &ProviderError{Kind: ErrorMalformed, Operation: operation, Cause: ErrResponseTooLarge}
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
@@ -255,6 +295,16 @@ func (c *endpointClient) request(ctx context.Context, operation, method string, 
 		return &ProviderError{Kind: ErrorMalformed, Operation: operation, Cause: errors.New("multiple JSON values")}
 	}
 	return nil
+}
+
+// withoutURL keeps a transport failure's reason: *url.Error quotes the endpoint,
+// and a managed endpoint can carry its API key in the path.
+func withoutURL(err error) error {
+	var transport *url.Error
+	if errors.As(err, &transport) {
+		return transport.Err
+	}
+	return err
 }
 
 func parseRetryAfter(value string, now time.Time) time.Duration {

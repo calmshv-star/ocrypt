@@ -5,6 +5,7 @@
     "genesis_hash": "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
     "native_asset_id": "eth-ethereum",
     "endpoints": ["https://mainnet.gateway.tenderly.co", "https://ethereum-rpc.polkachu.com", "https://rpc.mevblocker.io"],
+    "internal_trace_endpoints": ["https://docs-demo.quiknode.pro/", "https://eth.drpc.org"],
     "tokens": {
       "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48": {"asset_id": "usdc-ethereum", "decimals": 6},
       "0xdAC17F958D2ee523a2206206994597C13D831ec7": {"asset_id": "usdt-ethereum", "decimals": 6}
@@ -36,6 +37,7 @@
     "genesis_hash": "0x7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b",
     "native_asset_id": "eth-optimism",
     "endpoints": ["https://optimism.gateway.tenderly.co", "https://optimism.drpc.org", "https://mainnet.optimism.io"],
+    "internal_trace_endpoints": ["https://docs-demo.optimism.quiknode.pro/", "https://optimism.drpc.org"],
     "tokens": {
       "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85": {"asset_id": "usdc-optimism", "decimals": 6}
     }

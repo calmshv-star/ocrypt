@@ -503,7 +503,7 @@ export const fr = {
   "checkout.qrLabel": "Code QR de paiement",
   "checkout.qrAddressOnly": "Ce code QR contient uniquement l’adresse de réception. Saisissez le montant séparément.",
   "checkout.networkFeeTitle": "Frais de réseau et de retrait",
-  "checkout.networkFeeHelp": "Les frais sont payés séparément. Vérifiez que le destinataire reçoit le montant affiché ci-dessus ; votre portefeuille ou plateforme peut ajouter ou déduire ses frais.",
+  "checkout.networkFeeHelp": "Les plateformes déduisent souvent leurs frais du montant saisi. Vérifiez que le destinataire reçoit le montant affiché ci-dessus : s'il arrive moins, le paiement risque de ne pas être finalisé automatiquement.",
   "checkout.openExplorer": "Ouvrir l'explorateur de transaction",
   "checkout.secureNote": "La plateforme ne demande jamais votre phrase de récupération ni votre clé privée.",
   "checkout.receiptTitle": "Paiement effectué mais non crédité ?",

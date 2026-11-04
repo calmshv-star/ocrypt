@@ -54,6 +54,9 @@ and bloXroute as its second proof; the scanner always chooses the lower common
 height and still requires two byte-identical range results. Plasma uses two
 independent providers.
 
+Exchanges often pay through contracts. To credit those native transfers, give
+each EVM scanner two trace providers: see `evm-internal-transfers.md`.
+
 The standalone API removes expired request nonces in bounded batches once per
 minute. The supplied outbox worker uses the explicit local `history` sink: it
 validates each canonical event, then atomically advances `event_history` and

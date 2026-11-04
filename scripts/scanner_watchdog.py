@@ -20,6 +20,7 @@ import urllib.request
 from urllib.parse import urlparse
 
 LAG_LINE = re.compile(r"^merchant_scanner_head_lag_blocks(?:\{[^}]*\})?\s+(\S+)(?:\s+\d+)?\s*$", re.MULTILINE)
+UNCREDITED_LINE = re.compile(r"^merchant_scanner_unattributed_open(?:\{[^}]*\})?\s+(\S+)(?:\s+\d+)?\s*$", re.MULTILINE)
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 TELEGRAM_TOKEN = re.compile(r"^\d+:[A-Za-z0-9_-]+$")
 CHAT_ID = re.compile(r"^(-?\d+|@[A-Za-z0-9_]{5,})$")
@@ -144,7 +145,15 @@ def http_post(url, payload, timeout):
 
 
 def parse_lag(metrics):
-    match = LAG_LINE.search(metrics)
+    return _parse_gauge(LAG_LINE, metrics)
+
+
+def parse_uncredited(metrics):
+    return _parse_gauge(UNCREDITED_LINE, metrics)
+
+
+def _parse_gauge(line, metrics):
+    match = line.search(metrics)
     if not match:
         return None
     try:
@@ -162,11 +171,12 @@ def probe(target, fetch):
         status, _ = fetch(base + "/readyz", TIMEOUT)
     except Exception:  # noqa: BLE001 - any transport failure means unreachable
         return {"ready": False, "lag": None, "problem": "unreachable"}
-    lag = None
+    lag = uncredited = None
     try:
         metrics_status, metrics = fetch(base + "/metrics", TIMEOUT)
         if metrics_status == 200:
             lag = parse_lag(metrics)
+            uncredited = parse_uncredited(metrics)
     except Exception:  # noqa: BLE001 - lag is optional evidence
         pass
     ready = status == 200
@@ -178,7 +188,10 @@ def probe(target, fetch):
         problem = "lag unknown"
     elif limit is not None and lag > limit:
         problem = "%d blocks behind (limit %d)" % (lag, limit)
-    return {"ready": ready, "lag": lag, "problem": problem}
+    observation = {"ready": ready, "lag": lag, "problem": problem}
+    if uncredited is not None:
+        observation["uncredited"] = uncredited
+    return observation
 
 
 def _clean_target_state(value):
@@ -213,6 +226,20 @@ def evaluate(previous, name, observation, now, cfg):
         state["alerted_at"] = now
         return state, [dict(event, kind="repeat", bad_for=bad_for)]
     return state, []
+
+
+def uncredited_key(name):
+    return "%s (internal transfers)" % name
+
+
+def evaluate_uncredited(previous, name, count, now, cfg):
+    """Keep records apart from scanner health: rows can stay open for days, and
+    they must not hide a new outage. An unknown count changes nothing."""
+    key = uncredited_key(name)
+    if count is None:
+        return _clean_target_state(previous), []
+    problem = "has %d records waiting for an operator" % count if count else None
+    return evaluate(previous, key, {"problem": problem, "lag": None}, now, cfg)
 
 
 def format_message(event):
@@ -284,7 +311,7 @@ def run_once(cfg, now, fetch=http_fetch, post=http_post):
     gap = max(2 * cfg["alert_after_seconds"], 600)
     unobserved = previous["last_run"] is not None and (now - previous["last_run"] > gap or now < previous["last_run"])
     targets, status, messages = {}, [], []
-    configured = {target["name"] for target in cfg["targets"]}
+    configured = {target["name"] for target in cfg["targets"]} | {uncredited_key(target["name"]) for target in cfg["targets"]}
     for target in cfg["targets"]:
         name = target["name"]
         before = previous["targets"].get(name, {"bad_since": None, "alerted_at": None})
@@ -296,6 +323,9 @@ def run_once(cfg, now, fetch=http_fetch, post=http_post):
         except Exception:  # noqa: BLE001 - one bad target must not stop the others
             observation = {"ready": False, "lag": None, "problem": "unreachable"}
         targets[name], events = evaluate(before, name, observation, now, cfg)
+        messages.extend(format_message(event) for event in events)
+        key = uncredited_key(name)
+        targets[key], events = evaluate_uncredited(previous["targets"].get(key), name, observation.get("uncredited"), now, cfg)
         messages.extend(format_message(event) for event in events)
         down = observation["problem"] is not None
         status.append({

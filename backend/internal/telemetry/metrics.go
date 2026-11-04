@@ -72,6 +72,10 @@ type Registry struct {
 	scannerHeadLag       uint64
 	scannerGaps          map[string]uint64
 	scannerReorgs        uint64
+	scannerDetectionGap  bool
+	scannerUnattributed  uint64
+	scannerUnattrOpen    int
+	scannerInternalLag   uint64
 	providerProbes       map[providerProbeKey]uint64
 	providerOpenCircuits uint64
 	providerPeerGroups   uint64
@@ -191,6 +195,35 @@ func (registry *Registry) SetScannerHeadLag(blocks uint64) {
 func (registry *Registry) IncScannerGap(reason string) {
 	registry.mu.Lock()
 	registry.scannerGaps[normalizeGap(reason)]++
+	registry.mu.Unlock()
+}
+
+// SetScannerInternalDetectionMissing marks an EVM scanner that cannot see native
+// transfers made through contracts, such as exchange withdrawals.
+func (registry *Registry) SetScannerInternalDetectionMissing(missing bool) {
+	registry.mu.Lock()
+	registry.scannerDetectionGap = missing
+	registry.mu.Unlock()
+}
+
+// AddScannerUnattributed counts new records of money the internal lane could
+// not credit.
+func (registry *Registry) AddScannerUnattributed(count int) {
+	registry.mu.Lock()
+	registry.scannerUnattributed += uint64(count)
+	registry.mu.Unlock()
+}
+
+// SetScannerUnattributedOpen reports the records still waiting for an operator.
+func (registry *Registry) SetScannerUnattributedOpen(count int) {
+	registry.mu.Lock()
+	registry.scannerUnattrOpen = count
+	registry.mu.Unlock()
+}
+
+func (registry *Registry) SetScannerInternalLag(blocks uint64) {
+	registry.mu.Lock()
+	registry.scannerInternalLag = blocks
 	registry.mu.Unlock()
 }
 
@@ -321,6 +354,22 @@ func (registry *Registry) snapshot() string {
 	output.WriteString("# HELP merchant_scanner_reorgs_total Canonical reorgs compensated by the scanner.\n")
 	output.WriteString("# TYPE merchant_scanner_reorgs_total counter\n")
 	fmt.Fprintf(&output, "merchant_scanner_reorgs_total{service=\"%s\"} %d\n", service, registry.scannerReorgs)
+	output.WriteString("# HELP merchant_scanner_internal_detection_missing 1 when an EVM scanner cannot see native transfers made through contracts.\n")
+	output.WriteString("# TYPE merchant_scanner_internal_detection_missing gauge\n")
+	detectionGap := 0
+	if registry.scannerDetectionGap {
+		detectionGap = 1
+	}
+	fmt.Fprintf(&output, "merchant_scanner_internal_detection_missing{service=\"%s\"} %d\n", service, detectionGap)
+	output.WriteString("# HELP merchant_scanner_unattributed_inflows_total New records of money or transactions the internal lane could not credit.\n")
+	output.WriteString("# TYPE merchant_scanner_unattributed_inflows_total counter\n")
+	fmt.Fprintf(&output, "merchant_scanner_unattributed_inflows_total{service=\"%s\"} %d\n", service, registry.scannerUnattributed)
+	output.WriteString("# HELP merchant_scanner_unattributed_open Records of uncredited money still waiting for an operator.\n")
+	output.WriteString("# TYPE merchant_scanner_unattributed_open gauge\n")
+	fmt.Fprintf(&output, "merchant_scanner_unattributed_open{service=\"%s\"} %d\n", service, registry.scannerUnattrOpen)
+	output.WriteString("# HELP merchant_scanner_internal_lag_blocks Blocks the internal lane is behind the ordinary scan.\n")
+	output.WriteString("# TYPE merchant_scanner_internal_lag_blocks gauge\n")
+	fmt.Fprintf(&output, "merchant_scanner_internal_lag_blocks{service=\"%s\"} %d\n", service, registry.scannerInternalLag)
 
 	output.WriteString("# HELP merchant_provider_probes_total Provider probes by bounded outcome and error category.\n")
 	output.WriteString("# TYPE merchant_provider_probes_total counter\n")

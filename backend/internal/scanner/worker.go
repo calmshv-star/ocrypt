@@ -41,6 +41,23 @@ type RangeBatch struct {
 	// to bind only the overlap cursor and finalized destination. It must never
 	// contain events; full canonical ranges resume before a payable route exists.
 	IdleCheckpoint bool `json:"-"`
+	// Unattributed lists what the internal lane could not credit.
+	Unattributed []UnattributedInflow `json:"-"`
+}
+
+// Why the internal lane could not credit something.
+const (
+	UnattributedBalance  = "balance_unexplained"
+	UnattributedCallTree = "call_tree_too_large"
+	UnattributedTraces   = "traces_too_large"
+	UnattributedGaveUp   = "trace_unavailable"
+)
+
+// UnattributedInflow is money or a transaction the internal lane could not
+// credit. It stays for an operator; nothing is credited from it.
+type UnattributedInflow struct {
+	Address, TransactionID, Amount, Reason string
+	FromHeight, ToHeight                   uint64
 }
 type ConfigEvidence struct {
 	Kind        string `json:"kind"`

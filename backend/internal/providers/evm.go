@@ -863,7 +863,7 @@ func (s *EVMSource) appendEVMTraces(receipt *chains.EVMReceipt, calls []evmTrace
 
 func evmTraceMovesValue(callType string) bool {
 	switch strings.ToUpper(callType) {
-	case "CALL", "CALLCODE", "CREATE", "CREATE2", "SELFDESTRUCT":
+	case "CALL", "CREATE", "CREATE2", "SELFDESTRUCT":
 		return true
 	default:
 		return false
